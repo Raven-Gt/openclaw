@@ -1667,7 +1667,6 @@ src/agents/auth-profiles/policy.ts	1
 src/agents/auth-profiles/portability.ts	1
 src/agents/auth-profiles/profiles.ts	1
 src/agents/auth-profiles/repair.ts	1
-src/agents/auth-profiles/runtime-snapshots.ts	1
 src/agents/auth-profiles/source-check.ts	1
 src/agents/auth-profiles/sqlite.ts	2
 src/agents/auth-profiles/state.ts	5
