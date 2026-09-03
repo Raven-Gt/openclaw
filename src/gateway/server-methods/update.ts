@@ -403,6 +403,7 @@ export const updateHandlers: GatewayRequestHandlers = {
             // gateway does not replace its own package or git-built dist tree
             // while still serving RPCs.
             const started = await startManagedServiceUpdateHandoff({
+              requester: params.requester,
               root: installRoot,
               timeoutMs,
               restartDrainTimeoutMs: resolveGatewayRestartDeferralTimeoutMs(),
