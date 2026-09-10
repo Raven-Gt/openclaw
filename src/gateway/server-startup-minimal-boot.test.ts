@@ -78,7 +78,7 @@ describe("gateway minimal boot smoke", () => {
     }
   });
 
-  it("boots a minimal test gateway within budget", { timeout: BOOT_BUDGET_MS }, async () => {
+  it("boots a minimal test gateway and refreshes skill snapshots", { timeout: BOOT_BUDGET_MS }, async () => {
     const port = await getFreePort();
     const state = await createOpenClawTestState({
       label: "gateway-minimal-boot-smoke",
@@ -107,6 +107,7 @@ describe("gateway minimal boot smoke", () => {
     state.applyEnv();
     try {
       const { startGatewayServer } = await import("./server.js");
+      const snapshotVersion = getSkillsSnapshotVersion();
       const server = await startGatewayServer(port, {
         auth: { mode: "token", token },
         bind: "loopback",
@@ -114,6 +115,7 @@ describe("gateway minimal boot smoke", () => {
         sidecarStartup: "defer",
       });
       expect(server).toBeTruthy();
+      expect(getSkillsSnapshotVersion()).toBeGreaterThan(snapshotVersion);
       await server.close({ reason: "minimal boot smoke complete" });
     } finally {
       await state.cleanup();
