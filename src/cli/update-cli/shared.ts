@@ -390,14 +390,18 @@ export async function resolveGlobalManager(params: {
         "This OpenClaw installation is managed by Homebrew. To update OpenClaw, run:\n\n  brew upgrade openclaw-cli\n\nThen restart the gateway:\n\n  openclaw gateway restart",
       );
     }
+    const diagnostics: string[] = [];
     const detected = await detectGlobalInstallManagerForRoot(
       runCommand,
       params.root,
       params.timeoutMs,
+      diagnostics,
     );
     if (!detected) {
-      throw new Error(
-        "Update refused: package manager owner is unknown; no changes were made. Run this OpenClaw install through its active npm, pnpm, or Bun global shim, or reinstall it with that package manager, then retry.",
+      const reason = resolveUnmanagedUpdateInstallReason();
+      throw new UpdatePreMutationError(
+        reason,
+        `${UPDATE_INSTALL_SKIP_GUIDANCE[reason]} Inspected: ${diagnostics.join("; ")}.`,
       );
     }
     return detected;
