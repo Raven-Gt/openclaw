@@ -2650,7 +2650,7 @@ src/config/sessions/cleanup-service.ts	3
 src/config/sessions/conversation-delivery-store.ts	2
 src/config/sessions/group.ts	1
 src/config/sessions/legacy-main-session-migration-operations.ts	1
-src/config/sessions/legacy-main-session-migration.ts	6
+src/config/sessions/legacy-main-session-migration.ts	5
 src/config/sessions/lifecycle.ts	1
 src/config/sessions/metadata.ts	1
 src/config/sessions/restart-recovery-state.ts	6
