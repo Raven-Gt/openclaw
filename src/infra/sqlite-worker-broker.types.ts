@@ -90,6 +90,7 @@ export type OperationScope = {
   maintenanceScope?: OpenClawDatabaseMaintenanceScope;
   createAdmission?: SqliteWorkerAdmissionFactory;
   assertCurrent?: (commandType: PropertyKey) => void;
+  includeOrdinaryErrors?: true;
   active: boolean;
   pending: Set<Promise<unknown>>;
   stateContext?: SqliteWorkerStateContext;
@@ -139,6 +140,7 @@ export type PreparedSqliteWorkerOpen = {
   ) => void;
   stateDatabasePath?: string;
   createAdmission?: SqliteWorkerAdmissionFactory;
+  includeOrdinaryErrors?: true;
   assertCurrent?: () => void;
   moduleUrl: URL;
   databasePath: string;
@@ -161,6 +163,7 @@ export type SqliteWorkerOpenCustody = Pick<
   | "stateDatabasePath"
   | "onNativeStopped"
   | "signal"
+  | "includeOrdinaryErrors"
 > & { preparation?: unknown };
 export type SqliteWorkerInputRetention = "snapshot" | "stream";
 export type SqliteWorkerInputPreparation = {
