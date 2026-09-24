@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { cloneEnvWithPlatformSemantics } from "../config/config-env-vars.js";
-import { formatErrorMessage } from "../infra/errors.js";
+import { formatErrorMessageWithCode } from "../infra/errors.js";
 import { SQLITE_IDLE_HANDLE_TTL_MS } from "../infra/sqlite-handle-lifecycle.js";
 import { retainSqliteWorkerErrorCode } from "../infra/sqlite-worker-contract.js";
 import {
@@ -65,9 +65,17 @@ export type OpenClawAgentDatabaseExecution = {
   release(): Promise<void>;
 };
 
+export type AgentDatabaseCleanupFailure = {
+  agentId: string;
+  reason: string;
+  repairHint: string;
+};
+
 type ExecutionOwner = {
   readonly agentId: string;
   readonly sharedDatabaseKey: string;
+  readonly stateDatabasePath: string;
+  getCleanupFailure(): { error: unknown } | undefined;
   assertCurrent(): void;
   borrow(
     pathname: string,
@@ -87,6 +95,25 @@ const executionState = resolveGlobalSingleton<{
 }>(Symbol.for("openclaw.agentDatabaseExecutionOwners"), () => ({ owners: new Map() }));
 const executions = executionState.owners;
 const runInExecutionOwnerContext = AsyncLocalStorage.snapshot();
+
+/** Read owner-held cleanup state without opening storage or changing admission. */
+export function getOpenClawAgentDatabaseCleanupFailures(
+  stateDatabasePath: string,
+): AgentDatabaseCleanupFailure[] {
+  return [...new Set(executions.values())].flatMap((owner) => {
+    const failure = owner.getCleanupFailure();
+    return owner.stateDatabasePath === stateDatabasePath && failure
+      ? [
+          {
+            agentId: owner.agentId,
+            reason: formatErrorMessageWithCode(failure.error),
+            repairHint:
+              "Idle cleanup retries on this agent's next request. If cleanup remains blocked, restart the Gateway; do not delete its database or lease.",
+          },
+        ]
+      : [];
+  });
+}
 
 function supportsAgentDatabaseExecutionScope(options: OpenClawAgentDatabaseOptions): boolean {
   return (
@@ -206,7 +233,9 @@ function createAgentDatabaseExecution(
   const reportCleanupFailure = (error: unknown) => {
     // Diagnostic failures cannot turn a committed command into a replayable failure.
     try {
-      log.warn(`Agent database idle cleanup failed: ${formatErrorMessage(error)}`);
+      log.warn(
+        `Agent database idle cleanup failed (agent ${agentId}): ${formatErrorMessageWithCode(error)}`,
+      );
     } catch {
       // The resource owner still retains the cleanup failure.
     }
@@ -254,7 +283,11 @@ function createAgentDatabaseExecution(
         }
       },
       (error: unknown) => {
+        const firstFailure = !cleanupFailure;
         cleanupFailure = { error };
+        if (firstFailure) {
+          reportCleanupFailure(error);
+        }
         throw error;
       },
     );
@@ -304,7 +337,18 @@ function createAgentDatabaseExecution(
     }
     if (!generation) {
       for (let idle = executionState.idle; idle && idle !== owner; idle = executionState.idle) {
-        await idle.closeIdle();
+        // A failed owner keeps its exact generation and lease custody. Only that owner
+        // retries cleanup; unrelated turns must not inherit the failure.
+        if (idle.getCleanupFailure()) {
+          break;
+        }
+        try {
+          await idle.closeIdle();
+        } catch (error) {
+          if (!idle.getCleanupFailure()) {
+            throw error;
+          }
+        }
         assertCurrent();
         source.assertCurrent();
         assertCallerCurrent();
@@ -380,6 +424,8 @@ function createAgentDatabaseExecution(
     get sharedDatabaseKey() {
       return context.admission.identity.key;
     },
+    stateDatabasePath: context.admission.databasePath,
+    getCleanupFailure: () => cleanupFailure,
     assertCurrent,
     borrow(borrowedPath, expected, creating) {
       const expectedIdentity = expected ? Object.freeze({ ...expected }) : undefined;
@@ -540,8 +586,8 @@ function createAgentDatabaseExecution(
                 // Source refusal can leave an unaccepted generation allocated before native open.
                 try {
                   await closeNative(generation);
-                } catch (error) {
-                  reportCleanupFailure(error);
+                } catch {
+                  // closeNative reported and retained this generation's cleanup failure.
                 }
               }
               if (!generation && !nativeClosing && !cleanupFailure) {
@@ -559,7 +605,7 @@ function createAgentDatabaseExecution(
                   if (idleTimer !== timer || executionState.idle !== owner) {
                     return;
                   }
-                  void owner.closeIdle().catch(reportCleanupFailure);
+                  void owner.closeIdle().catch(() => undefined);
                 }, SQLITE_IDLE_HANDLE_TTL_MS),
               );
               idleTimer = timer;
@@ -568,9 +614,8 @@ function createAgentDatabaseExecution(
             }
             try {
               await owner.closeIdle();
-            } catch (error) {
+            } catch {
               // The completed command stays acknowledged; the resource owner retains cleanup.
-              reportCleanupFailure(error);
             }
           })();
           return release;
