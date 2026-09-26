@@ -3207,20 +3207,6 @@ html[dir="rtl"] .chat-attachment-loading > span {
   flex: 0 0 auto;
 }
 
-.chat-controls__session select {
-  height: 36px;
-  min-height: 36px;
-  padding: 0 34px 0 12px;
-  width: 100%;
-  max-width: none;
-  border-color: color-mix(in srgb, var(--input) 88%, transparent);
-  border-radius: var(--radius-lg);
-  background-color: color-mix(in srgb, var(--card) 92%, var(--bg-elevated) 8%);
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 @container chat-composer (max-width: 480px) {
   .agent-chat__input .chat-controls__model-trigger {
     gap: 3px;

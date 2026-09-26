@@ -36,7 +36,6 @@
     max-width: none;
   }
 
-  .chat-controls__session select,
   .chat-controls__inline-select-trigger {
     width: 100%;
     max-width: none;
