@@ -294,7 +294,6 @@ function buildDreamDiaryActionSuccessMessage(
         ),
       });
   }
-  return t("dreaming.actions.complete");
 }
 
 function resolveSelectedAgentId(state: DreamingState): string | null {

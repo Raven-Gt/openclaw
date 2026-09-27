@@ -1,8 +1,4 @@
-import {
-  logAckFailure,
-  removeAckReactionHandleAfterReply,
-  type AckReactionHandle,
-} from "openclaw/plugin-sdk/channel-feedback";
+import type { AckReactionHandle } from "openclaw/plugin-sdk/channel-feedback";
 import {
   type buildChannelInboundEventContext,
   type ChannelInboundTurnPlan,
@@ -316,9 +312,8 @@ export async function processMessage(params: {
   // that do preflight work before processMessage can send it first and set
   // ackAlreadySent so slow STT does not delay user-visible receipt feedback.
   // Skip if the status reaction controller is handling lifecycle signaling.
-  let ackReaction = params.ackReaction ?? null;
-  if (!statusReactionController && !ackReaction && params.ackAlreadySent !== true) {
-    ackReaction = await maybeSendAckReaction({
+  if (!statusReactionController && !params.ackReaction && params.ackAlreadySent !== true) {
+    await maybeSendAckReaction({
       cfg: params.cfg,
       msg: params.msg,
       agentId: params.route.agentId,
@@ -531,17 +526,5 @@ export async function processMessage(params: {
   const didSendReply = turnResult.dispatched
     ? (finalizeReply?.(turnResult.dispatchResult) ?? false)
     : false;
-  removeAckReactionHandleAfterReply({
-    removeAfterReply: false,
-    ackReaction,
-    onError: (err) => {
-      logAckFailure({
-        log: logVerbose,
-        channel: "whatsapp",
-        target: `${params.msg.platform.chatJid ?? conversationId}/${params.msg.event.id ?? "unknown"}`,
-        error: err,
-      });
-    },
-  });
   return didSendReply;
 }

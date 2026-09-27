@@ -123,7 +123,7 @@ interface EventBridgeController {
 }
 
 type MessageAccumulator = { text: string };
-type PromptErrorWithCode = Error & { code?: string; cause?: unknown };
+type PromptErrorWithCode = Error & { code?: string };
 
 export function attachEventBridge(
   session: SessionLike,
@@ -811,12 +811,9 @@ export function attachEventBridge(
   }
 }
 
-function createPromptError(code: string, message: string, cause?: unknown): PromptErrorWithCode {
+function createPromptError(code: string, message: string): PromptErrorWithCode {
   const error = new Error(message) as PromptErrorWithCode;
   error.code = code;
-  if (cause !== undefined) {
-    error.cause = cause;
-  }
   return error;
 }
 

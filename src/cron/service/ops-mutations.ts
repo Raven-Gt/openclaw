@@ -516,7 +516,6 @@ export async function remove(
         activeMarker: CronActiveJobMarker | undefined;
         agentId: string;
         sessionStorePath: string;
-        done: Promise<void>;
         finish: () => void;
         release: () => void;
       }
@@ -574,7 +573,6 @@ export async function remove(
         activeMarker,
         agentId,
         sessionStorePath,
-        done,
         finish,
         release,
       };

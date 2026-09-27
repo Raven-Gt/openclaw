@@ -187,23 +187,16 @@ function sanitizePromptBody(value: unknown): string | undefined {
 
 const HEAD_TAIL_OMISSION_MARKER = "…[omitted]…";
 const HEAD_TAIL_MARKER_LENGTH = HEAD_TAIL_OMISSION_MARKER.length;
-const MIN_HEAD_TAIL_CHARS = 20;
 
 /**
- * Applies head+tail truncation so the result is ≤ maxChars and the downstream
- * {@link truncateContextJsonString} (prefix-only 2000-char cap) is a no-op.
- * Head and tail portions are sized to keep the body within
- * {@link MAX_CONTEXT_JSON_STRING_CHARS}, preserving actionable tail content
- * that prefix-only truncation would drop.
+ * Keeps actionable tail content within the context-string cap so downstream
+ * prefix-only truncation does not discard it.
  */
-function truncateBodyHeadTail(body: string, maxChars = MAX_CONTEXT_JSON_STRING_CHARS): string {
-  if (body.length <= maxChars) {
+function truncateBodyHeadTail(body: string): string {
+  if (body.length <= MAX_CONTEXT_JSON_STRING_CHARS) {
     return body;
   }
-  const available = maxChars - HEAD_TAIL_MARKER_LENGTH;
-  if (available < MIN_HEAD_TAIL_CHARS * 2) {
-    return `${truncateUtf16Safe(body, Math.max(0, maxChars - 14)).trimEnd()}…[truncated]`;
-  }
+  const available = MAX_CONTEXT_JSON_STRING_CHARS - HEAD_TAIL_MARKER_LENGTH;
   // Budget in UTF-16 code units because truncateContextJsonString enforces
   // that same cap after JSON serialization.
   const headChars = Math.floor(available * 0.6);

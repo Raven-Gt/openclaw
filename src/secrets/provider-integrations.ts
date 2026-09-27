@@ -52,14 +52,6 @@ function resolveArg(arg: string, pluginRoot: string): string | undefined {
   return resolvePluginRelativePath(arg, pluginRoot);
 }
 
-function withNodeCommandTrustedDir(command: string, pluginRoot: string): string[] {
-  // The ${node} placeholder executes the current Node binary with a plugin-owned entrypoint.
-  // Trust both the Node binary dir and plugin root so resolver path checks accept that shape.
-  return command === NODE_COMMAND_PLACEHOLDER
-    ? [...new Set([path.dirname(process.execPath), pluginRoot])]
-    : [pluginRoot];
-}
-
 function isSecurePosixPathStat(stat: fs.Stats): boolean {
   if (process.platform === "win32") {
     return true;
@@ -153,7 +145,6 @@ function materializeExecProviderConfig(
   if (integration.args && args?.length !== integration.args.length) {
     return undefined;
   }
-  const trustedDirs = withNodeCommandTrustedDir(integration.command, pluginRoot);
   return {
     source: "exec",
     command: process.execPath,
@@ -168,7 +159,8 @@ function materializeExecProviderConfig(
     ...(integration.jsonOnly === false ? { jsonOnly: false } : {}),
     ...(integration.env ? { env: integration.env } : {}),
     ...(integration.passEnv ? { passEnv: integration.passEnv } : {}),
-    trustedDirs,
+    // The Node executable and plugin-owned entrypoint both need trusted roots.
+    trustedDirs: [...new Set([path.dirname(process.execPath), pluginRoot])],
   };
 }
 
