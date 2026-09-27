@@ -709,7 +709,7 @@ function renderAdvancedEntryList(params: {
   emptyKey: string;
   entries: DreamingEntry[];
   meta: (entry: DreamingEntry) => string[];
-  badge?: (entry: DreamingEntry) => string | null;
+  badge: (entry: DreamingEntry) => string | null;
   controls?: ReturnType<typeof html>;
 }) {
   return html`
@@ -732,16 +732,12 @@ function renderAdvancedEntryList(params: {
                 ${params.entries.map(
                   (entry) => html`
                     <article class="dreams-advanced__item" data-entry-key=${entry.key}>
-                      ${
-                        params.badge
-                          ? (() => {
-                              const label = params.badge?.(entry);
-                              return label
-                                ? html`<span class="dreams-advanced__badge">${label}</span>`
-                                : nothing;
-                            })()
-                          : nothing
-                      }
+                      ${(() => {
+                        const label = params.badge(entry);
+                        return label
+                          ? html`<span class="dreams-advanced__badge">${label}</span>`
+                          : nothing;
+                      })()}
                       <div class="dreams-advanced__snippet">${entry.snippet}</div>
                       <div class="dreams-advanced__source">
                         ${formatRange(entry.path, entry.startLine, entry.endLine)}
@@ -879,9 +875,7 @@ function renderAdvancedSection(props: DreamingProps) {
           `,
           badge: () => t("dreaming.advanced.originDailyLog"),
           meta: (entry) => [
-            entry.groundedCount > 0
-              ? `${entry.groundedCount} ${t("dreaming.stats.grounded").toLowerCase()}`
-              : "",
+            `${entry.groundedCount} ${t("dreaming.stats.grounded").toLowerCase()}`,
             entry.recallCount > 0 ? `${entry.recallCount} recall` : "",
             entry.dailyCount > 0 ? `${entry.dailyCount} daily` : "",
           ],
