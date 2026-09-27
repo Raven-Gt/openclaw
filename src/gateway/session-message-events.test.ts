@@ -1035,6 +1035,7 @@ describe("session.message websocket events", () => {
         cfgWithAgentDefaults: { session: { store: storePath } },
         deps: {},
         job,
+        deliveryAttemptFence: null,
         agentId: "main",
         agentSessionKey: "cron:job-webchat",
         sourceSessionKey: sessionKey,
@@ -1601,16 +1602,7 @@ describe("session.message websocket events", () => {
   });
 
   test("broadcasts appended transcript messages with the session key", async () => {
-    const storePath = await createSessionStoreFile();
-    await writeSessionStore({
-      entries: {
-        main: {
-          sessionId: "sess-main",
-          updatedAt: Date.now(),
-        },
-      },
-      storePath,
-    });
+    const storePath = await createMainSessionStore();
 
     const delivered = withOperatorSessionSubscriber((ws) =>
       waitForSessionMessageEvent(ws, "agent:main:main"),

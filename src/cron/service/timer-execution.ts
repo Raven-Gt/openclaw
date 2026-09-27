@@ -90,6 +90,7 @@ export async function executeJobCore(
       };
     }
     const evaluation = await evaluator({
+      deliveryAttemptFence: options?.deliveryAttemptFence ?? null,
       job,
       script: job.trigger.script,
       state: job.state.triggerState,
@@ -344,6 +345,7 @@ async function executeDetachedCronJob(
       };
     }
     const res = await state.deps.runCommandJob({
+      deliveryAttemptFence: options?.deliveryAttemptFence ?? null,
       job,
       abortSignal,
     });
@@ -390,6 +392,7 @@ async function executeDetachedCronJob(
   }
 
   const res = await state.deps.runIsolatedAgentJob({
+    deliveryAttemptFence: options?.deliveryAttemptFence ?? null,
     job,
     admissionSource:
       job.owner?.sessionKey ||
@@ -459,6 +462,7 @@ async function executeScriptCronJob(
     };
   }
   const result = await state.deps.runScriptJob({
+    deliveryAttemptFence: options?.deliveryAttemptFence ?? null,
     job,
     streamBatch: options?.streamBatch,
     abortSignal,

@@ -38,6 +38,7 @@ async function runAnnounceTurn(params: {
   };
 }) {
   return await runCronIsolatedAgentTurn({
+    deliveryAttemptFence: null,
     cfg: makeCfg(params.home, params.storePath, params.cfgOverrides),
     deps: params.deps ?? createCliDeps(),
     job: {

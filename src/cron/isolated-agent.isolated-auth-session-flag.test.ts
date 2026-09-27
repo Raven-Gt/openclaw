@@ -19,6 +19,7 @@ function makeParams(
   overrides?: Partial<RunCronIsolatedAgentTurnParams>,
 ): RunCronIsolatedAgentTurnParams {
   return {
+    deliveryAttemptFence: null,
     cfg: {
       auth: {
         profiles: {

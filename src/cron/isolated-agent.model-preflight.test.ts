@@ -47,6 +47,7 @@ describe("runCronIsolatedAgentTurn model provider preflight", () => {
     });
 
     const result = await runCronIsolatedAgentTurn({
+      deliveryAttemptFence: null,
       cfg: {
         agents: {
           defaults: {
@@ -110,6 +111,7 @@ describe("runCronIsolatedAgentTurn model provider preflight", () => {
     });
 
     const result = await runCronIsolatedAgentTurn({
+      deliveryAttemptFence: null,
       cfg: {
         agents: {
           defaults: {
@@ -195,6 +197,7 @@ describe("runCronIsolatedAgentTurn model provider preflight", () => {
     });
 
     const result = await runCronIsolatedAgentTurn({
+      deliveryAttemptFence: null,
       cfg: {
         agents: {
           defaults: {

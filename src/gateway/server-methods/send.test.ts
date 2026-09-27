@@ -10,15 +10,10 @@ import {
   GatewayErrorDetailCodes,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { createDeferred } from "../../../test/helpers/promise.js";
-import { createOperationalRunInstanceRef } from "../../agents/admitted-run-context.js";
 import { jsonResult } from "../../agents/tools/common.js";
 import type { ChannelPlugin } from "../../channels/plugins/types.public.js";
 import { createChannelPartialDeliveryError } from "../../channels/turn/delivery-result.js";
 import type { SessionTranscriptAppendResult } from "../../config/sessions/transcript.js";
-import {
-  claimAgentRunDelegatedAuthority,
-  releaseAgentRunDelegatedAuthority,
-} from "../../infra/agent-run-registry.js";
 import { OutboundDeliveryError } from "../../infra/outbound/deliver-types.js";
 import { resolveOutboundTargetWithPlugin } from "../../infra/outbound/targets-resolve-shared.js";
 import { buildOutboundMediaLoadOptions } from "../../media/load-options.js";
@@ -34,18 +29,19 @@ import {
 import { captureEnv, setTestEnvValue } from "../../test-utils/env.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { createSessionConversationTestRegistry } from "../../test-utils/session-conversation-registry.js";
-import { createAgentRuntimeApprovalAuthorityValidator } from "../agent-runtime-approval-authority.js";
 import { bindInProcessSessionDeliveryGeneration } from "../in-process-session-delivery.js";
-import {
-  mintMessageActionTurnCapability,
-  revokeMessageActionTurnCapability,
-} from "../message-action-turn-capability.js";
+import { revokeMessageActionTurnCapability } from "../message-action-turn-capability.js";
+import { runWithOperatorToolGatewayAuthority } from "../operator-tool-gateway-authority.js";
 import { DEDUPE_MAX, DEDUPE_TTL_MS } from "../server-constants.js";
 import { startGatewayMaintenanceTimers } from "../server-maintenance.js";
 import { createGatewayMaintenanceStateForTest } from "../test-helpers.maintenance-state.js";
+import { assertGatewayUploadsEnabled } from "../upload-policy.js";
 import {
   agentRuntimeClientForTests as agentRuntimeClient,
   createTelegramSourceSendRequest,
+  createMessageActionTurnClientForTests,
+  createDiscordTestConfig,
+  createDiscordSourceConfig,
   directCliClientForTests as directCliClient,
   firstRespondCall,
   messageActionContextFromSessionKeyForTests,
@@ -83,15 +79,9 @@ const mocks = vi.hoisted(() => ({
   ensureOutboundSessionEntry: vi.fn(async () => undefined),
   resolveMessageChannelSelection: vi.fn(),
   dispatchChannelMessageAction: vi.fn(),
-  sendPoll: vi.fn<
-    () => Promise<{
-      messageId: string;
-      toJid?: string;
-      channelId?: string;
-      conversationId?: string;
-      pollId?: string;
-    }>
-  >(async () => ({ messageId: "poll-1" })),
+  sendPoll: vi.fn<NonNullable<NonNullable<ChannelPlugin["outbound"]>["sendPoll"]>>(async () => ({
+    messageId: "poll-1",
+  })),
   getChannelPlugin: vi.fn(),
   loadOpenClawPlugins: vi.fn(),
   getRuntimeConfigSnapshot: vi.fn(),
@@ -222,6 +212,7 @@ const {
   runPoll,
   runPollWithClient,
   runMessageActionRequest,
+  runTelegramTerminalAction,
 } = createMessageMethodTestDriver(() => sendHandlers);
 
 async function withTempOpenClawStateDir<T>(test: (stateDir: string) => Promise<T>): Promise<T> {
@@ -292,102 +283,6 @@ function mockDeliverySuccess(messageId: string) {
 
 const { registerMessageThreadAddressingPlugin, registerMessageActionPlugin } =
   createMessageMethodPluginFixtures(mocks);
-
-async function runTelegramTerminalAction(params: {
-  sessionId: string;
-  idempotencyKey: string;
-  sourceTurnId: string;
-  toolCallId?: string;
-  message?: string;
-  presentation?: Record<string, unknown>;
-  sessionKey?: string;
-  sourceReplySessionKey?: string;
-  currentMessageId?: string;
-  currentThreadTs?: string;
-  sourceReplyFinal?: boolean;
-  context?: GatewayRequestContext;
-}) {
-  const sessionKey = params.sessionKey ?? "agent:main:telegram:direct:chat-123";
-  return runMessageActionRequest(
-    {
-      channel: "telegram",
-      action: "send",
-      params: {
-        to: "chat-123",
-        ...(params.message === undefined ? {} : { message: params.message }),
-        ...(params.presentation === undefined ? {} : { presentation: params.presentation }),
-      },
-      sessionKey,
-      sessionId: params.sessionId,
-      agentId: "main",
-      idempotencyKey: params.idempotencyKey,
-    },
-    {
-      internal: {
-        agentRuntimeIdentity: {
-          kind: "agentRuntime",
-          agentId: "main",
-          sessionKey,
-          messageActionContext: {
-            expiresAtMs: Date.now() + 60_000,
-            sessionId: params.sessionId,
-            ...(params.sourceReplySessionKey === undefined
-              ? {}
-              : { sourceReplySessionKey: params.sourceReplySessionKey }),
-            sourceReplyFinal: params.sourceReplyFinal ?? true,
-            ...(params.toolCallId === undefined
-              ? {}
-              : { sourceReplyToolCallId: params.toolCallId }),
-            toolContext: {
-              currentChannelProvider: "telegram",
-              currentChannelId: "chat-123",
-              ...(params.currentMessageId === undefined
-                ? {}
-                : { currentMessageId: params.currentMessageId }),
-              ...(params.currentThreadTs === undefined
-                ? {}
-                : { currentThreadTs: params.currentThreadTs }),
-              currentSourceTurnId: params.sourceTurnId,
-            },
-          },
-        },
-      },
-    },
-    params.context,
-  );
-}
-
-function createDiscordTestConfig(
-  token:
-    | string
-    | {
-        source: "env";
-        provider: "default";
-        id: "DISCORD_BOT_TOKEN_DRCLAW";
-      },
-  enabled = false,
-) {
-  return {
-    channels: {
-      discord: {
-        ...(enabled ? { enabled: true } : {}),
-        accounts: { drclaw: { token } },
-      },
-    },
-    ...(enabled ? { plugins: { allow: ["discord"] } } : {}),
-  };
-}
-
-function createDiscordSourceConfig(enabled = false) {
-  return createDiscordTestConfig(
-    {
-      source: "env",
-      provider: "default",
-      id: "DISCORD_BOT_TOKEN_DRCLAW",
-    },
-    enabled,
-  );
-}
 
 function runDiscordChannelInfo(
   idempotencyKey: string,
@@ -1236,28 +1131,10 @@ describe("gateway send mirroring", () => {
       },
     );
     const sessionKey = "agent:main:slack:channel:C1";
-    const operationalRunInstance = createOperationalRunInstanceRef("read-turn-revocation");
-    const delegatedAuthority = claimAgentRunDelegatedAuthority(operationalRunInstance);
-    const turnCapability = mintMessageActionTurnCapability({
-      agentId: "main",
-      runId: operationalRunInstance.runId,
+    const { client, context, turnCapability, close } = createMessageActionTurnClientForTests({
       sessionKey,
+      runId: "read-turn-revocation",
     });
-    const client = {
-      internal: {
-        agentRuntimeIdentity: {
-          kind: "agentRuntime" as const,
-          agentId: "main",
-          sessionKey,
-          operationalRunInstance,
-          delegatedAuthority: { kind: "local" as const, ...delegatedAuthority },
-          messageActionContext: {
-            ...messageActionContextFromSessionKeyForTests(sessionKey),
-            turnCapability,
-          },
-        },
-      },
-    };
     try {
       const request = runMessageActionRequest(
         {
@@ -1268,10 +1145,7 @@ describe("gateway send mirroring", () => {
           idempotencyKey: "read-turn-revocation",
         },
         client,
-        {
-          ...makeContext(),
-          validateAgentRuntimeApprovalAuthority: createAgentRuntimeApprovalAuthorityValidator(),
-        } as GatewayRequestContext,
+        context,
       );
       await entered.promise;
       revokeMessageActionTurnCapability(turnCapability);
@@ -1282,10 +1156,116 @@ describe("gateway send mirroring", () => {
       expect(providerRequest).not.toHaveBeenCalled();
     } finally {
       resume.resolve(null);
-      revokeMessageActionTurnCapability(turnCapability);
-      releaseAgentRunDelegatedAuthority(delegatedAuthority);
+      close();
     }
   });
+
+  it.each(
+    (["message.action", "send", "poll"] as const).flatMap((method) =>
+      (["fence-failure", "delivery-authority", "upload-policy"] as const)
+        .filter((failure) => method !== "poll" || failure !== "upload-policy")
+        .map((failure) => ({ method, failure })),
+    ),
+  )(
+    "refuses legacy cron $method delivery on $failure across the durable fence and handoff",
+    async ({ method, failure }) => {
+      const sessionKey = "agent:main:slack:channel:C1";
+      let deliveryCurrent = true;
+      let uploadsEnabled = true;
+      const beforeDeliveryAttempt = vi.fn(async () => {
+        if (failure === "fence-failure") {
+          throw new Error("occurrence delivery fence unavailable");
+        }
+        uploadsEnabled = failure !== "upload-policy";
+      });
+      const { client, context, close } = createMessageActionTurnClientForTests({
+        sessionKey,
+        runId: "scheduled-delivery-fence",
+        deliveryAttempt: {
+          beforeAttempt: beforeDeliveryAttempt,
+          assertCurrent: () => {
+            if (!deliveryCurrent) {
+              throw new Error("occurrence delivery authority is no longer active");
+            }
+          },
+        },
+      });
+      const platformSend = vi.fn();
+      mockDeliverySuccess("unexpected-delivery");
+      if (failure === "delivery-authority") {
+        const handoff = async (params: { assertDirectAdapterHandoff?: () => void }) => {
+          await Promise.resolve();
+          deliveryCurrent = false;
+          params.assertDirectAdapterHandoff?.();
+          platformSend();
+        };
+        if (method === "message.action") {
+          mocks.dispatchChannelMessageAction.mockImplementationOnce(async (params) => {
+            await handoff(params);
+            return jsonResult({ ok: true, messageId: "unexpected-delivery" });
+          });
+        } else if (method === "send") {
+          mocks.deliverOutboundPayloads.mockImplementationOnce(async (params) => {
+            await handoff(params);
+            return [{ channel: "slack", messageId: "unexpected-delivery" }];
+          });
+        } else {
+          mocks.sendPoll.mockImplementationOnce(async (params) => {
+            await handoff(params);
+            return { messageId: "unexpected-delivery" };
+          });
+        }
+      }
+      try {
+        const request = {
+          channel: "slack",
+          ...(method === "poll" ? {} : { sessionKey }),
+          idempotencyKey: `scheduled-fence-${method}`,
+        };
+        const respond = vi.fn();
+        await runWithOperatorToolGatewayAuthority(
+          {
+            scopes: ["operator.write"],
+            signal: new AbortController().signal,
+            assertInputCommitAllowed: () =>
+              assertGatewayUploadsEnabled({ gateway: { uploads: { enabled: uploadsEnabled } } }),
+          },
+          () =>
+            invokeGatewayMessageMethod({
+              method,
+              client,
+              context,
+              respond,
+              request: {
+                ...request,
+                ...(method === "message.action"
+                  ? { action: "send", params: { to: "C1", message: "report" } }
+                  : method === "send"
+                    ? { to: "C1", message: "report" }
+                    : { to: "C1", question: "Ship?", options: ["Yes", "No"] }),
+              },
+            }),
+        );
+        expect(firstRespondCall(respond)[0]).toBe(false);
+        expect(firstRespondCall(respond)[2]?.message).toContain(
+          failure === "fence-failure"
+            ? "occurrence delivery fence unavailable"
+            : failure === "delivery-authority"
+              ? "authority is no longer active"
+              : "uploads are disabled",
+        );
+        expect(beforeDeliveryAttempt).toHaveBeenCalledOnce();
+        expect(platformSend).not.toHaveBeenCalled();
+        if (failure !== "delivery-authority") {
+          expect(mocks.dispatchChannelMessageAction).not.toHaveBeenCalled();
+          expect(mocks.deliverOutboundPayloads).not.toHaveBeenCalled();
+          expect(mocks.sendPoll).not.toHaveBeenCalled();
+        }
+      } finally {
+        close();
+      }
+    },
+  );
 
   it("does not send after turn capability closes while delegated authority remains active", async () => {
     const enteredDelivery = createDeferred<null>();
@@ -1301,32 +1281,15 @@ describe("gateway send mirroring", () => {
       },
     );
     const sessionKey = "agent:main:slack:channel:C1";
-    const operationalRunInstance = createOperationalRunInstanceRef("run-turn-capability-race");
-    const delegatedAuthority = claimAgentRunDelegatedAuthority(operationalRunInstance);
-    const messageActionTurnCapability = mintMessageActionTurnCapability({
-      agentId: "main",
-      runId: operationalRunInstance.runId,
+    const {
+      client,
+      context,
+      turnCapability: messageActionTurnCapability,
+      close,
+    } = createMessageActionTurnClientForTests({
       sessionKey,
+      runId: "run-turn-capability-race",
     });
-    const client = {
-      internal: {
-        agentRuntimeIdentity: {
-          kind: "agentRuntime" as const,
-          agentId: "main",
-          sessionKey,
-          operationalRunInstance,
-          delegatedAuthority: { kind: "local" as const, ...delegatedAuthority },
-          messageActionContext: {
-            ...messageActionContextFromSessionKeyForTests(sessionKey),
-            turnCapability: messageActionTurnCapability,
-          },
-        },
-      },
-    };
-    const context = {
-      ...makeContext(),
-      validateAgentRuntimeApprovalAuthority: createAgentRuntimeApprovalAuthorityValidator(),
-    } as GatewayRequestContext;
 
     try {
       const request = runSendWithClient(
@@ -1349,8 +1312,7 @@ describe("gateway send mirroring", () => {
       expect(firstRespondCall(respond)[2]?.message).toContain("authority is no longer active");
       expect(platformSend).not.toHaveBeenCalled();
     } finally {
-      revokeMessageActionTurnCapability(messageActionTurnCapability);
-      releaseAgentRunDelegatedAuthority(delegatedAuthority);
+      close();
     }
   });
 

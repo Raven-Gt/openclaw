@@ -2,6 +2,17 @@ import {
   GATEWAY_CLIENT_MODES,
   GATEWAY_CLIENT_NAMES,
 } from "../../../packages/gateway-protocol/src/client-info.js";
+import { createOperationalRunInstanceRef } from "../../agents/admitted-run-context.js";
+import {
+  claimAgentRunDelegatedAuthority,
+  releaseAgentRunDelegatedAuthority,
+} from "../../infra/agent-run-registry.js";
+import { createAgentRuntimeApprovalAuthorityValidator } from "../agent-runtime-approval-authority.js";
+import {
+  mintMessageActionTurnCapability,
+  revokeMessageActionTurnCapability,
+} from "../message-action-turn-capability.js";
+import type { GatewayRequestContext } from "./types.js";
 
 export function resolveAgentIdFromSessionKeyForTests(params: {
   sessionKey?: string;
@@ -154,4 +165,92 @@ export function createTelegramSourceSendRequest(
     },
     idempotencyKey,
   };
+}
+
+export function createMessageActionTurnClientForTests(params: {
+  sessionKey: string;
+  runId: string;
+  scheduled?: Parameters<typeof mintMessageActionTurnCapability>[0]["scheduled"];
+  deliveryAttempt?: Parameters<typeof mintMessageActionTurnCapability>[0]["deliveryAttempt"];
+}) {
+  const operationalRunInstance = createOperationalRunInstanceRef(params.runId);
+  const delegatedAuthority = claimAgentRunDelegatedAuthority(operationalRunInstance);
+  const turnCapability = mintMessageActionTurnCapability({
+    agentId: "main",
+    runId: params.runId,
+    sessionKey: params.sessionKey,
+    scheduled: params.scheduled,
+    deliveryAttempt: params.deliveryAttempt,
+  });
+  return {
+    turnCapability,
+    context: {
+      dedupe: new Map(),
+      getRuntimeConfig: () => ({}),
+      validateAgentRuntimeApprovalAuthority: createAgentRuntimeApprovalAuthorityValidator(),
+    } as GatewayRequestContext,
+    client: {
+      connect: {
+        minProtocol: 1,
+        maxProtocol: 1,
+        role: "operator",
+        scopes: ["operator.write"],
+        client: {
+          id: GATEWAY_CLIENT_NAMES.CLI,
+          version: "test",
+          platform: "test",
+          mode: GATEWAY_CLIENT_MODES.CLI,
+        },
+      },
+      internal: {
+        agentRuntimeIdentity: {
+          kind: "agentRuntime" as const,
+          agentId: "main",
+          sessionKey: params.sessionKey,
+          operationalRunInstance,
+          delegatedAuthority: { kind: "local" as const, ...delegatedAuthority },
+          messageActionContext: {
+            ...messageActionContextFromSessionKeyForTests(params.sessionKey),
+            turnCapability,
+          },
+        },
+      },
+    },
+    close: () => {
+      revokeMessageActionTurnCapability(turnCapability);
+      releaseAgentRunDelegatedAuthority(delegatedAuthority);
+    },
+  };
+}
+
+export function createDiscordTestConfig(
+  token:
+    | string
+    | {
+        source: "env";
+        provider: "default";
+        id: "DISCORD_BOT_TOKEN_DRCLAW";
+      },
+  enabled = false,
+) {
+  return {
+    channels: {
+      discord: {
+        ...(enabled ? { enabled: true } : {}),
+        accounts: { drclaw: { token } },
+      },
+    },
+    ...(enabled ? { plugins: { allow: ["discord"] } } : {}),
+  };
+}
+
+export function createDiscordSourceConfig(enabled = false) {
+  return createDiscordTestConfig(
+    {
+      source: "env",
+      provider: "default",
+      id: "DISCORD_BOT_TOKEN_DRCLAW",
+    },
+    enabled,
+  );
 }

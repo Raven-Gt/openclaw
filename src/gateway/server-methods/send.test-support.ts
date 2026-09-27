@@ -131,8 +131,73 @@ export function createMessageMethodTestDriver(getHandlers: () => GatewayRequestH
     return { respond };
   }
 
+  async function runTelegramTerminalAction(params: {
+    sessionId: string;
+    idempotencyKey: string;
+    sourceTurnId: string;
+    toolCallId?: string;
+    message?: string;
+    presentation?: Record<string, unknown>;
+    sessionKey?: string;
+    sourceReplySessionKey?: string;
+    currentMessageId?: string;
+    currentThreadTs?: string;
+    sourceReplyFinal?: boolean;
+    context?: GatewayRequestContext;
+  }) {
+    const sessionKey = params.sessionKey ?? "agent:main:telegram:direct:chat-123";
+    return runMessageActionRequest(
+      {
+        channel: "telegram",
+        action: "send",
+        params: {
+          to: "chat-123",
+          ...(params.message === undefined ? {} : { message: params.message }),
+          ...(params.presentation === undefined ? {} : { presentation: params.presentation }),
+        },
+        sessionKey,
+        sessionId: params.sessionId,
+        agentId: "main",
+        idempotencyKey: params.idempotencyKey,
+      },
+      {
+        internal: {
+          agentRuntimeIdentity: {
+            kind: "agentRuntime",
+            agentId: "main",
+            sessionKey,
+            messageActionContext: {
+              expiresAtMs: Date.now() + 60_000,
+              sessionId: params.sessionId,
+              ...(params.sourceReplySessionKey === undefined
+                ? {}
+                : { sourceReplySessionKey: params.sourceReplySessionKey }),
+              sourceReplyFinal: params.sourceReplyFinal ?? true,
+              ...(params.toolCallId === undefined
+                ? {}
+                : { sourceReplyToolCallId: params.toolCallId }),
+              toolContext: {
+                currentChannelProvider: "telegram",
+                currentChannelId: "chat-123",
+                ...(params.currentMessageId === undefined
+                  ? {}
+                  : { currentMessageId: params.currentMessageId }),
+                ...(params.currentThreadTs === undefined
+                  ? {}
+                  : { currentThreadTs: params.currentThreadTs }),
+                currentSourceTurnId: params.sourceTurnId,
+              },
+            },
+          },
+        },
+      },
+      params.context,
+    );
+  }
+
   return {
     invokeGatewayMessageMethod,
+    runTelegramTerminalAction,
     runSend,
     runSendWithClient,
     runPoll,
