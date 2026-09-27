@@ -88,7 +88,7 @@ function statusForBodyErrorCode(code: RequestBodyLimitFailureCode): number {
       return 413;
     case "REQUEST_BODY_TIMEOUT":
       return 408;
-    case "CONNECTION_CLOSED":
+    default:
       return 400;
   }
 }
