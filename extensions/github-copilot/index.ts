@@ -349,7 +349,7 @@ export default definePluginEntry({
   register(api) {
     const dynamicModels = createGithubCopilotDynamicModelHooks();
 
-    async function promptForEnterpriseDomain(ctx: ProviderAuthContext): Promise<string | null> {
+    async function promptForEnterpriseDomain(ctx: ProviderAuthContext): Promise<string> {
       // COPILOT_GITHUB_DOMAIN is authoritative for every runtime routing path
       // (token refresh, usage, completions). Honor it here too when it is set so
       // the persisted config and freshly minted token can never diverge from the
@@ -579,10 +579,6 @@ export default definePluginEntry({
 
     async function runGitHubCopilotEnterpriseAuth(ctx: ProviderAuthContext) {
       const domain = await promptForEnterpriseDomain(ctx);
-      if (!domain) {
-        await ctx.prompter.note("Enterprise login cancelled.", "GitHub Copilot");
-        return { profiles: [] };
-      }
       if (domain === PUBLIC_GITHUB_COPILOT_DOMAIN) {
         await ctx.prompter.note(
           "github.com is the default — use the standard GitHub Copilot login instead of the enterprise (data residency) option.",

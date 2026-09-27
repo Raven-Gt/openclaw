@@ -80,8 +80,6 @@ type AgentsProps = {
   >;
   agentFiles: AgentFilesViewState;
   agentFilesListError: string | null;
-  agentIdentityLoading: boolean;
-  agentIdentityError: string | null;
   agentIdentityById: Record<string, AgentIdentityResult>;
   applicationConfig?: ApplicationConfigCapability;
   identityDraft: AgentIdentityDraft;
@@ -302,13 +300,10 @@ export function renderAgents(props: AgentsProps) {
                           renderAgentOverview({
                             applicationConfig: props.applicationConfig,
                             agent: selectedAgent,
-                            basePath: props.basePath,
                             defaultId,
                             configForm: config,
                             agentFilesList: props.agentFiles.agentFilesList,
                             agentIdentity: props.agentIdentityById[selectedAgent.id] ?? null,
-                            agentIdentityError: props.agentIdentityError,
-                            agentIdentityLoading: props.agentIdentityLoading,
                             identityDraft: props.identityDraft,
                             identityAvatarLoader: props.identityAvatarLoader,
                             identitySaving: props.identitySaving,

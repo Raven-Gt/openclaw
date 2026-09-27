@@ -231,11 +231,6 @@ export async function buildWebchatAssistantMessageFromReplyPayloads(
   if (!hasAudio && !hasImage) {
     return null;
   }
-  const transcriptText =
-    transcriptTextParts.join("\n\n").trim() ||
-    (hasAudio && hasImage ? "Media reply" : hasAudio ? "Audio reply" : "Image reply");
-  if (transcriptTextParts.length === 0) {
-    content.unshift({ type: "text", text: transcriptText });
-  }
+  const transcriptText = transcriptTextParts.join("\n\n").trim();
   return { content, transcriptText, payloadTexts };
 }

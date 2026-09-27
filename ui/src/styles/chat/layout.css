@@ -625,10 +625,6 @@ openclaw-pending-session-create {
   min-height: 0;
 }
 
-.chat-session {
-  min-width: 240px;
-}
-
 /* Virtual geometry must commit with its rows. A global reduced-motion duration
    otherwise activates the default "all" transition for offsets and height. */
 .chat-virtual-sizer,
@@ -2961,11 +2957,6 @@ openclaw-chat-ci-details {
   }
 }
 
-@media (max-width: 900px) {
-  .chat-session {
-    min-width: 180px;
-  }
-}
 @container chat-composer (max-width: 480px) {
   @media (hover: none) {
     /* Touch has no hover reveal, so the microphone picker stays reachable as a

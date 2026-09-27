@@ -325,21 +325,11 @@ async function getDirectoryEntries(params: {
     directoryCache.set(cacheKey, entries, params.cfg);
     return entries;
   }
-  // Empty cached directory results may be stale; live lookup gets one chance
-  // before both live and cache keys are updated.
-  const liveKey = buildDirectoryCacheKey({
-    channel: params.channel,
-    accountId: params.accountId,
-    kind: params.kind,
-    source: "live",
-    signature,
-    query: cacheQuery,
-  });
+  // Empty cached directory results may be stale; try a live lookup before caching.
   const liveEntries = await listDirectoryEntries({
     ...params,
     source: "live",
   });
-  directoryCache.set(liveKey, liveEntries, params.cfg);
   directoryCache.set(cacheKey, liveEntries, params.cfg);
   return liveEntries;
 }

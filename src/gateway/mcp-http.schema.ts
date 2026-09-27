@@ -129,7 +129,8 @@ function flattenUnionSchema(
   if (!Array.isArray(variants) || variants.length === 0) {
     return raw;
   }
-  const mergedProps = Object.create(null) as Record<string, unknown>;
+  const mergedProps: Partial<Record<string, boolean | Record<string, unknown>>> =
+    Object.create(null);
   const requiredSets: Set<string>[] = [];
   for (const variant of variants) {
     if (variant === true) {
@@ -148,11 +149,11 @@ function flattenUnionSchema(
           );
           continue;
         }
-        if (!Object.hasOwn(mergedProps, key)) {
+        const existing = mergedProps[key];
+        if (existing === undefined) {
           mergedProps[key] = schema;
           continue;
         }
-        const existing = mergedProps[key];
         const incoming = schema;
         if (existing === true || incoming === true) {
           mergedProps[key] = true;
@@ -166,14 +167,6 @@ function flattenUnionSchema(
           continue;
         }
         if (areSchemaValuesEquivalent(existing, incoming)) {
-          continue;
-        }
-        if (!isRecord(existing) || !isRecord(incoming)) {
-          if (existing !== incoming) {
-            warnSchemaOnce(
-              `${MCP_LOOPBACK_LOG_PREFIX}: conflicting schema definitions for "${toolName}.${key}", keeping the first variant`,
-            );
-          }
           continue;
         }
         if (isDeepStrictEqual(existing, incoming)) {

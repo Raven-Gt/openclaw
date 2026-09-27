@@ -331,9 +331,6 @@ async function waitForTranscriptRetry(delayMs: number, signal: AbortSignal): Pro
   if (signal.aborted) {
     throw transcriptPersistenceAbortError();
   }
-  if (delayMs <= 0) {
-    return;
-  }
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
       signal.removeEventListener("abort", onAbort);

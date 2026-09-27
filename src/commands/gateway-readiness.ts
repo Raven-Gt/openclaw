@@ -161,11 +161,9 @@ async function confirmRecovery(params: {
 async function waitForGatewayReady(params: {
   gatherStatus: () => Promise<DaemonStatus>;
   readyWhenReachable?: boolean;
-  attempts?: number;
-  delayMs?: number;
 }): Promise<DaemonStatus> {
-  const attempts = params.attempts ?? 20;
-  const delayMs = params.delayMs ?? 500;
+  const attempts = 20;
+  const delayMs = 500;
   let latest = await params.gatherStatus();
   for (
     let attempt = 1;

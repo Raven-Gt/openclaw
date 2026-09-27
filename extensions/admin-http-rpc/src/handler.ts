@@ -91,7 +91,6 @@ function statusForBodyErrorCode(code: RequestBodyLimitFailureCode): number {
     case "CONNECTION_CLOSED":
       return 400;
   }
-  return 400;
 }
 
 async function readAdminJsonBody(req: IncomingMessage): Promise<ReadJsonBodyResult> {

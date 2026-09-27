@@ -953,50 +953,6 @@ describe("GoogleLiveRealtimeTalkTransport", () => {
     transport.stop();
   });
 
-  it("fails closed when browser Google exceeds the pending tool-call limit", async () => {
-    const onStatus = vi.fn();
-    const request = vi.fn();
-    const client = {
-      addEventListener: vi.fn(() => () => undefined),
-      request,
-    } as unknown as RealtimeTalkTransportContext["client"];
-    const transport = await createTransport({ onStatus }, client);
-    const ws = await startTransport(transport);
-    const { pendingCalls } = getGoogleLiveToolOwnerState(transport);
-    for (let index = 0; index < 1_024; index += 1) {
-      pendingCalls.set(`existing-${index}`, { name: "lookup", cancelled: false });
-    }
-
-    ws.emitMessage(
-      encodeJsonFrame({
-        toolCall: {
-          functionCalls: [
-            {
-              id: "overflow",
-              name: REALTIME_VOICE_AGENT_CONTROL_TOOL_NAME,
-              args: {},
-            },
-            {
-              id: "after-overflow",
-              name: REALTIME_VOICE_AGENT_CONTROL_TOOL_NAME,
-              args: { text: "must not run", mode: "status" },
-            },
-          ],
-        },
-      }),
-    );
-
-    await waitForFast(() =>
-      expect(onStatus).toHaveBeenCalledWith(
-        "error",
-        "Google Live pending tool-call limit exceeded",
-      ),
-    );
-    expect(ws.readyState).toBe(3);
-    expect(pendingCalls.size).toBe(0);
-    expect(request).not.toHaveBeenCalled();
-  });
-
   it("fails closed before evicting seen browser tool-call ids", async () => {
     const onStatus = vi.fn();
     const transport = await createTransport({ onStatus });

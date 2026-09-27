@@ -532,10 +532,6 @@ export async function repairCanonicalSessionKeys(params: {
   const removedRows = repairGroups.reduce((total, group) => total + group.removedRows, 0);
   if (params.apply) {
     while (repairGroups.length > 0) {
-      const group = repairGroups[0];
-      if (!group) {
-        break;
-      }
       const candidateGroups = repairGroups.slice(0, CANONICAL_SESSION_REPAIR_BATCH_GROUP_LIMIT);
       const hydrated = hydrateCanonicalSessionCandidates(
         candidateGroups.flatMap((candidateGroup) => candidateGroup.candidates),

@@ -347,10 +347,9 @@ export function findActiveUserMessageIndex(messages: AgentMessage[]): number {
   return -1;
 }
 
-function isToolCallAssistantMessage(message: AgentMessage): boolean {
-  if (message.role !== "assistant") {
-    return false;
-  }
+function isToolCallAssistantMessage(
+  message: Extract<AgentMessage, { role: "assistant" }>,
+): boolean {
   const content = (message as { content?: unknown }).content;
   if (!Array.isArray(content)) {
     return false;

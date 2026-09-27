@@ -134,10 +134,7 @@ export function formatFileOperations(readFiles: string[], modifiedFiles: string[
   if (sections.length === 0) {
     return "";
   }
-  const joined = `\n\n${sections.join("\n\n")}`;
-  return joined.length > MAX_FILE_OPS_SECTION_CHARS
-    ? joined.slice(0, MAX_FILE_OPS_SECTION_CHARS)
-    : joined;
+  return `\n\n${sections.join("\n\n")}`;
 }
 
 /** Extract visible summary text without normalizing valid model output. */

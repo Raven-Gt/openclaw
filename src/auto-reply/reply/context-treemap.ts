@@ -132,14 +132,8 @@ function sanitizeLabel(value: string): string {
 }
 
 function truncateLabel(value: string, maxChars: number): string {
-  if (maxChars <= 0) {
-    return "";
-  }
   if (value.length <= maxChars) {
     return value;
-  }
-  if (maxChars <= 2) {
-    return value.slice(0, maxChars);
   }
   return value.slice(0, maxChars - 1);
 }

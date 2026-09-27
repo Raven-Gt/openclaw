@@ -1078,8 +1078,7 @@ body {
 }
 
 @media print {
-  #sidebar,
-  #sidebar-toggle {
+  #sidebar {
     display: none !important;
   }
   body {

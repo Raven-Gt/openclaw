@@ -104,12 +104,9 @@ function isOpenRouterReasoningPayloadEnabled(payload: Record<string, unknown>): 
 
 function injectOpenRouterRouting(
   baseStreamFn: StreamFn | undefined,
-  providerRouting?: Record<string, unknown>,
+  providerRouting: Record<string, unknown>,
   sourceApi?: ProviderWrapStreamFnContext["sourceApi"],
-): StreamFn | undefined {
-  if (!providerRouting) {
-    return baseStreamFn;
-  }
+): StreamFn {
   const routedStreamFn: StreamFn = (model, context, options) =>
     (
       baseStreamFn ??

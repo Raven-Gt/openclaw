@@ -2,10 +2,7 @@ import path from "node:path";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { extensionForMime } from "openclaw/plugin-sdk/media-mime";
 import { loadOutboundMediaFromUrl } from "openclaw/plugin-sdk/outbound-media";
-import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { fetchMediaWithZaloSendContext } from "./send-context.js";
 import { createZalouserSendReceipt } from "./send-receipt.js";
@@ -75,9 +72,8 @@ function resolveUploadedVoiceAsset(
   uploaded: Array<{
     fileType?: string;
     fileUrl?: string;
-    fileName?: string;
   }>,
-): { fileUrl: string; fileName?: string } | undefined {
+): { fileUrl: string } | undefined {
   for (const item of uploaded) {
     if (!item || typeof item !== "object") {
       continue;
@@ -88,7 +84,7 @@ function resolveUploadedVoiceAsset(
       continue;
     }
     if (fileType === "others" || fileType === "video") {
-      return { fileUrl, fileName: normalizeOptionalString(item.fileName) };
+      return { fileUrl };
     }
   }
   return undefined;

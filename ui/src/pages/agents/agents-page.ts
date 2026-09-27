@@ -1029,8 +1029,6 @@ class AgentsPage
             cron: this.cron,
             agentFiles: this,
             agentFilesListError: this.context.agents.files(selectedAgentId).error,
-            agentIdentityLoading: this.agentIdentityLoading,
-            agentIdentityError: this.agentIdentityError,
             agentIdentityById: Object.fromEntries(
               this.context.agentIdentity.entries().map((entry) => [entry.agentId, entry]),
             ),
