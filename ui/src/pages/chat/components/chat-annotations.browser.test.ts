@@ -373,7 +373,9 @@ describe("comment pins", () => {
         disconnect() {}
       },
     );
-    onTestFinished(() => vi.unstubAllGlobals());
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
     container.innerHTML = `<div class="chat-thread" style="height: 600px">
       <div class="chat-thread-inner">
         <div class="chat-bubble" data-entry-id="before">Earlier context</div>
@@ -382,7 +384,11 @@ describe("comment pins", () => {
       </div>
     </div>`;
     const thread = container.querySelector<HTMLElement>(".chat-thread")!;
-    const [before, source, after] = thread.querySelectorAll<HTMLElement>(".chat-bubble");
+    const bubble = (entryId: string) =>
+      thread.querySelector<HTMLElement>(`.chat-bubble[data-entry-id="${entryId}"]`)!;
+    const before = bubble("before");
+    const source = bubble("source");
+    const after = bubble("after");
     const pins = document.createElement("openclaw-chat-comment-pins") as HTMLElement & {
       attachments: ChatAttachment[];
       sessionKey: string;
