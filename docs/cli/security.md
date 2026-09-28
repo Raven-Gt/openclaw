@@ -41,7 +41,7 @@ If Gateway password auth is supplied only at startup, pass the same value with `
 
 ### Models
 
-The GPT version check reports “Below GPT-5 family” only when the model name identifies a numeric version below 5, including GPT-4o. GPT-5 and later versions do not trigger that reason; unknown or unparseable names are not assumed to be old. A higher version number or an absent warning is not evidence that a model is secure. Legacy-model, other tier, and small-model exposure checks still apply independently.
+The GPT version check reports “Below GPT-5 family” only when the model name identifies a numeric version below 5, including GPT-4o, Azure's `gpt-35-turbo` (GPT-3.5), and fine-tuned `ft:` versions of older models. GPT-5 and later versions do not trigger that reason; unknown or unparseable names are not assumed to be old. A higher version number or an absent warning is not evidence that a model is secure. Legacy-model, other tier, and small-model exposure checks still apply independently.
 
 ### Webhook/hooks
 

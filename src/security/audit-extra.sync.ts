@@ -161,10 +161,10 @@ const WEAK_TIER_MODEL_PATTERNS: Array<{ id: string; re: RegExp; label: string }>
 ];
 
 function isGptBelow5(id: string): boolean {
-  const model = id.slice(id.lastIndexOf("/") + 1);
-  // Infer age only from a numeric GPT version (including GPT-4o), not an unknown name.
+  const model = id.slice(id.lastIndexOf("/") + 1).replace(/^ft:/i, "");
+  // Azure's gpt-35-turbo is GPT-3.5, not a future GPT-35 generation.
   const version = /^gpt-(\d+)(?:\.\d+|o)?(?:$|[-:@])/i.exec(model);
-  return version !== null && Number(version[1]) < 5;
+  return version !== null && (Number(version[1]) < 5 || /^gpt-35-turbo(?:$|[-:@])/i.test(model));
 }
 
 function isClaudeModel(id: string): boolean {

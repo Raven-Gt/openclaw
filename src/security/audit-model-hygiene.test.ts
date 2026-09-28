@@ -56,6 +56,10 @@ describe("security audit model hygiene findings", () => {
 
   it.each([
     "gpt-3.5-turbo",
+    "azure-openai/gpt-35-turbo",
+    "azure-openai/GPT-35-TURBO-16k",
+    "openai/ft:gpt-4o-mini:example:suffix:abc123",
+    "ft:gpt-3.5-turbo-0125:example::abc123",
     "openai/gpt-4",
     "openai/gpt-4-turbo",
     "openai/gpt-4-0613",
@@ -90,6 +94,9 @@ describe("security audit model hygiene findings", () => {
     "custom/GPT-6.1-example",
     "openrouter/openai/gpt-10-example:free",
     "custom/gpt-12.3-example@20260901",
+    "custom/gpt-35-example",
+    "custom/gpt-35-turboish",
+    "openai/ft:gpt-6-example:example:suffix:abc123",
   ])("does not label GPT-5 or a later version as older: %s", (model) => {
     const findings = collectModelHygieneFindings({
       agents: { defaults: { model: { primary: model } } },
@@ -101,6 +108,7 @@ describe("security audit model hygiene findings", () => {
   it.each([
     "custom/unknown-model",
     "custom/gpt-example",
+    "custom/ft:gpt-example:example:suffix:abc123",
     "custom/gpt-",
     "custom/gpt-4unknown",
     "custom/gpt-4.x",
