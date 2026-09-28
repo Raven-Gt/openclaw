@@ -3,13 +3,14 @@ import { createDeferred } from "../../../../test/helpers/promise.js";
 import { createAdmittedRunOperatorAuthority } from "../../../agents/admitted-run-context.js";
 import { defaultRuntime } from "../../../runtime.js";
 import { createQueueSettings, createQueueTestRun } from "../queue.test-helpers.js";
-import { prepareStaleFollowupDrainRetirement, scheduleFollowupDrain } from "./drain.js";
+import { scheduleFollowupDrain } from "./drain.js";
 import { enqueueFollowupRun, parkSteerCandidate, reserveQueuedSteerCandidate } from "./enqueue.js";
 import {
   admitFollowupRunLifecycle,
   completeFollowupRunLifecycle,
   retireFollowupRunCancellation,
 } from "./lifecycle.js";
+import { prepareStaleFollowupDrainRetirement } from "./retirement.js";
 import { clearFollowupQueue, getExistingFollowupQueue } from "./state.js";
 import type { FollowupRun } from "./types.js";
 
