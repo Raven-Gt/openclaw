@@ -39,6 +39,7 @@ type PendingInputView = {
   page: ChatPendingInputsPage;
   /** Live custody receipts keep the queue independent of retained-input pagination. */
   queuedInputs: ChatPendingInputsPage["items"];
+  steeringRunIds: Set<string>;
   receiptRunIds: string[];
   queuedCount: number;
   queueBefore?: number;
@@ -82,6 +83,7 @@ function reconcileQueuedInputs(
 
 export function buildPendingInputQueueItems(
   inputs: ChatPendingInputsPage["items"],
+  steeringRunIds?: ReadonlySet<string>,
 ): ChatQueueDisplayItem[] {
   return inputs
     .toSorted((left, right) => left.acceptedAt - right.acceptedAt)
@@ -108,6 +110,7 @@ export function buildPendingInputQueueItems(
           createdAt: input.acceptedAt,
           pendingRunId: input.runId,
           serverQueued: true,
+          ...(steeringRunIds?.has(input.runId) ? { serverSteerPending: true as const } : {}),
           sender: message.sender ?? undefined,
         },
       ];
@@ -299,6 +302,7 @@ export function applyChatPendingInputs(
       agentId: resolveUiSelectedSessionAgentId(state),
       page: displayPage,
       queuedInputs,
+      steeringRunIds: new Set(),
       receiptRunIds: [],
       queuedCount: displayPage.queuedCount ?? 0,
       queueBefore: displayPage.nextBefore,

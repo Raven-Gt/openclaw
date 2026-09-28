@@ -302,7 +302,9 @@ function renderChatQueueItem(
     !editing &&
     !item.localCommandName &&
     !item.intent &&
-    (isSteerableQueuedMessage(item) || item.sendState === "waiting-model");
+    (isSteerableQueuedMessage(item) ||
+      item.serverSteerPending ||
+      item.sendState === "waiting-model");
   const segment = reorder.segments.find((ids) => ids.includes(item.id)) ?? [];
   const moveIndex = segment.indexOf(item.id);
   const move = props.onQueueMove;
@@ -546,6 +548,7 @@ function renderChatQueueItem(
                   type="button"
                   ?disabled=${!canSteer}
                   aria-label=${t("chat.queue.steerQueuedMessage")}
+                  aria-busy=${ifDefined(item.serverSteerPending ? "true" : undefined)}
                   @click=${() => props.onQueueSteer?.(item.id)}
                 >
                   ${icons.arrowUp}
