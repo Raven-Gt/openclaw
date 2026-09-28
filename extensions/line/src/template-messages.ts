@@ -88,8 +88,6 @@ function normalizeCarouselColumn(column: CarouselColumn): CarouselColumn {
       .map((action) => normalizeLineAction(action))
       .filter((action) => action.label !== undefined && action.label !== "")
       .slice(0, 3),
-    defaultAction:
-      column.defaultAction === undefined ? undefined : normalizeLineAction(column.defaultAction),
   };
 }
 
@@ -141,24 +139,17 @@ function normalizeCarousel(
   return text ? { kind: "text", text } : { kind: "empty" };
 }
 
-function createCarouselMessage(
-  columns: CarouselColumn[],
-  options?: {
-    imageAspectRatio?: "rectangle" | "square";
-    imageSize?: "cover" | "contain";
-    altText?: string;
-  },
-): TemplateMessage {
+function createCarouselMessage(columns: CarouselColumn[], altText?: string): TemplateMessage {
   const template: CarouselTemplate = {
     type: "carousel",
     columns,
-    imageAspectRatio: options?.imageAspectRatio ?? "rectangle",
-    imageSize: options?.imageSize ?? "cover",
+    imageAspectRatio: "rectangle",
+    imageSize: "cover",
   };
 
   return {
     type: "template",
-    altText: resolveTemplateAltText(options?.altText, "View carousel"),
+    altText: resolveTemplateAltText(altText, "View carousel"),
     template,
   };
 }
@@ -194,10 +185,6 @@ function createButtonTemplate(
   actions: Action[],
   options?: {
     thumbnailImageUrl?: string;
-    imageAspectRatio?: "rectangle" | "square";
-    imageSize?: "cover" | "contain";
-    imageBackgroundColor?: string;
-    defaultAction?: Action;
     altText?: string;
   },
 ): TemplateMessage {
@@ -213,11 +200,10 @@ function createButtonTemplate(
     text: truncateTemplateText(text, textLimit),
     actions: actions.slice(0, 4).map((action) => normalizeLineAction(action)), // LINE limit: max 4 actions
     thumbnailImageUrl: options?.thumbnailImageUrl,
-    imageAspectRatio: options?.imageAspectRatio ?? "rectangle",
-    imageSize: options?.imageSize ?? "cover",
-    imageBackgroundColor: options?.imageBackgroundColor,
-    defaultAction:
-      options?.defaultAction === undefined ? undefined : normalizeLineAction(options.defaultAction),
+    imageAspectRatio: "rectangle",
+    imageSize: "cover",
+    imageBackgroundColor: undefined,
+    defaultAction: undefined,
   };
 
   return {
@@ -235,8 +221,6 @@ function createCarouselColumn(params: {
   text: string;
   actions: Action[];
   thumbnailImageUrl?: string;
-  imageBackgroundColor?: string;
-  defaultAction?: Action;
 }): CarouselColumn {
   // LINE caps a carousel column's text at 60 chars when the column carries a
   // title or thumbnail image, and 120 chars otherwise. Sending an over-length
@@ -253,8 +237,8 @@ function createCarouselColumn(params: {
     text: truncateTemplateText(params.text, textLimit),
     actions: params.actions,
     thumbnailImageUrl: params.thumbnailImageUrl,
-    imageBackgroundColor: params.imageBackgroundColor,
-    defaultAction: params.defaultAction,
+    imageBackgroundColor: undefined,
+    defaultAction: undefined,
   });
 }
 
@@ -301,7 +285,7 @@ export function buildTemplateMessageFromPayload(
       }
       return outcome.kind === "text"
         ? { type: "text", text: outcome.text }
-        : createCarouselMessage(outcome.columns, { altText: payload.altText });
+        : createCarouselMessage(outcome.columns, payload.altText);
     }
 
     default:
