@@ -147,7 +147,7 @@ export function renderMessageActionButtons(
   `;
 }
 
-export function renderReplyButton(
+function renderReplyButton(
   target: MessageReplyTarget,
   onReply: (target: MessageReplyTarget) => void,
 ) {

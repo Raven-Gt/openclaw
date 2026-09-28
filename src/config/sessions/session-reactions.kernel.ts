@@ -214,7 +214,10 @@ function canonicalReactors(
     query
       .selectFrom("session_message_reactions as reaction")
       .leftJoin(
-        sql<{ key: string; value: string }>`json_each(${JSON.stringify(aliases)})`.as("alias"),
+        /* kysely-allow-raw -- SQLite json_each expands the bounded profile-alias map for one query. */ sql<{
+          key: string;
+          value: string;
+        }>`json_each(${JSON.stringify(aliases)})`.as("alias"),
         (join) =>
           join
             .onRef("alias.key", "=", "reaction.actor_id")
@@ -224,7 +227,9 @@ function canonicalReactors(
         "reaction.message_id",
         "reaction.emoji",
         "reaction.actor_type",
-        sql<string>`coalesce(alias.value, reaction.actor_id)`.as("actor_id"),
+        /* kysely-allow-raw -- Resolve a merged profile ID in SQLite before deduplicating reactors. */ sql<string>`coalesce(alias.value, reaction.actor_id)`.as(
+          "actor_id",
+        ),
       ])
       .where("reaction.session_id", "=", sessionId)
       .where("reaction.message_id", "in", messageIds)
@@ -283,11 +288,13 @@ export function listSessionReactionsInDatabase(
           .selectFrom("reactors")
           .selectAll()
           .select([
-            sql<number>`row_number() over (partition by message_id, emoji order by actor_type, actor_id)`.as(
+            /* kysely-allow-raw -- Rank each reaction's first three named reactors in SQLite. */ sql<number>`row_number() over (partition by message_id, emoji order by actor_type, actor_id)`.as(
               "rank",
             ),
-            sql<number>`count(*) over (partition by message_id, emoji)`.as("count"),
-            sql<number>`max(case when actor_type = 'profile' and actor_id = ${input.viewerProfileId ?? ""} then 1 else 0 end) over (partition by message_id, emoji)`.as(
+            /* kysely-allow-raw -- Count all reactors before the bounded page is selected. */ sql<number>`count(*) over (partition by message_id, emoji)`.as(
+              "count",
+            ),
+            /* kysely-allow-raw -- Compute viewer membership across the complete reaction partition. */ sql<number>`max(case when actor_type = 'profile' and actor_id = ${input.viewerProfileId ?? ""} then 1 else 0 end) over (partition by message_id, emoji)`.as(
               "mine",
             ),
           ]),
@@ -384,7 +391,9 @@ export function copySessionReactionsInTransaction(
               .onRef("identity.event_id", "=", "reaction.message_id"),
           )
           .select([
-            sql<string>`${destinationId}`.as("session_id"),
+            /* kysely-allow-raw -- Kysely select expression binds the destination ID as a value. */ sql<string>`${destinationId}`.as(
+              "session_id",
+            ),
             "reaction.message_id",
             "reaction.emoji",
             "reaction.actor_type",
