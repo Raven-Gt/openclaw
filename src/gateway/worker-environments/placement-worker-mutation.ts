@@ -79,13 +79,17 @@ export function createPlacementWorkerMutation<Receipt>(params: {
         const committed = admission?.committed ?? admission?.settlement?.committed;
         if (committed) {
           const receipt = params.readReceipt(committed.facts, publication);
-          if (receipt !== undefined) return publish(receipt);
+          if (receipt !== undefined) {
+            return publish(receipt);
+          }
         }
         if (!commitGranted || admission?.settlement?.kind === "completed") {
           publication?.rollback();
         } else if (params.recoverUnknown) {
           const receipt = await params.recoverUnknown(error, publication);
-          if (receipt !== undefined) return publish(receipt);
+          if (receipt !== undefined) {
+            return publish(receipt);
+          }
         } else {
           publication?.invalidate();
         }

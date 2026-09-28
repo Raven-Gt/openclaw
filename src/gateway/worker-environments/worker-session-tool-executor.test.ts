@@ -223,15 +223,16 @@ describe("worker session tool topology", () => {
       parameters: SkillLibraryWorkshopSchema,
       execute: executeWorkshop,
     });
-    const tool = tools.find((tool) => tool.name === "skill_workshop")!;
+    const tool = tools.find((candidate) => candidate.name === "skill_workshop")!;
     const first = await tool.execute("call-0", { action: "list" }, undefined, update);
     expect(await tool.execute("call-0", { action: "list" })).toEqual(first);
     expect(executeWorkshop).toHaveBeenCalledOnce();
     expect(afterToolCall).toHaveBeenCalledOnce();
     expect(update).toHaveBeenCalledOnce();
     await expect(tool.execute("call-0", { action: "read" })).rejects.toThrow("reused");
-    for (let index = 1; index < 64; index += 1)
+    for (let index = 1; index < 64; index += 1) {
       await tool.execute(`call-${index}`, { action: "list" });
+    }
     await expect(tool.execute("call-64", { action: "list" })).rejects.toThrow("operation limit");
     getFixture().closeSourceRun();
     await expect(tool.execute("call-0", { action: "list" })).rejects.toThrow();
@@ -243,7 +244,7 @@ describe("worker session tool topology", () => {
     async (revokedAt) => {
       setEntry(SOURCE.sessionKey, SOURCE.sessionId);
       await placements.authorizeWorkerTurnTools(sourceClaim, ["skill_workshop"]);
-      if (revokedAt === "policy")
+      if (revokedAt === "policy") {
         initializeGlobalHookRunner(
           createMockPluginRegistry([
             {
@@ -256,6 +257,7 @@ describe("worker session tool topology", () => {
             },
           ]),
         );
+      }
       const executeWorkshop = vi.fn<AnyAgentTool["execute"]>(async () => {
         await Promise.resolve();
         await placements.authorizeWorkerTurnTools(sourceClaim, []);
@@ -269,7 +271,7 @@ describe("worker session tool topology", () => {
           parameters: SkillLibraryWorkshopSchema,
           execute: executeWorkshop,
         })
-        .find((tool) => tool.name === "skill_workshop")!;
+        .find((candidate) => candidate.name === "skill_workshop")!;
       await expect(tool.execute("revoked-call", { action: "list" })).rejects.toThrow(
         "tool authority changed",
       );
@@ -856,7 +858,9 @@ describe("worker spawn startup composition", () => {
           try {
             const tools = await createTools({ identity });
             const spawnTool = tools.find((tool) => tool.name === "sessions_spawn");
-            if (!spawnTool) throw new Error("Worker spawn tool was not composed");
+            if (!spawnTool) {
+              throw new Error("Worker spawn tool was not composed");
+            }
             const pending = spawnTool.execute("startup-parent-closure", {
               task: "start the child",
             });
@@ -870,8 +874,11 @@ describe("worker spawn startup composition", () => {
               closeSourceRun();
             }
             finishProvisioning.resolve();
-            if (closed) await expect(pending).rejects.toThrow();
-            else expect(JSON.stringify(await pending)).not.toContain('"status":"error"');
+            if (closed) {
+              await expect(pending).rejects.toThrow();
+            } else {
+              expect(JSON.stringify(await pending)).not.toContain('"status":"error"');
+            }
             expect(placements.get(CHILD.sessionId)?.state).toBe(closed ? undefined : "active");
             expect(gatewayRequest).toHaveBeenCalledTimes(closed ? 0 : 1);
           } finally {

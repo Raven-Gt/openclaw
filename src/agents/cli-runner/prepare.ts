@@ -1352,7 +1352,6 @@ async function prepareCliRunContextWithinReadFence(
       agentAccountId: params.agentAccountId,
       messageProvider: params.messageProvider ?? params.messageChannel,
       messageChannel: params.messageChannel,
-      chatType: runtimeChatType,
       groupId: params.groupId,
       groupChannel: params.groupChannel,
       groupSpace: params.groupSpace,

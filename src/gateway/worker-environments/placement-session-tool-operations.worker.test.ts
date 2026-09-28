@@ -92,13 +92,17 @@ it("checks live admission at commit and keeps a refused operation replayable", a
   vi.spyOn(operationAdmission, "createSqliteWorkerOperationAdmission").mockImplementationOnce(
     (admit, attachment) =>
       createAdmission((request, grant) => {
-        if (request.stage === "commit") revoked = true;
+        if (request.stage === "commit") {
+          revoked = true;
+        }
         admit(request, grant);
       }, attachment),
   );
   await expect(
     placements.beginWorkerSessionToolOperation(begin(source), () => {
-      if (revoked) throw new Error("synthetic tool caller revoked");
+      if (revoked) {
+        throw new Error("synthetic tool caller revoked");
+      }
     }),
   ).rejects.toThrow("synthetic tool caller revoked");
   expect(await placements.beginWorkerSessionToolOperation(begin(source))).toMatchObject({
@@ -183,14 +187,14 @@ it("cannot fence a reopened owner's same-byte grant with a delayed uncertain out
   const source = await claim("reopened");
   await placements.authorizeWorkerTurnTools(source, ["sessions_send"]);
   const previous = placements;
-  const failed = createDeferredCore<void>();
-  const deliver = createDeferredCore<void>();
+  const failed = createDeferredCore();
+  const deliver = createDeferredCore();
   let originalError: unknown;
   const runOperation = stateWorker.runOpenClawStateWorkerOperation;
   vi.spyOn(stateWorker, "runOpenClawStateWorkerOperation").mockImplementationOnce(
-    async (context, operation, options) => {
+    async (context, request, options) => {
       try {
-        return await runOperation(context, operation, options);
+        return await runOperation(context, request, options);
       } catch (error) {
         originalError = error;
         failed.resolve();

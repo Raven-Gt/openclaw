@@ -11,7 +11,9 @@ async function toolHarness(name: string) {
   let sourceCurrent = true;
   const assertSource = vi.fn(() => {
     fixture.source.receiptAuthority();
-    if (!sourceCurrent) throw new Error("Source transcript writer changed");
+    if (!sourceCurrent) {
+      throw new Error("Source transcript writer changed");
+    }
   });
   const execute = vi.fn<AnyAgentTool["execute"]>(async () => ({
     content: [],
@@ -35,8 +37,9 @@ async function toolHarness(name: string) {
   bindAgentToolExecutionLocation(tool, { kind: "gateway" });
   const runtime = createWorkerGatewayToolRuntime({
     assertCurrent: () => {
-      if (getWorkerTurnToolSurface(fixture.identity) !== runtime)
+      if (getWorkerTurnToolSurface(fixture.identity) !== runtime) {
         throw new Error("Tool surface owner changed");
+      }
     },
     signal: new AbortController().signal,
     prepare: async () => ({
@@ -52,7 +55,9 @@ async function toolHarness(name: string) {
   });
   fixture.bindToolSurface(runtime);
   const surface = await fixture.workerService.getToolSurface(fixture.identity);
-  if (!surface.ok) throw new Error("Expected an admitted tool surface");
+  if (!surface.ok) {
+    throw new Error("Expected an admitted tool surface");
+  }
   const request = {
     generation: surface.result.generation,
     toolId: surface.result.tools[0]!.id,
@@ -136,9 +141,14 @@ describe("worker Gateway tool RPC authority", () => {
         const h = await toolHarness(`tool-revoked-${authority}-${fails}`);
         h.execute.mockImplementationOnce(async () => {
           await Promise.resolve();
-          if (authority === "placement") h.placementStore.validateWorkerTurn.mockReturnValue(false);
-          else h.releaseSource();
-          if (fails) throw new Error("Tool failed after authority changed");
+          if (authority === "placement") {
+            h.placementStore.validateWorkerTurn.mockReturnValue(false);
+          } else {
+            h.releaseSource();
+          }
+          if (fails) {
+            throw new Error("Tool failed after authority changed");
+          }
           return { content: [], details: { ok: true } };
         });
         await expect(h.invoke()).resolves.toMatchObject({ ok: false });

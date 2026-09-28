@@ -345,15 +345,17 @@ export function createWorkerSessionToolExecutor(
     const source = await exactSource({ identity: request.identity, placements: params.placements });
     if (request.toolName === "portal" || request.toolName === "skill_workshop") {
       return await runWithSource({ source, request }, async (authority, prepared) => {
-        if (prepared.toolName === "portal")
+        if (prepared.toolName === "portal") {
           return executePortal(prepared, source, authority.assertSource);
-        if (prepared.toolName === "skill_workshop" && params.skillWorkshop)
+        }
+        if (prepared.toolName === "skill_workshop" && params.skillWorkshop) {
           return params.skillWorkshop.execute(
             prepared.request.toolCallId,
             prepared.request.arguments,
             prepared.signal,
             prepared.onUpdate,
           );
+        }
         throw new Error("Worker tool policy changed the tool identity");
       });
     }
@@ -403,17 +405,22 @@ export function createWorkerSessionToolExecutor(
         }
       },
     );
-    if (started.kind === "completed") {
-      return parseWorkerSessionToolResult(started.resultJson);
-    }
-    if (started.kind === "unknown")
-      return errorResult(new Error("The prior operation outcome is unknown; it was not replayed"));
-    if (started.kind === "conflict")
-      return errorResult(new Error("Worker tool call id was reused"));
-    if (started.kind === "capacity")
-      return errorResult(new Error("Too many worker session operations are already in progress"));
-    if (started.kind === "unauthorized") {
-      throw new Error("Worker session tool authority changed");
+    switch (started.kind) {
+      case "completed":
+        return parseWorkerSessionToolResult(started.resultJson);
+      case "unknown":
+        return errorResult(
+          new Error("The prior operation outcome is unknown; it was not replayed"),
+        );
+      case "conflict":
+        return errorResult(new Error("Worker tool call id was reused"));
+      case "capacity":
+        return errorResult(new Error("Too many worker session operations are already in progress"));
+      case "unauthorized":
+        throw new Error("Worker session tool authority changed");
+      case "execute":
+      case "in-progress":
+        break;
     }
     const sourceClaimId = source.turnClaim.claimId;
     const operationIdentity = {
@@ -540,9 +547,13 @@ export function createWorkerGatewayTools(
   params: WorkerGatewayToolsDependencies & { identity: WorkerConnectionIdentity },
 ): AnyAgentTool[] {
   const claim = params.identity.turnClaim;
-  if (!claim) throw new Error("Worker source turn has no operational owner");
+  if (!claim) {
+    throw new Error("Worker source turn has no operational owner");
+  }
   const capability = getWorkerTurnExecutionIdentityCapability(params.placements, claim);
-  if (!capability) throw new Error("Worker source turn has no operational owner");
+  if (!capability) {
+    throw new Error("Worker source turn has no operational owner");
+  }
   const source = capability.sessionTarget;
   const execute = createWorkerSessionToolExecutor(params);
   const toolOptions = { agentSessionKey: source.sessionKey, workerPlacement: true };

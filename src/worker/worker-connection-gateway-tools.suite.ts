@@ -29,7 +29,10 @@ export function registerWorkerGatewayToolTransportTests(connectParams: WorkerCon
             Object.defineProperty(socket, "readyState", { value: WebSocket.OPEN });
             vi.spyOn(socket, "send").mockImplementation((data, optionsOrCallback, done) => {
               const callback = typeof optionsOrCallback === "function" ? optionsOrCallback : done;
-              const frame = JSON.parse(String(data));
+              if (typeof data !== "string") {
+                throw new Error("Expected an encoded worker request");
+              }
+              const frame = JSON.parse(data);
               if (frame.method === "connect") {
                 socket.emit(
                   "message",

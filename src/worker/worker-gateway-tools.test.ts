@@ -55,6 +55,7 @@ function fixture() {
 describe("worker Gateway tool transport", () => {
   it("installs canonical definitions unchanged and forwards invocation and updates", async () => {
     const { surface, client, result } = fixture();
+    Object.freeze(surface.tools[0]!.definition);
     client.invokeGatewayTool.mockImplementationOnce(async (_params, options) => {
       options?.onUpdate?.({ content: [{ type: "text", text: "working" }] });
       return { type: "res", id: "response-1", ok: true, payload: result };

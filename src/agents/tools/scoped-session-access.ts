@@ -56,7 +56,9 @@ export async function runWithScopedSessionAccess<T>(params: {
       { agentId, storePath, sessionKey: params.targetSessionKey },
       () => params.signal?.throwIfAborted(),
       async (read) => {
-        if (!read.ok) throw read.error;
+        if (!read.ok) {
+          throw read.error;
+        }
         if (read.value?.sessionId !== expectedSessionId || read.value.archivedAt !== undefined) {
           throw new Error(`Session "${params.targetSessionKey}" changed after access was granted.`);
         }

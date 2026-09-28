@@ -55,7 +55,6 @@ describe("resolveConversationCapabilityProfile", () => {
   it("intersects a prepared direct policy with existing tool policy", () => {
     const profile = resolveConversationCapabilityProfile({
       config: { tools: { deny: ["write"] } },
-      chatType: "direct",
       conversationToolPolicy: { allow: ["read", "write", "exec"], deny: ["exec"] },
     });
 
@@ -74,7 +73,7 @@ describe("resolveConversationCapabilityProfile", () => {
   });
 
   it("does not add a requester restriction without a conversation policy", () => {
-    const profile = resolveConversationCapabilityProfile({ chatType: "direct" });
+    const profile = resolveConversationCapabilityProfile({});
 
     expect(profile.policy.groupPolicy).toBeUndefined();
     expect(
@@ -100,7 +99,6 @@ describe("resolveConversationCapabilityProfile", () => {
       sessionKey: "agent:main:discord:dm:guest",
       agentId: "main",
       messageProvider: "discord",
-      chatType: "direct",
       senderId: "guest",
       modelProvider: "openai",
       modelId: "gpt-5.5",
@@ -145,7 +143,6 @@ describe("resolveConversationCapabilityProfile", () => {
     const deny = ["exec", "process"];
     const profile = resolveConversationCapabilityProfile({
       config: { tools: { toolsBySender: { "*": { deny } } } },
-      chatType: "direct",
       ...params,
     });
 
@@ -176,7 +173,6 @@ describe("resolveConversationCapabilityProfile", () => {
       sessionKey: "agent:main:whatsapp:group:team",
       agentId: "main",
       messageProvider: "whatsapp",
-      chatType: "group",
       groupId: "team",
       senderId: "alice",
       modelProvider: "openai",

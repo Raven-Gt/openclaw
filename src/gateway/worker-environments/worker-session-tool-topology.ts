@@ -62,14 +62,18 @@ export async function resolveWorkerSessionToolSource(params: {
   try {
     const source = authority.identity;
     const assertCurrent = () => {
-      if (!authority.isCurrent()) throw new Error("Worker source session placement changed");
+      if (!authority.isCurrent()) {
+        throw new Error("Worker source session placement changed");
+      }
     };
     const bound = getWorkerTurnExecutionIdentityCapability(params.placements, claim)?.sessionTarget;
     const loaded = bound
       ? {
           canonicalKey: bound.sessionKey,
           entry: await withSessionEntryReadOnlyInWorker(bound, assertCurrent, async (read) => {
-            if (!read.ok) throw read.error;
+            if (!read.ok) {
+              throw read.error;
+            }
             return read.value;
           }),
         }

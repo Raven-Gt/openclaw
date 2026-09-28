@@ -78,22 +78,22 @@ export function buildEffectiveToolInventory(
   const compatible = filterRuntimeCompatibleTools(normalizedTools);
   diagnostics.push(...compatible.diagnostics);
   const projectTool = projection.createToolProjection();
-  const entries = compatible.tools
-    .map((tool) => {
-      const projected = projectTool(tool);
-      const description = projected.description ?? summarizeEffectiveToolDescription(tool);
-      return {
-        id: tool.name,
-        ...projected,
-        label: projected.label ?? resolveEffectiveToolLabel(tool),
-        description,
-        rawDescription:
-          projected.rawDescription ??
-          (normalizeOptionalString(tool.description) ||
-            (projection.rawDescriptionFallback === "summary" ? description : "")),
-      };
-    })
-    .toSorted((a, b) => a.label.localeCompare(b.label));
+  const entries: EffectiveToolInventoryEntry[] = [];
+  for (const tool of compatible.tools) {
+    const projected = projectTool(tool);
+    const description = projected.description ?? summarizeEffectiveToolDescription(tool);
+    entries.push({
+      id: tool.name,
+      ...projected,
+      label: projected.label ?? resolveEffectiveToolLabel(tool),
+      description,
+      rawDescription:
+        projected.rawDescription ??
+        (normalizeOptionalString(tool.description) ||
+          (projection.rawDescriptionFallback === "summary" ? description : "")),
+    });
+  }
+  entries.sort((a, b) => a.label.localeCompare(b.label));
   const counts = new Map<string, number>();
   for (const entry of entries) {
     counts.set(entry.label, (counts.get(entry.label) ?? 0) + 1);

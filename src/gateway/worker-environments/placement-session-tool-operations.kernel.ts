@@ -71,12 +71,12 @@ export function clearWorkerTurnToolState(
   );
 }
 
-export function createPlacementSessionToolOperationKernel(params: {
+export function createPlacementSessionToolOperationKernel(runtime: {
   db: DatabaseSync;
   instanceId: string;
   now: () => number;
 }) {
-  const { db, instanceId, now } = params;
+  const { db, instanceId, now } = runtime;
   const currentWorkerClaim = (claim: WorkerSessionTurnClaim) => {
     const current = find(db, required(claim.sessionId, "session id"));
     return claim.owner.kind === "worker" && current && isCurrentPlacementTurnClaim(current, claim)

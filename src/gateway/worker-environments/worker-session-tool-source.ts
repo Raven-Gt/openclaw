@@ -34,7 +34,9 @@ import type { WorkerSessionToolSource as ExactSource } from "./worker-session-to
 export function workerSessionToolArguments(
   request: WorkerSessionToolRequest,
 ): Record<string, unknown> {
-  if (request.toolName === "skill_workshop") return request.request.arguments;
+  if (request.toolName === "skill_workshop") {
+    return request.request.arguments;
+  }
   const { toolCallId: _toolCallId, ...args } = request.request;
   return args;
 }
@@ -45,24 +47,29 @@ export function prepareWorkerSessionToolRequest(
   toolCallId: string,
   raw: unknown,
 ): WorkerSessionToolRequest | undefined {
-  if (toolName === "sessions_spawn" && Value.Check(PlacedSessionsSpawnSchema, raw))
+  if (toolName === "sessions_spawn" && Value.Check(PlacedSessionsSpawnSchema, raw)) {
     return { ...binding, toolName, request: { ...raw, toolCallId } };
-  if (toolName === "sessions_send" && Value.Check(PlacedSessionsSendSchema, raw))
+  }
+  if (toolName === "sessions_send" && Value.Check(PlacedSessionsSendSchema, raw)) {
     return { ...binding, toolName, request: { ...raw, toolCallId } };
+  }
   if (toolName === "portal" && Value.Check(SessionPortalToolSchema, raw)) {
     if (
       (raw.title?.length ?? 0) > 256 ||
       (raw.description?.length ?? 0) > 8 * 1024 ||
       (raw.path?.length ?? 0) > 1024 ||
       (raw.id?.length ?? 0) > 256
-    )
+    ) {
       return undefined;
+    }
     return { ...binding, toolName, request: { ...raw, toolCallId } };
   }
-  if (toolName === "presence" && Value.Check(PresenceQueryParamsSchema, raw))
+  if (toolName === "presence" && Value.Check(PresenceQueryParamsSchema, raw)) {
     return { ...binding, toolName, request: { ...raw, toolCallId } };
-  if (toolName === "skill_workshop" && Value.Check(SkillLibraryWorkshopSchema, raw))
+  }
+  if (toolName === "skill_workshop" && Value.Check(SkillLibraryWorkshopSchema, raw)) {
     return { ...binding, toolName, request: { arguments: raw, toolCallId } };
+  }
   return undefined;
 }
 
@@ -95,7 +102,9 @@ async function applyToolPolicy(
       toolCallId,
       outcome.params,
     );
-    if (adjusted) return { request: adjusted };
+    if (adjusted) {
+      return { request: adjusted };
+    }
   }
   return {
     result: buildBlockedToolResult({
@@ -226,8 +235,9 @@ export function createWorkerSessionToolSourceRunner(params: {
                 ) {
                   throw new Error("Worker session tool authority changed");
                 }
-                if ("result" in policy) result = policy.result;
-                else {
+                if ("result" in policy) {
+                  result = policy.result;
+                } else {
                   request = policy.request;
                   result = await run(
                     {

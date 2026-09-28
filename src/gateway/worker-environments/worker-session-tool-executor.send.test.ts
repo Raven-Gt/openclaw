@@ -425,7 +425,9 @@ describe("worker session tool send delivery", () => {
       setEntry(SOURCE.sessionKey, SOURCE.sessionId, PARENT);
       setEntry(TARGET.sessionKey, TARGET.sessionId, PARENT);
       scopedSessionAccess.mockImplementation(async (params) => {
-        if (params.targetSessionKey !== PARENT.sessionKey) return await params.run();
+        if (params.targetSessionKey !== PARENT.sessionKey) {
+          return await params.run();
+        }
         if (replaced === "target") {
           setEntry(TARGET.sessionKey, "replacement-target", PARENT);
           await activate({ ...TARGET, sessionId: "replacement-target" });
@@ -466,7 +468,9 @@ describe.each([false, true])(
       const admissionStarted = createDeferred();
       const finishAdmission = createDeferred();
       scopedSessionAccess.mockImplementation(async (params) => {
-        if (params.targetSessionKey !== PARENT.sessionKey) return await params.run();
+        if (params.targetSessionKey !== PARENT.sessionKey) {
+          return await params.run();
+        }
         admissionStarted.resolve();
         await finishAdmission.promise;
         return await params.run();

@@ -11,11 +11,6 @@ export const WORKER_REQUIRED_LOCAL_TOOL_NAMES = [
 
 const WORKER_OPTIONAL_LOCAL_TOOL_NAMES = ["browser", "computer"] as const;
 
-const WORKER_LOCAL_TOOL_NAMES = [
-  ...WORKER_REQUIRED_LOCAL_TOOL_NAMES,
-  ...WORKER_OPTIONAL_LOCAL_TOOL_NAMES,
-] as const;
-
 /** Gateway-proxied tools exposed through the closed worker protocol. */
 export const WORKER_SESSION_TOOL_NAMES = [
   "skill_workshop",
@@ -26,7 +21,8 @@ export const WORKER_SESSION_TOOL_NAMES = [
 ] as const;
 
 export const WORKER_TOOL_NAMES = [
-  ...WORKER_LOCAL_TOOL_NAMES,
+  ...WORKER_REQUIRED_LOCAL_TOOL_NAMES,
+  ...WORKER_OPTIONAL_LOCAL_TOOL_NAMES,
   ...WORKER_SESSION_TOOL_NAMES,
 ] as const;
 

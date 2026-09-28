@@ -25,7 +25,6 @@ import type {
   PreparedSessionCapabilityEntry,
   SessionCapabilityStore,
 } from "./subagents/spawn/subagent-capabilities.js";
-import type { PromptMode } from "./system-prompt.types.js";
 import {
   collectExplicitAllowlist,
   collectExplicitDenylist,
@@ -67,12 +66,10 @@ export type ConversationCapabilityProfileParams = {
   agentAccountId?: string | null;
   messageProvider?: string | null;
   messageChannel?: string | null;
-  chatType?: string;
   conversationToolPolicy?: GroupToolPolicyConfig;
   groupId?: string | null;
   groupChannel?: string | null;
   groupSpace?: string | null;
-  memberRoleIds?: readonly string[];
   spawnedBy?: string | null;
   senderId?: string | null;
   senderName?: string | null;
@@ -84,8 +81,6 @@ export type ConversationCapabilityProfileParams = {
   workspaceDir?: string;
   cwd?: string;
   spawnWorkspaceDir?: string;
-  isCanonicalWorkspace?: boolean;
-  promptMode?: PromptMode;
   sandboxToolPolicy?: SandboxToolPolicy;
   runtimeToolAllowlist?: string[];
   /** Persist the runtime allowlist as real parent authority on spawned children. */
@@ -218,23 +213,14 @@ export function resolveConversationCapabilityProfile(params: ConversationCapabil
         : undefined,
     },
     policy: {
-      agentId: effective.agentId,
+      ...effective,
       sessionKey: params.sessionKey,
       subagentSessionKey,
       trustedGroup,
-      profile: effective.profile,
-      providerProfile: effective.providerProfile,
-      sources: effective.sources,
-      profiles: effective.profiles,
-      gatewayConfigReadAllowed: effective.gatewayConfigReadAllowed,
       profilePolicy,
       providerProfilePolicy,
       profileAlsoAllow: mergeRuntimeToolAlsoAllowlist(effective.profileAlsoAllow),
       providerProfileAlsoAllow: mergeRuntimeToolAlsoAllowlist(effective.providerProfileAlsoAllow),
-      globalPolicy: effective.globalPolicy,
-      globalProviderPolicy: effective.globalProviderPolicy,
-      agentPolicy: effective.agentPolicy,
-      agentProviderPolicy: effective.agentProviderPolicy,
       groupPolicy,
       senderPolicy,
       sandboxPolicy: sandboxToolPolicy,

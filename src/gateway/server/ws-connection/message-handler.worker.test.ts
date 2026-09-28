@@ -126,7 +126,7 @@ describe("dedicated worker websocket protocol", () => {
   it("does not finish hello after its socket closes while preparing tools", async () => {
     vi.useFakeTimers();
     const harness = attachHarness({ identity: ATTACHED_IDENTITY });
-    const pending = createDeferredCore<void>();
+    const pending = createDeferredCore();
     const prepare = harness.service.getToolSurface.getMockImplementation()!;
     harness.service.getToolSurface.mockImplementation(async (identity) => {
       await pending.promise;
@@ -144,7 +144,7 @@ describe("dedicated worker websocket protocol", () => {
   it("carries connection cancellation into Gateway tool dispatch", async () => {
     vi.useFakeTimers();
     const harness = attachHarness({ identity: ATTACHED_IDENTITY });
-    const completion = createDeferredCore<void>();
+    const completion = createDeferredCore();
     let connectionSignal: AbortSignal | undefined;
     harness.service.invokeGatewayTool.mockImplementation(
       async (_identity, _request, _sink, signal) => {

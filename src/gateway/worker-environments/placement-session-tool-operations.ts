@@ -25,19 +25,27 @@ const waiters = resolveGlobalMap<string, Waiting>(
   (registered) => {
     const error = new Error("Gateway lifecycle ended while waiting for worker session operations");
     for (const { listeners } of registered.values()) {
-      for (const listener of listeners) listener(error);
+      for (const listener of listeners) {
+        listener(error);
+      }
     }
     registered.clear();
   },
 );
 registerOpenClawStateDatabaseLifecycleListener((event) => {
-  if (event.kind === "opened") return;
+  if (event.kind === "opened") {
+    return;
+  }
   for (const [id, waiting] of waiters) {
-    if (waiting.path !== (event.identity?.canonicalPath ?? event.path)) continue;
+    if (waiting.path !== (event.identity?.canonicalPath ?? event.path)) {
+      continue;
+    }
     waiters.delete(id);
     const error = new Error("Worker session operation database owner retired");
     waiting.error = error;
-    for (const listener of waiting.listeners) listener(error);
+    for (const listener of waiting.listeners) {
+      listener(error);
+    }
   }
 });
 function isReceipt(value: unknown): value is PlacementSessionToolReceipt {
@@ -61,15 +69,19 @@ export function createPlacementSessionToolOperationOps(runtime: {
     if (error) {
       waiting.error = error;
       waiters.set(id, waiting);
-    } else if (!waiting.error) waiters.delete(id);
-    for (const listener of waiting.listeners) listener(waiting.error);
+    } else if (!waiting.error) {
+      waiters.delete(id);
+    }
+    for (const listener of waiting.listeners) {
+      listener(waiting.error);
+    }
   };
   async function execute(
-    command: SqliteWorkerCommand<PlacementSessionToolWorkerOperations>,
+    inputCommand: SqliteWorkerCommand<PlacementSessionToolWorkerOperations>,
     assertCurrent?: () => void,
     admissionFence?: ReturnType<typeof stagePlacementTurnToolWorkerPublication>,
   ): Promise<PlacementSessionToolReceipt> {
-    command = structuredClone(command);
+    const command = structuredClone(inputCommand);
     const mutation = createPlacementWorkerMutation({
       context,
       label: "Worker session operation",
@@ -77,14 +89,19 @@ export function createPlacementSessionToolOperationOps(runtime: {
       assertCurrent,
       readReceipt: (facts) => (isReceipt(facts) ? facts : undefined),
       stageCommit(facts) {
-        if (!isReceipt(facts)) throw new Error("Worker session operation commit has no receipt");
-        if (facts.toolNames === undefined) return undefined;
+        if (!isReceipt(facts)) {
+          throw new Error("Worker session operation commit has no receipt");
+        }
+        if (facts.toolNames === undefined) {
+          return undefined;
+        }
         if (
           command.type !== "placementTools.authorize" &&
           command.type !== "placementTools.seal" &&
           command.type !== "placementTools.clear"
-        )
+        ) {
           throw new Error("Worker session receipt has unexpected tool authority");
+        }
         return stagePlacementTurnToolWorkerPublication(context.admission.identity, {
           claim: command.input.args[0],
           toolNames: facts.toolNames,
@@ -204,13 +221,18 @@ export function createPlacementSessionToolOperationOps(runtime: {
             waiters.delete(id);
             return;
           }
-          if (waiting.error) throw waiting.error;
+          if (waiting.error) {
+            throw waiting.error;
+          }
           const error = await changed;
-          if (error) throw error;
+          if (error) {
+            throw error;
+          }
         } finally {
           listeners.delete(finish);
-          if (!waiting.error && listeners.size === 0 && waiters.get(id) === waiting)
+          if (!waiting.error && listeners.size === 0 && waiters.get(id) === waiting) {
             waiters.delete(id);
+          }
         }
       }
     },
@@ -222,7 +244,9 @@ export function createPlacementSessionToolOperationOps(runtime: {
         { type: "placementTools.begin", input: input([params]) },
         assertCurrent,
       );
-      if (!receipt.result) throw new Error("Worker session operation admission receipt is missing");
+      if (!receipt.result) {
+        throw new Error("Worker session operation admission receipt is missing");
+      }
       return receipt.result;
     },
     async bindWorkerSessionToolOperationChild(...args: Parameters<Kernel["bindChild"]>) {

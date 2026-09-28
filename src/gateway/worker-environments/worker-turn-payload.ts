@@ -347,10 +347,7 @@ export function buildWorkerTurnResult(params: {
   };
 }
 
-export function assertSupportedTurn(params: SessionPlacementTurnParams): {
-  provider: string;
-  model: string;
-} {
+export function assertSupportedTurn(params: SessionPlacementTurnParams) {
   if (params.clientTools?.length) {
     throw new Error("Cloud worker turns do not support client-provided tools");
   }

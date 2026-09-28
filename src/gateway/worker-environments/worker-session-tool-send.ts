@@ -54,7 +54,9 @@ export async function executeWorkerSessionSend(operation: {
     });
     return executeWorkerSessionToolWithReplay(async (replay) => {
       operation.assertSource();
-      if (replay) await assertCurrentTarget();
+      if (replay) {
+        await assertCurrentTarget();
+      }
       const { toolCallId, ...args } = operation.request;
       return tool.execute(toolCallId, { ...args, sessionKey: operation.target.sessionKey });
     });

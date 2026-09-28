@@ -18,7 +18,7 @@ describe("worker Gateway tool dispatch", () => {
   it("keeps control frames usable at capacity and retains invocations across socket loss", async () => {
     vi.useFakeTimers();
     const harness = attachHarness({ identity: ATTACHED_IDENTITY });
-    const completion = createDeferredCore<void>();
+    const completion = createDeferredCore();
     harness.service.invokeGatewayTool.mockImplementation(async (_identity, args, sink) => {
       sink.send({
         type: "event",
@@ -103,7 +103,7 @@ describe("worker Gateway tool dispatch", () => {
   it("rejects duplicate in-flight request IDs without dispatching another operation", async () => {
     vi.useFakeTimers();
     const harness = attachHarness({ identity: ATTACHED_IDENTITY });
-    const completion = createDeferredCore<void>();
+    const completion = createDeferredCore();
     harness.service.invokeGatewayTool.mockImplementation(async () => {
       await completion.promise;
       return { ok: true, result: { content: [] } };

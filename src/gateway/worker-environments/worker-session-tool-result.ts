@@ -87,8 +87,9 @@ export function boundWorkerToolResult(result: unknown): WorkerGatewayToolResult 
       },
       result,
     )
-  )
+  ) {
     return result;
+  }
   return workerSessionToolErrorResult(
     new Error("Worker tool result exceeded the transport contract"),
   );

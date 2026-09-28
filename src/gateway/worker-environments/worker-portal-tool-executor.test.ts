@@ -64,7 +64,9 @@ describe("worker portal tool execution", () => {
     signal?: AbortSignal,
   ) {
     const claim = workerIdentity.turnClaim;
-    if (!claim || claim.owner.kind !== "worker") throw new Error("Missing worker turn claim");
+    if (!claim || claim.owner.kind !== "worker") {
+      throw new Error("Missing worker turn claim");
+    }
     const authority =
       sourceAuthorities.get(claim.claimId) ?? (await placements.prepareTurnClaimAuthority(claim));
     sourceAuthorities.set(claim.claimId, authority);
@@ -74,7 +76,9 @@ describe("worker portal tool execution", () => {
           { identity: workerIdentity, toolName: "portal", request, signal },
           { sessionId: claim.sessionId, turnClaim: { ...claim, owner: claim.owner } },
           () => {
-            if (!authority.isCurrent()) throw new Error("Worker source session placement changed");
+            if (!authority.isCurrent()) {
+              throw new Error("Worker source session placement changed");
+            }
           },
         ),
       ),
@@ -209,7 +213,9 @@ describe("worker portal tool execution", () => {
   afterEach(async () => {
     await Promise.all([...actualServices].map((service) => service.closeAll()));
     actualServices.clear();
-    for (const authority of sourceAuthorities.values()) authority.release();
+    for (const authority of sourceAuthorities.values()) {
+      authority.release();
+    }
     sourceAuthorities.clear();
     vi.restoreAllMocks();
     await closeStateDatabaseForTest();
@@ -394,7 +400,9 @@ describe("worker portal tool execution", () => {
     const { service, httpServers } = useActualPortalService();
     const successorOpening = createDeferred();
     portalOpen.mockImplementation((params) => {
-      if (portalOpen.mock.calls.length === 2) successorOpening.resolve();
+      if (portalOpen.mock.calls.length === 2) {
+        successorOpening.resolve();
+      }
       return service.open(params);
     });
     const first = runPortal({ toolCallId: "first-opening-portal", action: "open", port: 4321 });
