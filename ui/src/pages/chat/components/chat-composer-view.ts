@@ -29,6 +29,7 @@ import { focusComposerFromChrome, paneDomId } from "./chat-composer-dom.ts";
 import type { GoalComposerController } from "./chat-composer-goal-mode.ts";
 import { renderChatGoal, renderChatGoalRecovery } from "./chat-composer-goal.ts";
 import { composerHighlights } from "./chat-composer-highlights.ts";
+import { resolveComposerMentionHighlights } from "./chat-composer-mention-highlights.ts";
 import type { HumanMentionMenuHost } from "./chat-composer-mention-menu.ts";
 import { renderChatComposerPlusMenu } from "./chat-composer-plus-menu.ts";
 import { renderComposerQuestionDock } from "./chat-composer-question.ts";
@@ -557,7 +558,14 @@ export function renderChatComposerView(context: ChatComposerViewContext) {
                     aria-label=${t("chat.composer.composerInput")}
                     placeholder=${dictation?.active ? "" : placeholder}
                     rows="1"
-                    ${composerHighlights(resolveComposerSkillHighlights)}
+                    ${composerHighlights((value) => [
+                      ...resolveComposerSkillHighlights(value),
+                      ...resolveComposerMentionHighlights(
+                        value,
+                        props.getDraft?.() ?? props.draft,
+                        mentionMenuHost.getMentions(),
+                      ),
+                    ])}
                   ></textarea>
                   <span class="agent-chat__composer-placeholder" aria-hidden="true"
                     >${dictation?.active ? "" : placeholder}</span
