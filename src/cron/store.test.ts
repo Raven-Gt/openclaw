@@ -730,20 +730,27 @@ describe("cron store", () => {
     db.prepare(
       "UPDATE cron_jobs SET sort_order = 20 WHERE store_key = ? AND job_id = 'healthy'",
     ).run(cronStoreKey(storePath));
-    const retained = () =>
-      db
-        .prepare("SELECT * FROM cron_jobs WHERE store_key = ? AND job_id = 'legacy'")
-        .get(cronStoreKey(storePath));
+    const retained = () => {
+      const { sort_order: _sortOrder, ...row } = expectDefined(
+        db
+          .prepare("SELECT * FROM cron_jobs WHERE store_key = ? AND job_id = 'legacy'")
+          .get(cronStoreKey(storePath)),
+        "stored legacy row",
+      );
+      return row;
+    };
     const before = retained();
     const loaded = await loadCronStore(storePath);
     const jobsById = new Map(loaded.jobs.map((job) => [job.id, job]));
     jobsById.set("new", expectDefined(makeStore("new", true).jobs[0], "new fixture"));
-    await saveCronStore(storePath, {
-      version: 1,
-      jobs: order.map((id) => expectDefined(jobsById.get(id), "replacement fixture")),
-    });
+    await expect(
+      saveCronStore(storePath, {
+        version: 1,
+        jobs: order.map((id) => expectDefined(jobsById.get(id), "replacement fixture")),
+      }),
+    ).resolves.toBeUndefined();
     expect((await loadCronStore(storePath)).jobs.map((job) => job.id)).toEqual(order);
-    expect(retained()).toEqual({ ...before, sort_order: order.indexOf("legacy") });
+    expect(retained()).toEqual(before);
   });
 
   it("persists runtime-only state churn in SQLite", async () => {

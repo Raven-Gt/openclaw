@@ -118,9 +118,9 @@ async function persistUpdatedJob(params: {
 }) {
   const { state, snapshot, previousJob, nextJob, persistStore } = params;
   const defaultAgentId = resolveCurrentDefaultAgentId(state);
-  const ownerChanged =
-    resolveEffectiveJobAgentId(previousJob, defaultAgentId, state.deps.legacyDefaultAgentId) !==
-    resolveEffectiveJobAgentId(nextJob, defaultAgentId, state.deps.legacyDefaultAgentId);
+  // Declaration convergence also refuses unresolved legacy ownership before publishing.
+  resolveEffectiveJobAgentId(previousJob, defaultAgentId, state.deps.legacyDefaultAgentId);
+  resolveEffectiveJobAgentId(nextJob, defaultAgentId, state.deps.legacyDefaultAgentId);
   const reservation = state.queuedRunReservationsByJobId.get(nextJob.id);
   const preservesOnExitRearm =
     reservation?.onExit === true &&
