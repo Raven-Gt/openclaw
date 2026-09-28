@@ -178,9 +178,8 @@ describe("VisitorAccessService", () => {
         "grant expires 2026-08-29T12:00:00.000Z | EXPIRED; provider cleanup pending",
       );
       expect(list.text).toContain(access);
-      expect(list.details.grants).toEqual([
-        expect.objectContaining({ githubLogin: "unrelated-login", state: "expired" }),
-      ]);
+      expect(list.details.grants).toEqual([expect.objectContaining({ state: "expired" })]);
+      expect(list.details.grants[0]).not.toHaveProperty("githubLogin");
       expect(fixture.gatewayRequest.mock.calls.every(([method]) => method === "users.list")).toBe(
         true,
       );
@@ -472,7 +471,7 @@ describe("VisitorAccessService", () => {
 
     expect(result.text).toContain("1 unmanaged, 1 missing from policy");
     expect(result.text).toMatch(
-      /missing@example.com.*@visitor.*2026-08-27T12:00:00.000Z.*2026-08-29T12:00:00.000Z.*MISSING FROM POLICY/,
+      /missing@example.com.*Verified GitHub: unavailable.*2026-08-27T12:00:00.000Z.*2026-08-29T12:00:00.000Z.*MISSING FROM POLICY/,
     );
     expect(result.text).toMatch(/manual@example.com.*UNMANAGED/);
     expect(result.details.grants).toEqual([

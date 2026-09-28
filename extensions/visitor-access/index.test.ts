@@ -20,6 +20,7 @@ import { closeOpenClawStateDatabaseAsync } from "openclaw/plugin-sdk/sqlite-runt
 import { Value } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import plugin from "./index.js";
+import { visitorListDetailsSchema } from "./src/tool-results.js";
 import type { VisitorGrant } from "./src/visitors.js";
 
 type PluginGatewayAccessPolicy = Parameters<OpenClawPluginApi["registerGatewayAccessPolicy"]>[0];
@@ -339,7 +340,7 @@ describe("visitor-access plugin lifecycle", () => {
   });
 
   it.each([undefined, "invitation-login"])(
-    "lists current verified identity separately from invitation input %s",
+    "lists only the profile identity and revokes by email after invitation input %s",
     async (github) => {
       const policy = createPolicyFetch();
       vi.stubGlobal("fetch", policy.fetcher);
@@ -349,6 +350,7 @@ describe("visitor-access plugin lifecycle", () => {
       const grant = await registered.store.lookup("alias@example.test");
 
       const pending = await registered.execute("visitor_list");
+      expect(pending.details).not.toHaveProperty("grants.0.githubLogin");
       expect(pending.content).toEqual([
         { type: "text", text: expect.stringContaining("Verified GitHub: unavailable") },
       ]);
@@ -356,8 +358,11 @@ describe("visitor-access plugin lifecycle", () => {
         { type: "text", text: expect.stringContaining("first sign-in pending") },
       ]);
 
+      await registered.execute("visitor_invite", { email: "unrelated@example.test", days: 7 });
+      const otherGrant = await registered.store.lookup("unrelated@example.test");
+      let listedEmail: string | undefined;
       // The directory selects the verified primary account, or null when none is selected.
-      for (const login of ["verified-person", "current-person", null]) {
+      for (const login of ["verified-person", null, "current-person"]) {
         registered.gatewayRequest.mockResolvedValue({
           profiles: [
             {
@@ -384,26 +389,21 @@ describe("visitor-access plugin lifecycle", () => {
         expect(listed.content).not.toEqual([
           { type: "text", text: expect.stringContaining("first sign-in pending") },
         ]);
-        if (github) {
-          expect(listed.content).toEqual([
-            {
-              type: "text",
-              text: expect.stringContaining("invitation GitHub: @invitation-login (input only)"),
-            },
-          ]);
+        expect(listed.content).not.toEqual([
+          { type: "text", text: expect.stringContaining("invitation-login") },
+        ]);
+        if (!Value.Check(visitorListDetailsSchema, listed.details)) {
+          throw new Error("Invalid visitor_list details");
         }
-        expect(listed.details).toMatchObject({
-          grants: [
-            {
-              email: "alias@example.test",
-              ...(github ? { githubLogin: github } : {}),
-              ...(login ? { verifiedGithubLogin: login } : {}),
-            },
-          ],
+        const target = listed.details.grants.find((entry) => entry.email === grant?.email);
+        expect(target).toMatchObject({
+          email: "alias@example.test",
+          ...(login ? { githubLogin: login } : {}),
         });
         if (!login) {
-          expect(listed.details).not.toHaveProperty("grants.0.verifiedGithubLogin");
+          expect(target).not.toHaveProperty("githubLogin");
         }
+        listedEmail = target?.email;
         const schema = registered.tools.get("visitor_list")?.outputSchema;
         if (!schema) {
           throw new Error("visitor_list did not declare an output schema");
@@ -411,7 +411,17 @@ describe("visitor-access plugin lifecycle", () => {
         expect(Value.Check(schema, listed.details)).toBe(true);
       }
       expect(await registered.store.lookup("alias@example.test")).toEqual(grant);
-      expect(policy.emails()).toEqual(["alias@example.test"]);
+      expect(listedEmail).toBe("alias@example.test");
+      const revoked = await registered.execute("visitor_revoke", { email: listedEmail });
+      expect(revoked.details).toEqual({ outcome: "revoked", emails: ["alias@example.test"] });
+      expect(await registered.store.lookup("alias@example.test")).toBeUndefined();
+      expect(await registered.store.lookup("unrelated@example.test")).toEqual(otherGrant);
+      expect(policy.emails()).toEqual(["unrelated@example.test"]);
+      expect(
+        policy.fetcher.mock.calls.every(
+          ([input]) => requestUrl(input).hostname === "api.cloudflare.com",
+        ),
+      ).toBe(true);
     },
   );
 

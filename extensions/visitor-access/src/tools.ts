@@ -63,7 +63,7 @@ export function createVisitorTools(context: OpenClawPluginToolContext<2>): AnyAg
       name: "visitor_revoke",
       label: "Revoke visitor",
       description:
-        "Remove visitor access by email or GitHub login. GitHub login removes all recorded grants for that login. Explicit email can also remove an unmanaged policy entry. Already absent grants are a no-op.",
+        "Remove visitor access by email or GitHub login. Use the returned email to revoke a listed grant. GitHub input matches recorded invitation input, which may differ from the current profile login. Explicit email can also remove an unmanaged policy entry. Already absent grants are a no-op.",
       parameters: Type.Object(identityFields, { additionalProperties: false }),
       outputSchema: Type.Union([visitorRevokeDetailsSchema, visitorToolErrorSchema]),
       run: (service: VisitorAccessService, raw: unknown) => service.revoke(raw, assertCurrent),
@@ -72,7 +72,7 @@ export function createVisitorTools(context: OpenClawPluginToolContext<2>): AnyAg
       name: "visitor_list",
       label: "List visitors",
       description:
-        "List recorded visitor grants, current verified GitHub identities separately from invitation input, current Gateway access, invitation and expiry dates, and drift from the Access policy. Grant expiry does not describe independent staff access. Unmanaged policy emails are reported and retained; missing policy emails are never automatically restored.",
+        "List recorded visitor grants, current verified GitHub identities, current Gateway access, invitation and expiry dates, and drift from the Access policy. Use the returned email to revoke a listed grant. Grant expiry does not describe independent staff access. Unmanaged policy emails are reported and retained; missing policy emails are never automatically restored.",
       parameters: Type.Object({}, { additionalProperties: false }),
       outputSchema: Type.Union([visitorListDetailsSchema, visitorToolErrorSchema]),
       run: (service: VisitorAccessService) => service.list(assertCurrent),

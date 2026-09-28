@@ -524,7 +524,8 @@ describe("visitor access admitted caller", () => {
             return block.text;
           };
           const listing = await invoke("visitor_list");
-          expect(listing).toContain(`${active.email} | @${active.githubLogin}`);
+          expect(listing).toContain(`${active.email} | Verified GitHub: unavailable`);
+          expect(listing).not.toContain(`@${active.githubLogin}`);
           expect(listing).toContain(`invited ${new Date(active.createdAt).toISOString()}`);
           expect(listing).toContain('Gateway access: existing role "writer" retained');
           expect(listing).toContain(`${unmanaged} | UNMANAGED`);

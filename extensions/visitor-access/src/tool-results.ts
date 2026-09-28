@@ -41,9 +41,6 @@ export const visitorListDetailsSchema = Type.Object(
         {
           email: Type.String(),
           githubLogin: Type.Optional(
-            Type.String({ description: "Invitation input, not a verified identity." }),
-          ),
-          verifiedGithubLogin: Type.Optional(
             Type.String({
               description:
                 "Current verified GitHub login from the Gateway profile, when available.",
