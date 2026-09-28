@@ -40,6 +40,8 @@ type PendingInputView = {
   /** Live custody receipts keep the queue independent of retained-input pagination. */
   queuedInputs: ChatPendingInputsPage["items"];
   steeringRunIds: Set<string>;
+  steerRequestVersion: number;
+  steerError?: { message: string; version: number };
   receiptRunIds: string[];
   queuedCount: number;
   queueBefore?: number;
@@ -303,6 +305,7 @@ export function applyChatPendingInputs(
       page: displayPage,
       queuedInputs,
       steeringRunIds: new Set(),
+      steerRequestVersion: 0,
       receiptRunIds: [],
       queuedCount: displayPage.queuedCount ?? 0,
       queueBefore: displayPage.nextBefore,

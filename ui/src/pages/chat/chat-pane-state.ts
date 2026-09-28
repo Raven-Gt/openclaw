@@ -6,7 +6,7 @@ import {
   resolveControlUiFollowUpMode,
   resolveControlUiServerQueueMode,
 } from "../../lib/chat/follow-up-mode.ts";
-import { getChatHistoryLoadState } from "./chat-history-state.ts";
+import { getChatHistoryLoadState, setChatError } from "./chat-history-state.ts";
 import type { ChatState } from "./chat-state-contract.ts";
 import type { ChatPageHost } from "./chat-state-host.ts";
 
@@ -125,9 +125,8 @@ export function dismissChatError(state: {
   lastError: string | null;
   lastErrorCode?: string | null;
 }) {
-  state.lastError = null;
+  setChatError(state, null);
   state.lastErrorCode = null;
-  state.chatError = null;
 }
 
 export function initialHistorySubmitState(state: ChatState, unavailable: boolean) {

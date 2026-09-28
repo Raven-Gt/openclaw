@@ -1,4 +1,3 @@
-import type { ChatSteerResult } from "../../../../packages/gateway-protocol/src/schema/logs-chat.js";
 import { fetchAssistantIdentity } from "../../app/assistant-identity.ts";
 import {
   dispatchCommandClientPresentation,
@@ -26,6 +25,7 @@ import { resolveAgentIdForSession } from "./chat-avatar.ts";
 import { CHAT_TRANSCRIPT_LOADING_CHANGED_EVENT } from "./chat-history-events.ts";
 import { setChatError } from "./chat-history-state.ts";
 import { loadChatHistory } from "./chat-history.ts";
+import { steerPendingQueuedChatInput } from "./chat-pending-input-steer.ts";
 import { getChatPendingInputs } from "./chat-pending-inputs.ts";
 import { chatProviderReviewRow } from "./chat-provider-review.ts";
 import { removeQueuedMessage } from "./chat-queue.ts";
@@ -116,60 +116,6 @@ function cancelPendingQueuedChatInput(state: ChatPageHost, id: string): boolean 
     }
     await loadChatHistory(state, { supersedeInFlight: true });
   });
-  return true;
-}
-
-async function steerPendingQueuedChatInput(state: ChatPageHost, id: string): Promise<boolean> {
-  if (!id.startsWith("pending-input:")) {
-    return false;
-  }
-  const view = getChatPendingInputs(state);
-  const input = view?.queuedInputs.find(
-    (item) => `pending-input:${item.id}` === id && item.queued && item.state === "queued",
-  );
-  const client = state.client;
-  if (
-    !view?.sessionId ||
-    !input?.runId ||
-    !client ||
-    !state.connected ||
-    view.steeringRunIds.has(input.runId) ||
-    chatProviderReviewRow(state)?.providerReview
-  ) {
-    return true;
-  }
-  const epoch = state.connectionEpoch;
-  const current = () =>
-    getChatPendingInputs(state) === view &&
-    state.client === client &&
-    state.connected &&
-    state.connectionEpoch === epoch;
-  view.steeringRunIds.add(input.runId);
-  state.requestUpdate?.();
-  try {
-    const result = await client.request<ChatSteerResult>("chat.steer", {
-      sessionKey: view.sessionKey,
-      agentId: view.agentId,
-      sessionId: view.sessionId,
-      runId: input.runId,
-    });
-    if (current()) {
-      setChatError(state, null);
-      await loadChatHistory(state, { supersedeInFlight: true });
-      if (current() && result.status === "queued") {
-        setChatError(state, result.reason);
-      }
-    }
-  } catch (error) {
-    if (current()) {
-      setChatError(state, formatUiError(error));
-    }
-  } finally {
-    view.steeringRunIds.delete(input.runId);
-    if (current()) {
-      state.requestUpdate?.();
-    }
-  }
   return true;
 }
 

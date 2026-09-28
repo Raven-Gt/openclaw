@@ -78,6 +78,7 @@ export async function hydrateChatHistory(
   deltaCursor: string | undefined,
   inputRunIds: string[],
   requestKeyPrefix: string,
+  preserveComposerState: boolean,
 ): Promise<ObservedChatHistoryResult | undefined> {
   const ownership = beginHistoryRequest(state, client, connectionEpoch, sessionKey, requestAgentId);
   const isCurrent = () => state.sessions === sessions && acceptsHistoryResult(state, ownership);
@@ -125,10 +126,13 @@ export async function hydrateChatHistory(
       { console: false, maxBufferedEventsForType: 30 },
     );
   recordTiming("start", { method });
-  // Any pending input-history snapshot becomes invalid once we start reloading transcript state.
-  state.resetChatInputHistoryNavigation?.();
+  // Explicit transcript loads reset recall; custody-only reconciliation does not
+  // own the editable composer snapshot or another action's diagnostic.
+  if (!preserveComposerState) {
+    state.resetChatInputHistoryNavigation?.();
+    setChatError(state, null);
+  }
   state.chatLoading = true;
-  setChatError(state, null);
   const request = (cursor?: string) =>
     requestSharedHistory(
       sessions,
