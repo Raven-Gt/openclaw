@@ -23,6 +23,7 @@ import {
 } from "./chat-history-snapshot.ts";
 import {
   beginHistoryRequest,
+  chatHistoryRequests,
   ownsHistoryRequest,
   acceptsHistoryResult,
   resetChatHistoryProjection,
@@ -130,7 +131,6 @@ export async function hydrateChatHistory(
   // own the editable composer snapshot or another action's diagnostic.
   if (!preserveComposerState) {
     state.resetChatInputHistoryNavigation?.();
-    setChatError(state, null);
   }
   state.chatLoading = true;
   const request = (cursor?: string) =>
@@ -147,6 +147,37 @@ export async function hydrateChatHistory(
       inputRunIds,
     );
   try {
+    const requests = chatHistoryRequests(state);
+    let admission = requests.subscriptionReady;
+    while (admission) {
+      const ready = await admission;
+      if (!isCurrent()) {
+        return undefined;
+      }
+      if (admission === requests.subscriptionReady) {
+        if (!ready) {
+          if (requests.subscriptionError) {
+            setChatHistoryLoad(state, {
+              phase: "failed",
+              sessionKey,
+              requestAgentId,
+              startup: method === "chat.startup",
+              message: requests.subscriptionError,
+              retryable: false,
+            });
+            state.requestUpdate?.();
+          }
+          return undefined;
+        }
+        break;
+      }
+      admission = requests.subscriptionReady;
+    }
+    // The snapshot covers activity emitted before the foreground observer was
+    // admitted; subsequent activity arrives through its acknowledged full stream.
+    if (!preserveComposerState) {
+      setChatError(state, null);
+    }
     let response = await request(deltaCursor);
     if (!isCurrent()) {
       recordTiming("stale", {

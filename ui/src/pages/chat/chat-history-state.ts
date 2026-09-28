@@ -54,6 +54,7 @@ type ChatHistoryPaneRequests = {
   chatErrorVersion: number;
   branchVersion: number;
   subscriptionGeneration: number;
+  subscriptionReady?: Promise<boolean>;
   subscriptionError?: string;
   pendingSubscriptionReleases: Set<SessionMessageSubscription>;
   historyLoad: ChatHistoryLoadState;

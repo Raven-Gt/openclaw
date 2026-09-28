@@ -9,7 +9,7 @@ import {
   scheduleFollowupDrain,
 } from "./queue.js";
 import { createQueueTestRun as createRun } from "./queue.test-helpers.js";
-import { prepareStaleFollowupDrainRetirement } from "./queue/drain.js";
+import { prepareStaleFollowupDrainRetirement } from "./queue/retirement.js";
 import { clearFollowupQueue, getExistingFollowupQueue } from "./queue/state.js";
 import type { FollowupRun, QueueDropPolicy, QueueSettings } from "./queue/types.js";
 

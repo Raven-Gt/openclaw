@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import { createAdmittedRunOperatorAuthority } from "../../../agents/admitted-run-context.js";
+import { defaultRuntime } from "../../../runtime.js";
 import { createQueueSettings, createQueueTestRun } from "../queue.test-helpers.js";
+import { scheduleFollowupDrain } from "./drain.js";
 import { enqueueFollowupRun, parkSteerCandidate, reserveQueuedSteerCandidate } from "./enqueue.js";
-import { admitFollowupRunLifecycle, retireFollowupRunCancellation } from "./lifecycle.js";
+import {
+  admitFollowupRunLifecycle,
+  completeFollowupRunLifecycle,
+  retireFollowupRunCancellation,
+} from "./lifecycle.js";
+import { prepareStaleFollowupDrainRetirement } from "./retirement.js";
 import { clearFollowupQueue, getExistingFollowupQueue } from "./state.js";
 import type { FollowupRun } from "./types.js";
 
@@ -223,6 +230,189 @@ describe("existing queued source steering reservation", () => {
       }
       expect(reserveQueuedSteerCandidate(key, selected)).toBeUndefined();
       expect(selected.steerPending).toBeUndefined();
+    },
+  );
+
+  it.each(["old", "new", "summarize"] as const)(
+    "defers %s overflow while an existing source waits for acceptance and its receipt",
+    async (dropPolicy) => {
+      const key = "promote-overflow-reservation-" + dropPolicy;
+      keys.add(key);
+      const settings = createQueueSettings({ mode: "followup", cap: 1, dropPolicy });
+      const selected = createQueueTestRun({ prompt: "selected", messageId: "selected" });
+      const disposition = vi.fn();
+      const settled = vi.fn();
+      selected.onQueueDisposition = disposition;
+      selected.turnAdoptionLifecycle = { onAdopted: vi.fn(), onSettled: settled };
+      enqueueFollowupRun(key, selected, settings, "message-id", undefined, false);
+      const reservation = reserveQueuedSteerCandidate(key, selected)!;
+      const waiting = createQueueTestRun({ prompt: "while waiting", messageId: "waiting" });
+      enqueueFollowupRun(key, waiting, settings, "message-id", undefined, false);
+      expect(getExistingFollowupQueue(key)?.items).toEqual([selected, waiting]);
+      await expect(reservation.admit()).resolves.toBe("steer");
+      reservation.accepted(true);
+      const accepted = createQueueTestRun({ prompt: "after acceptance", messageId: "accepted" });
+      enqueueFollowupRun(key, accepted, settings, "message-id", undefined, false);
+      expect(getExistingFollowupQueue(key)?.items).toEqual([selected, waiting, accepted]);
+      expect(disposition).not.toHaveBeenCalled();
+      expect(settled).not.toHaveBeenCalled();
+      expect(() => reservation.assertCurrent()).not.toThrow();
+      reservation.consume("consumed");
+      expect(disposition).not.toHaveBeenCalled();
+      expect(settled).toHaveBeenCalledOnce();
+      expect(getExistingFollowupQueue(key)?.items).not.toContain(selected);
+    },
+  );
+
+  it.each(["disposition", "settlement"] as const)(
+    "keeps accepted custody and overflow siblings settled when a %s callback throws",
+    (failure) => {
+      const key = "promote-overflow-callback-" + failure;
+      const { sources, selected } = queuedSources(key);
+      const dropped = sources[0]!;
+      const callback = vi.fn(() => {
+        throw new Error("overflow callback failed");
+      });
+      if (failure === "disposition") {
+        dropped.onQueueDisposition = callback;
+      } else {
+        dropped.turnAdoptionLifecycle!.onSettled = callback;
+      }
+      const report = vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
+      try {
+        const reservation = reserveQueuedSteerCandidate(key, selected)!;
+        const newest = createQueueTestRun({ prompt: "newest", messageId: "newest" });
+        enqueueFollowupRun(
+          key,
+          newest,
+          createQueueSettings({ cap: 1, dropPolicy: "old" }),
+          "message-id",
+          undefined,
+          false,
+        );
+        reservation.accepted(true);
+        expect(() => reservation.consume("consumed")).not.toThrow();
+        expect(selected.turnAdoptionLifecycle?.onSettled).toHaveBeenCalledOnce();
+        expect(dropped.turnAdoptionLifecycle?.onSettled).toHaveBeenCalledOnce();
+        expect(callback).toHaveBeenCalledOnce();
+        expect(report).toHaveBeenCalledOnce();
+        expect(getExistingFollowupQueue(key)?.items).toEqual([newest]);
+      } finally {
+        report.mockRestore();
+      }
+    },
+  );
+
+  it.each(["accepted", "rejected"] as const)(
+    "does not execute a later collect group while its steering is %s",
+    async (outcome) => {
+      vi.useFakeTimers();
+      const key = "promote-collect-snapshot-" + outcome;
+      keys.add(key);
+      const settings = createQueueSettings({ mode: "collect" });
+      const first = createQueueTestRun({ prompt: "first group", messageId: "first" });
+      const selected = createQueueTestRun({ prompt: "selected group", messageId: "selected" });
+      // Same route, distinct execution contexts: the drain snapshots two collect groups.
+      first.turnAdoptionLifecycle = { ownerKey: "first", onAdopted: vi.fn() };
+      selected.turnAdoptionLifecycle = { ownerKey: "selected", onAdopted: vi.fn() };
+      const entered = createDeferred();
+      const release = createDeferred();
+      const delivered: string[] = [];
+      const runFollowup = async (run: FollowupRun) => {
+        delivered.push(run.prompt);
+        if (delivered.length === 1) {
+          entered.resolve();
+          await release.promise;
+        }
+      };
+      for (const source of [first, selected]) {
+        enqueueFollowupRun(key, source, settings, "message-id", runFollowup, false);
+      }
+      scheduleFollowupDrain(key, runFollowup);
+      await entered.promise;
+      const reservation = reserveQueuedSteerCandidate(key, selected)!;
+      await expect(reservation.admit()).resolves.toBe("steer");
+      if (outcome === "accepted") {
+        reservation.accepted(true);
+      }
+      try {
+        release.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(delivered).toHaveLength(1);
+        if (outcome === "accepted") {
+          reservation.consume("consumed");
+        } else {
+          reservation.fallback();
+        }
+        await vi.advanceTimersByTimeAsync(0);
+        expect(delivered).toHaveLength(outcome === "accepted" ? 1 : 2);
+        if (outcome === "rejected") {
+          expect(delivered[1]).toContain("selected group");
+        }
+      } finally {
+        release.resolve();
+        clearFollowupQueue(key);
+        await vi.advanceTimersByTimeAsync(0);
+      }
+    },
+  );
+
+  it.each(["accepted", "rejected", "waiting"] as const)(
+    "settles %s steering custody transferred by stale-drain recovery",
+    async (outcome) => {
+      vi.useFakeTimers();
+      const key = "promote-recovery-transfer-" + outcome;
+      keys.add(key);
+      const settings = createQueueSettings({ mode: "followup" });
+      const active = createQueueTestRun({ prompt: "active", messageId: "active" });
+      const selected = createQueueTestRun({ prompt: "selected", messageId: "selected" });
+      const onSettled = vi.fn();
+      selected.turnAdoptionLifecycle = { onAdopted: vi.fn(), onSettled };
+      const entered = createDeferred();
+      const release = createDeferred();
+      const delivered: FollowupRun[] = [];
+      const runFollowup = async (run: FollowupRun) => {
+        await admitFollowupRunLifecycle(run);
+        delivered.push(run);
+        if (run === active) {
+          entered.resolve();
+          await release.promise;
+        }
+        completeFollowupRunLifecycle(run);
+      };
+      enqueueFollowupRun(key, active, settings, "message-id", runFollowup);
+      await entered.promise;
+      enqueueFollowupRun(key, selected, settings, "message-id", runFollowup, false);
+      const reservation = reserveQueuedSteerCandidate(key, selected)!;
+      const admission = reservation.admit();
+      const interruptedAdmission =
+        outcome === "waiting" ? expect(admission).resolves.toBe("fallback") : undefined;
+      if (!interruptedAdmission) {
+        await expect(admission).resolves.toBe("steer");
+      }
+      try {
+        const retire = prepareStaleFollowupDrainRetirement(key);
+        expect(retire).toBeTypeOf("function");
+        retire?.();
+        await interruptedAdmission;
+        // Recovery transfers this exact source, not a newly admitted source with the same id.
+        expect(getExistingFollowupQueue(key)?.items).toEqual([selected]);
+        expect(() => reservation.assertCurrent()).toThrow("no longer current");
+        if (outcome === "accepted") {
+          reservation.accepted(true);
+          reservation.consume("consumed");
+        } else {
+          reservation.fallback();
+        }
+        await vi.advanceTimersByTimeAsync(0);
+        expect(delivered).toEqual(outcome === "accepted" ? [active] : [active, selected]);
+        expect(getExistingFollowupQueue(key)).toBeUndefined();
+        expect(onSettled).toHaveBeenCalledOnce();
+      } finally {
+        release.resolve();
+        clearFollowupQueue(key);
+        await vi.advanceTimersByTimeAsync(0);
+      }
     },
   );
 

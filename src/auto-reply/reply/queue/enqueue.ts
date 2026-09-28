@@ -43,6 +43,7 @@ import {
   resolveFollowupAbortSignal,
   type EnqueueFollowupRunOptions,
   type FollowupRun,
+  type FollowupQueueDisposition,
   type QueueDedupeMode,
   type QueueSettings,
 } from "./types.js";
@@ -186,8 +187,7 @@ export function enqueueFollowupRun(
   // publish an external queued identity for work that will never be admitted.
   const pendingCount = countPendingQueueItems(queue.items, queue.inFlight);
   if (queue.dropPolicy === "new" && queue.cap > 0 && pendingCount >= queue.cap) {
-    run.onQueueDisposition?.("queue-cap-new");
-    completeFollowupRunLifecycle(run);
+    completeOverflowedFollowupRun(run, "queue-cap-new");
     return false;
   }
   if (!markFollowupRunEnqueued(run)) {
@@ -206,6 +206,23 @@ export function enqueueFollowupRun(
     front: options.position === "front",
   });
   return true;
+}
+
+function completeOverflowedFollowupRun(
+  run: FollowupRun,
+  disposition: FollowupQueueDisposition,
+): void {
+  try {
+    try {
+      run.onQueueDisposition?.(disposition);
+    } finally {
+      completeFollowupRunLifecycle(run);
+    }
+  } catch (error) {
+    // Overflow already detached this source. A notification failure must not
+    // strand its authority, the consumed steer, or the remaining FIFO siblings.
+    defaultRuntime.error?.(`followup queue overflow settlement failed: ${String(error)}`);
+  }
 }
 
 function applyFollowupQueueOverflow(
@@ -233,8 +250,7 @@ function applyFollowupQueueOverflow(
         return;
       }
       for (const item of dropped) {
-        item.onQueueDisposition?.("queue-cap-old");
-        completeFollowupRunLifecycle(item);
+        completeOverflowedFollowupRun(item, "queue-cap-old");
       }
     },
     isProtected: (item) => item.protectFromQueueOverflow === true,
@@ -273,8 +289,7 @@ function applyFollowupQueueOverflow(
     }
   }
   if (!shouldEnqueue) {
-    run.onQueueDisposition?.(queue.dropPolicy === "new" ? "queue-cap-new" : "queue-cap");
-    completeFollowupRunLifecycle(run);
+    completeOverflowedFollowupRun(run, queue.dropPolicy === "new" ? "queue-cap-new" : "queue-cap");
     return false;
   }
   return true;
@@ -425,10 +440,11 @@ export function reserveQueuedSteerCandidate(
 function createParkedSteerReservation(key: string, run: FollowupRun): ParkedSteerReservation {
   const queue = getExistingFollowupQueue(key);
   const pending = run.steerPending;
-  const ownsReservation = () =>
-    getExistingFollowupQueue(key) === queue &&
-    isParkedFollowupRunOwned(key, run) &&
-    run.steerPending === pending;
+  // Recovery may transfer this exact source and reservation into a replacement
+  // drain. It revokes injection, but the original attempt must still settle custody.
+  const ownsSourceReservation = () =>
+    isParkedFollowupRunOwned(key, run) && run.steerPending === pending;
+  const ownsReservation = () => getExistingFollowupQueue(key) === queue && ownsSourceReservation();
   return {
     assertCurrent() {
       if (!ownsReservation() || isFollowupRunAborted(run)) {
@@ -441,15 +457,16 @@ function createParkedSteerReservation(key: string, run: FollowupRun): ParkedStee
         pending?.predecessor ?? Promise.resolve(true),
         resolveFollowupAbortSignal(run),
       ).catch((error: unknown) => {
-        if (isFollowupRunAborted(run)) {
+        if (isFollowupRunAborted(run) || !ownsReservation()) {
           return false;
         }
         throw error;
       });
-      if (isFollowupRunAborted(run) || !ownsReservation()) {
+      if (isFollowupRunAborted(run) || !ownsSourceReservation()) {
         return "cancelled";
       }
-      if (!pending || run.steerPending !== pending) {
+      if (!ownsReservation() || !pending) {
+        // A recovered source stays queued; only its old injection authority ended.
         return "fallback";
       }
       // The injection owner now decides whether this input can safely be replayed.
@@ -457,17 +474,17 @@ function createParkedSteerReservation(key: string, run: FollowupRun): ParkedStee
       return "steer";
     },
     accepted: (accepted) => {
-      if (ownsReservation()) {
+      if (ownsSourceReservation()) {
         settleParkedSteerAcceptance(key, run, accepted);
       }
     },
     fallback: () => {
-      if (ownsReservation()) {
+      if (ownsSourceReservation()) {
         settleParkedSteerAcceptance(key, run, false);
       }
     },
     consume: (disposition) => {
-      if (ownsReservation()) {
+      if (ownsSourceReservation()) {
         consumeParkedFollowupRun(key, run, disposition);
       }
     },

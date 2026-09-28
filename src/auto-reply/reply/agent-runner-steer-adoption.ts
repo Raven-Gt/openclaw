@@ -244,6 +244,12 @@ async function runParkedReplySteer(
           followupRun.run.inputProvenance.kind === "external_user"),
       terminalReplyExpectation: followupRun.run.terminalReplyExpectation,
       toolAuthorityFingerprint: params.toolAuthorityFingerprint,
+      personalToolParticipant: {
+        operatorAuthority: followupRun.operatorAuthority,
+        senderId: followupRun.run.senderId,
+        senderName: followupRun.run.senderName,
+        gatewayUiCommandTarget: followupRun.run.gatewayUiCommandTarget,
+      },
       ...(params.pendingInputAuthorityFingerprint
         ? { pendingInputAuthorityFingerprint: params.pendingInputAuthorityFingerprint }
         : {}),
@@ -458,8 +464,11 @@ export function createQueuedReplySteer(params: QueuedReplySteerParams): QueuedTu
         })
         .finally(() => {
           assertActionCurrent = undefined;
-          releaseSteering?.();
-          inFlight = undefined;
+          try {
+            releaseSteering?.();
+          } finally {
+            inFlight = undefined;
+          }
         })
         .catch((error: unknown) => {
           if (!acknowledged) {
@@ -475,9 +484,15 @@ export function createQueuedReplySteer(params: QueuedReplySteerParams): QueuedTu
         });
       return acknowledgment.promise;
     } catch (error) {
-      parked.fallback();
-      releaseSteering?.();
-      inFlight = undefined;
+      try {
+        parked.fallback();
+      } finally {
+        try {
+          releaseSteering?.();
+        } finally {
+          inFlight = undefined;
+        }
+      }
       throw error;
     }
   };
