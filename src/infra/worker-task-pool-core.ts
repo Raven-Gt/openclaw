@@ -33,7 +33,10 @@ import {
   joinOwnedWorkerTasks,
   type OwnedWorkerTaskSettlement,
 } from "./worker-task-pool-owned.js";
-import { closeWorkerPoolResources } from "./worker-task-pool-resources.js";
+import {
+  closeWorkerPoolResources,
+  prepareWorkerTaskResources,
+} from "./worker-task-pool-resources.js";
 import { createWorkerTaskPoolRetirement } from "./worker-task-pool-retirement.js";
 import type {
   OwnedWorkerTask,
@@ -49,6 +52,7 @@ import type {
 const runInWorkerPoolContext = AsyncLocalStorage.snapshot();
 
 type WorkerReply<Output> = { status: "ok"; value: Output } | { status: "failed"; error: string };
+type WorkerPreparation = Awaited<ReturnType<typeof prepareWorkerTaskResources>>;
 export class WorkerTaskError extends Error {
   constructor(
     message: string,
@@ -361,7 +365,7 @@ export class WorkerTaskPoolCore<Input, Output> {
   }
 
   // Worker listeners outlive tasks; their creation scope must not retain an async task frame.
-  private createWorker(slot: Slot<Input, Output>): Worker {
+  private createWorker(slot: Slot<Input, Output>, preparation?: WorkerPreparation): Worker {
     // A zero idle timeout delegates retirement (and retained custody) to the caller.
     if ((this.options.idleTimeoutMs ?? 60_000) > 0) {
       const pressure = channel("openclaw.memory.critical");
@@ -369,26 +373,13 @@ export class WorkerTaskPoolCore<Input, Output> {
       pressure.subscribe(this.retireIdleOnPressure);
     }
     const worker = runInWorkerPoolContext(() => {
-      const prepared = this.options.prepareWorker?.();
-      slot.releaseResources = prepared?.releaseResources;
-      const temporaryDirectory = prepared?.temporaryDirectory;
-      if (temporaryDirectory) {
-        const releaseResources = slot.releaseResources;
-        slot.releaseResources = async () => {
-          try {
-            const { removeTemporaryArtifacts } = await import("./temp-artifact-cleanup.js");
-            await removeTemporaryArtifacts(temporaryDirectory, "Worker task");
-          } finally {
-            await releaseResources?.();
-          }
-        };
-      }
+      const preparedOptions = preparation?.(slot);
       const workerUrl = this.options.workerUrl;
       const workerOptions = {
         // Preserve native require(ESM) and its transitive import-only exports.
         execArgv: resolveRuntimeWorkerThreadExecArgv(workerUrl),
         ...this.options.workerOptions,
-        ...prepared?.options,
+        ...preparedOptions,
       };
       // Preparation and option getters can synchronously close the task.
       if (slot.retiring) {
@@ -431,6 +422,7 @@ export class WorkerTaskPoolCore<Input, Output> {
     const taskInput = task.input!;
     delete task.input;
     let input: Input;
+    let preparation: WorkerPreparation | undefined;
     task.preparation = createDeferredCore();
     try {
       try {
@@ -438,6 +430,12 @@ export class WorkerTaskPoolCore<Input, Output> {
           typeof taskInput === "function"
             ? await (taskInput as () => Input | Promise<Input>)() // SAFETY: Callable inputs are factories.
             : taskInput;
+        const prepare = this.options.prepareWorker;
+        if (!task.done && !slot.worker && prepare) {
+          preparation = await runInWorkerPoolContext(() =>
+            prepareWorkerTaskResources(prepare.bind(this.options)),
+          );
+        }
       } finally {
         task.preparation.resolve();
         task.preparation = undefined;
@@ -453,7 +451,7 @@ export class WorkerTaskPoolCore<Input, Output> {
     }
     task.preparedAt = performance.now();
     try {
-      const worker = slot.worker ?? this.createWorker(slot);
+      const worker = slot.worker ?? this.createWorker(slot, preparation);
       const transferList = task.options.transferList?.(input);
       if (!task.done) {
         const transferStartedAt = performance.now();

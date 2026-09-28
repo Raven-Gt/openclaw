@@ -1,7 +1,35 @@
 import { MessageChannel, type Worker } from "node:worker_threads";
 import { toErrorObject } from "@openclaw/normalization-core/error-coercion";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import type { Slot } from "./worker-task-pool.types.js";
+import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
+import type { Slot, WorkerTaskPoolOptions } from "./worker-task-pool.types.js";
+
+const loadTemporaryArtifactCleanup = createLazyRuntimeModule(
+  () => import("./temp-artifact-cleanup.js"),
+);
+
+/** Load retirement code before the synchronous factory can create owned resources. */
+export async function prepareWorkerTaskResources(
+  prepare: NonNullable<WorkerTaskPoolOptions<unknown>["prepareWorker"]>,
+) {
+  const { removeTemporaryArtifacts } = await loadTemporaryArtifactCleanup();
+  return (slot: Pick<Slot<unknown, unknown>, "releaseResources">) => {
+    const prepared = prepare();
+    slot.releaseResources = prepared.releaseResources;
+    const temporaryDirectory = prepared.temporaryDirectory;
+    if (temporaryDirectory) {
+      const releaseResources = slot.releaseResources;
+      slot.releaseResources = async () => {
+        try {
+          await removeTemporaryArtifacts(temporaryDirectory, "Worker task");
+        } finally {
+          await releaseResources?.();
+        }
+      };
+    }
+    return prepared.options;
+  };
+}
 
 type WorkerResourceClosures = {
   pending: number;

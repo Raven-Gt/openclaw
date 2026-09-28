@@ -14,6 +14,84 @@ vi.mock("./temp-artifact-cleanup.js", () => ({ removeTemporaryArtifacts: cleanup
 const workerUrl = new URL("./worker-task-pool.test-support.ts", import.meta.url);
 
 describe("worker task artifact lifetime", () => {
+  it.each(["abort", "close"])(
+    "retains input while cleanup loading finishes after %s without creating worker resources",
+    async (ending) => {
+      const context = new AsyncLocalStorage<string>();
+      let loadingContext: string | undefined;
+      const loading = createDeferredCore();
+      const loaded = createDeferredCore();
+      const createWorker = vi.fn(() => {
+        throw new Error("canceled preparation must not create a worker");
+      });
+      vi.doMock("node:worker_threads", async (importOriginal) => ({
+        ...(await importOriginal<typeof import("node:worker_threads")>()),
+        Worker: createWorker,
+      }));
+      vi.doMock("./temp-artifact-cleanup.js", async () => {
+        loadingContext = context.getStore();
+        loading.resolve();
+        await loaded.promise;
+        return { removeTemporaryArtifacts: cleanup };
+      });
+      vi.resetModules();
+      cleanup.mockReset();
+      const { WorkerTaskPool: MockedWorkerTaskPool } = await import("./worker-task-pool.js");
+      const prepareWorker = vi.fn(() => ({
+        options: {},
+        temporaryDirectory: "/fixture/canceled-worker-scratch",
+      }));
+      const pool = new MockedWorkerTaskPool<string, string>({
+        workerUrl: new URL("file:///fixture/worker.js"),
+        maxWorkers: 1,
+        prepareWorker,
+      });
+      const controller = new AbortController();
+      const reason = new Error("canceled while loading cleanup");
+      const consumed = vi.fn(() => expect(context.getStore()).toBe("request"));
+      const task = context.run("request", () =>
+        pool.run("retained input", {
+          signal: controller.signal,
+          onInputConsumed: consumed,
+        }),
+      );
+      const rejected = expect(task).rejects.toBe(reason);
+      let closing: Promise<void> | undefined;
+      try {
+        await loading.promise;
+        expect(loadingContext).toBeUndefined();
+        if (ending === "abort") {
+          controller.abort(reason);
+        }
+        let closed = false;
+        closing = pool.close(reason).then(() => {
+          closed = true;
+        });
+        await rejected;
+        expect(closed).toBe(false);
+        expect(consumed).not.toHaveBeenCalled();
+        expect(pool.getSnapshot().pendingTasks).toBe(1);
+        expect(prepareWorker).not.toHaveBeenCalled();
+        expect(createWorker).not.toHaveBeenCalled();
+
+        loaded.resolve();
+        await closing;
+        expect(consumed).toHaveBeenCalledOnce();
+        expect(pool.getSnapshot().pendingTasks).toBe(0);
+        expect(prepareWorker).not.toHaveBeenCalled();
+        expect(createWorker).not.toHaveBeenCalled();
+        expect(cleanup).not.toHaveBeenCalled();
+      } finally {
+        loaded.resolve();
+        await Promise.allSettled([task, closing, pool.close(reason)]);
+        cleanup.mockReset();
+        vi.doUnmock("node:worker_threads");
+        vi.doMock("./temp-artifact-cleanup.js", () => ({ removeTemporaryArtifacts: cleanup }));
+        vi.resetModules();
+      }
+    },
+  );
+
   it.each([
     { phase: "idle", observer: "returns" },
     { phase: "unconsumed-result", observer: "throws" },
@@ -53,6 +131,13 @@ describe("worker task artifact lifetime", () => {
         ...(await importOriginal<typeof import("node:worker_threads")>()),
         Worker: MockWorker,
       }));
+      let retiring = false;
+      vi.doMock("./temp-artifact-cleanup.js", () => {
+        if (retiring) {
+          throw new Error("cleanup module loaded during retirement");
+        }
+        return { removeTemporaryArtifacts: cleanup };
+      });
       vi.resetModules();
       cleanup.mockReset();
       let artifactsCleaned = false;
@@ -106,6 +191,7 @@ describe("worker task artifact lifetime", () => {
           },
         );
         await delivered.promise;
+        retiring = true;
         if (phase === "idle") {
           await expect(task).resolves.toBe(42);
           expect(await Promise.allSettled([pool.close(), pool.close()])).toEqual([
@@ -153,6 +239,7 @@ describe("worker task artifact lifetime", () => {
         await pool.close().catch(() => undefined);
         cleanup.mockReset();
         vi.doUnmock("node:worker_threads");
+        vi.doMock("./temp-artifact-cleanup.js", () => ({ removeTemporaryArtifacts: cleanup }));
         vi.resetModules();
       }
     },
