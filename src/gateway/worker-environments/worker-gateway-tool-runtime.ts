@@ -36,9 +36,8 @@ export function createWorkerGatewayToolRuntime(params: {
     signal.throwIfAborted();
     params.assertCurrent();
   };
-  let prepared:
-    | Promise<{ surface: WorkerToolSurface; tools: Map<string, AnyAgentTool> }>
-    | undefined;
+  let prepared: Promise<WorkerToolSurface> | undefined;
+  let issuedTools: Map<string, AnyAgentTool> | undefined;
   const prepare = (identity: WorkerConnectionIdentity) => {
     assertCurrent();
     return (prepared ??= params.prepare(identity).then(({ tools, policy }) => {
@@ -68,7 +67,8 @@ export function createWorkerGatewayToolRuntime(params: {
       if (!Value.Check(WorkerToolSurfaceSchema, surface)) {
         throw new Error("Worker tool surface is invalid");
       }
-      return { surface, tools: handles };
+      issuedTools = handles;
+      return surface;
     }));
   };
   const calls = new Map<
@@ -84,14 +84,14 @@ export function createWorkerGatewayToolRuntime(params: {
   let sequential: Promise<unknown> = Promise.resolve();
   return {
     async getSurface(identity) {
-      const { surface } = await prepare(identity);
+      const surface = await prepare(identity);
       assertCurrent();
       return surface;
     },
-    async invoke(identity, request, sink, connectionSignal) {
-      const { tools } = await prepare(identity);
+    async invoke(_identity, request, sink, connectionSignal) {
+      // Admission issues handles; cancellation must see the call before its first yield.
       assertCurrent();
-      const tool = tools.get(request.toolId);
+      const tool = issuedTools?.get(request.toolId);
       const location = tool && getAgentToolExecutionLocation(tool);
       if (request.generation !== generation || !tool || location?.kind !== "gateway") {
         throw new Error("Worker tool handle is unavailable");

@@ -122,6 +122,23 @@ describe("worker Gateway tool RPC authority", () => {
     expect(h.execute).toHaveBeenCalledOnce();
   });
 
+  it("cancels an issued invocation before its first yield without starting the tool", async () => {
+    const h = await toolHarness("cancel-before-yield");
+    const [invoked, cancelled] = await Promise.all([
+      h.invoke(),
+      h.workerService.cancelGatewayTool(h.identity, {
+        generation: h.request.generation,
+        toolCallId: h.request.toolCallId,
+      }),
+    ]);
+    expect(cancelled).toEqual({ ok: true, result: { cancelled: true } });
+    expect(invoked).toMatchObject({
+      ok: true,
+      result: { details: { status: "error", error: "Worker tool call cancelled" } },
+    });
+    expect(h.execute).not.toHaveBeenCalled();
+  });
+
   it("returns actionable tool failures to an authorized worker", async () => {
     const h = await toolHarness("tool-error");
     h.execute.mockRejectedValueOnce(new Error("portal port required"));
