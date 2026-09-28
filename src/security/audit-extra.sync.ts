@@ -160,12 +160,11 @@ const WEAK_TIER_MODEL_PATTERNS: Array<{ id: string; re: RegExp; label: string }>
   { id: "anthropic.haiku", re: /\bhaiku\b/i, label: "Haiku tier (smaller model)" },
 ];
 
-function isGptModel(id: string): boolean {
-  return /\bgpt-/i.test(id);
-}
-
-function isGpt5OrHigher(id: string): boolean {
-  return /\bgpt-5(?:\b|[.-])/i.test(id);
+function isGptBelow5(id: string): boolean {
+  const model = id.slice(id.lastIndexOf("/") + 1);
+  // Infer age only from a numeric GPT version (including GPT-4o), not an unknown name.
+  const version = /^gpt-(\d+)(?:\.\d+|o)?(?:$|[-:@])/i.exec(model);
+  return version !== null && Number(version[1]) < 5;
 }
 
 function isClaudeModel(id: string): boolean {
@@ -1051,7 +1050,7 @@ export function collectModelHygieneFindings(cfg: OpenClawConfig): SecurityAuditF
         break;
       }
     }
-    if (isGptModel(entry.id) && !isGpt5OrHigher(entry.id)) {
+    if (isGptBelow5(entry.id)) {
       addWeakMatch(entry.id, entry.source, "Below GPT-5 family");
     }
     if (isClaudeModel(entry.id) && !isClaude45OrHigher(entry.id)) {
