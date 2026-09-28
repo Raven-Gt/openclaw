@@ -141,7 +141,7 @@ export async function ensureLoaded(
   const quarantinedConfigJobs: QuarantinedCronConfigJob[] = [...loaded.invalidConfigRows];
   for (const [index, raw] of loadedJobs.entries()) {
     if (!hasCanonicalCronDeliveryMode(raw.delivery)) {
-      const warningKey = `delivery:${String(raw.id)}`;
+      const warningKey = `delivery:${raw.id}`;
       if (!state.warnedInvalidPersistedJobKeys.has(warningKey)) {
         state.warnedInvalidPersistedJobKeys.add(warningKey);
         state.deps.log.warn(

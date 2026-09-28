@@ -11,6 +11,7 @@ import { cronStoreKey } from "../cron/store/key.js";
 import { loadCronRows } from "../cron/store/row-codec.js";
 import { runInitialConfigWriteHealth } from "../flows/doctor-health-contribution-runners.config.js";
 import * as sqliteSnapshot from "../infra/sqlite-snapshot.js";
+import { writeConfigMachineState } from "../state/config-machine-state-write.js";
 import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import {
@@ -410,100 +411,166 @@ it.each(["ops", "research"])(
   },
 );
 
-it.each(["health write", "preflight custom store", "health write with unsupported delivery"])(
-  "pins the original owner before the %s and preserves recovery",
-  async (entry) => {
-    await withOpenClawTestState(
-      { label: "cron-owner-doctor", env: { OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" } },
-      async (state) => {
-        const customStore = entry === "preflight custom store";
-        const storePath = state.statePath(customStore ? "custom-cron" : "cron", "jobs.json");
-        await state.writeConfig(sourceConfig(customStore ? storePath : undefined));
-        seedJobs(storePath);
-        const unsupportedDelivery = entry === "health write with unsupported delivery";
-        if (unsupportedDelivery) {
-          openOpenClawStateDatabase()
-            .db.prepare(
-              "UPDATE cron_jobs SET job_json = json_set(job_json, '$.delivery.mode', 'not-a-route') WHERE store_key = ? AND job_id = 'historical'",
-            )
-            .run(cronStoreKey(storePath));
-        }
-        const original = rows(storePath);
-        const originalGrant = openOpenClawStateDatabase()
-          .db.prepare(
-            "SELECT grant_definition_generation FROM cron_jobs WHERE store_key = ? AND job_id = 'historical'",
-          )
-          .get(cronStoreKey(storePath));
-        if (customStore) {
-          await state.writeJson("custom-cron/jobs.json", {
-            version: 1,
-            jobs: [makeCronJob({ id: "json-import", enabled: false })],
-          });
-        }
-        const ctx = await repair(state);
-        expect(ctx.configWriteRefusal).toBeUndefined();
-        const saved = await readConfigFileSnapshot();
-        expect(saved.config.agents?.ownership).toBe("explicit");
-        expect(saved.config.agents?.defaults?.systemAgent?.agentId).toBe("research");
-        expect(saved.sourceConfig.agents?.entries?.ops).not.toHaveProperty("default");
-        const repaired = rows(storePath);
-        const historical = repaired.find((row) => row.job_id === "historical");
-        const originalHistorical = original.find((row) => row.job_id === "historical");
-        expect(historical).toMatchObject({
-          agent_id: "ops",
-          state_json: originalHistorical?.state_json,
-          sort_order: originalHistorical?.sort_order,
+it.each([
+  "health write",
+  "preflight custom store",
+  "health write with unsupported delivery",
+  "legacy list with a machine-state custom store",
+])("pins the original owner before the %s and preserves recovery", async (entry) => {
+  await withOpenClawTestState(
+    { label: "cron-owner-doctor", env: { OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" } },
+    async (state) => {
+      const machineStore = entry === "legacy list with a machine-state custom store";
+      const customStore = entry === "preflight custom store" || machineStore;
+      const storePath = state.statePath(customStore ? "custom-cron" : "cron", "jobs.json");
+      const config = sourceConfig(customStore && !machineStore ? storePath : undefined);
+      await state.writeConfig(
+        machineStore
+          ? {
+              ...config,
+              agents: {
+                defaults: config.agents.defaults,
+                list: [{ id: "ops", default: true }, { id: "research" }],
+              },
+            }
+          : config,
+      );
+      if (machineStore) {
+        writeConfigMachineState("cron.store", storePath);
+      }
+      seedJobs(storePath);
+      const otherStorePath = state.statePath("other-cron", "jobs.json");
+      if (machineStore) {
+        saveCronJobsStoreWithRevisionNative(otherStorePath, {
+          version: 1,
+          jobs: [makeCronJob({ id: "other-ownerless", enabled: false })],
         });
-        expect(JSON.parse(historical?.job_json ?? "null")).toMatchObject({
-          agentId: "ops",
-          authoredNote: "keep me",
-          ...(unsupportedDelivery ? { delivery: { mode: "not-a-route" } } : {}),
-        });
-        const repairedGrant = openOpenClawStateDatabase()
+      }
+      const readOtherRows = () =>
+        openOpenClawStateDatabase()
+          .db.prepare("SELECT * FROM cron_jobs WHERE store_key = ? ORDER BY sort_order, job_id")
+          .all(cronStoreKey(otherStorePath));
+      const otherRowsBefore = machineStore ? readOtherRows() : undefined;
+      const unsupportedDelivery = entry === "health write with unsupported delivery";
+      if (unsupportedDelivery) {
+        openOpenClawStateDatabase()
           .db.prepare(
-            "SELECT grant_definition_generation, grant_definition_revision, grant_definition_updated_at FROM cron_jobs WHERE store_key = ? AND job_id = 'historical'",
+            "UPDATE cron_jobs SET job_json = json_set(job_json, '$.delivery.mode', 'not-a-route') WHERE store_key = ? AND job_id = 'historical'",
           )
-          .get(cronStoreKey(storePath));
-        expect(repairedGrant?.grant_definition_generation).toBeGreaterThan(
-          Number(originalGrant?.grant_definition_generation),
+          .run(cronStoreKey(storePath));
+      }
+      const original = rows(storePath);
+      const originalGrant = openOpenClawStateDatabase()
+        .db.prepare(
+          "SELECT grant_definition_generation FROM cron_jobs WHERE store_key = ? AND job_id = 'historical'",
+        )
+        .get(cronStoreKey(storePath));
+      if (customStore) {
+        await state.writeJson("custom-cron/jobs.json", {
+          version: 1,
+          jobs: [
+            makeCronJob({ id: "json-import", enabled: false }),
+            ...(machineStore
+              ? [
+                  makeCronJob({ id: "json-explicit", agentId: "research", enabled: false }),
+                  makeCronJob({
+                    id: "json-session",
+                    sessionKey: "agent:research:main",
+                    enabled: false,
+                  }),
+                ]
+              : []),
+          ],
+        });
+      }
+      const legacySource = machineStore ? await fs.readFile(storePath, "utf8") : undefined;
+      const ctx = await repair(state);
+      expect(ctx.configWriteRefusal).toBeUndefined();
+      const saved = await readConfigFileSnapshot();
+      expect(saved.config.agents?.ownership).toBe("explicit");
+      expect(saved.config.agents?.defaults?.systemAgent?.agentId).toBe("research");
+      expect(saved.sourceConfig.agents?.entries?.ops).not.toHaveProperty("default");
+      const repaired = rows(storePath);
+      const historical = repaired.find((row) => row.job_id === "historical");
+      const originalHistorical = original.find((row) => row.job_id === "historical");
+      expect(historical).toMatchObject({
+        agent_id: "ops",
+        state_json: originalHistorical?.state_json,
+        sort_order: originalHistorical?.sort_order,
+      });
+      expect(JSON.parse(historical?.job_json ?? "null")).toMatchObject({
+        agentId: "ops",
+        authoredNote: "keep me",
+        ...(unsupportedDelivery ? { delivery: { mode: "not-a-route" } } : {}),
+      });
+      const repairedGrant = openOpenClawStateDatabase()
+        .db.prepare(
+          "SELECT grant_definition_generation, grant_definition_revision, grant_definition_updated_at FROM cron_jobs WHERE store_key = ? AND job_id = 'historical'",
+        )
+        .get(cronStoreKey(storePath));
+      expect(repairedGrant?.grant_definition_generation).toBeGreaterThan(
+        Number(originalGrant?.grant_definition_generation),
+      );
+      expect(repairedGrant?.grant_definition_revision).toBeNull();
+      expect(repairedGrant?.grant_definition_updated_at).toBeNull();
+      for (const id of ["explicit", "session", "sql-owner"]) {
+        const row = repaired.find((candidate) => candidate.job_id === id);
+        const before = original.find((candidate) => candidate.job_id === id);
+        if (!customStore && id !== "sql-owner") {
+          expect(row).toEqual(before);
+        } else {
+          expect(row?.state_json).toBe(before?.state_json);
+          expect(row?.agent_id).toBe(before?.agent_id);
+        }
+      }
+      expect(
+        JSON.parse(repaired.find((row) => row.job_id === "sql-owner")?.job_json ?? "null"),
+      ).toMatchObject({ agentId: "research" });
+      if (customStore) {
+        expect(repaired.find((row) => row.job_id === "json-import")?.agent_id).toBe("ops");
+      }
+      if (machineStore) {
+        expect(saved.sourceConfig.agents).not.toHaveProperty("list");
+        expect(readOtherRows()).toEqual(otherRowsBefore);
+        const importedExplicit = expectDefined(
+          repaired.find((row) => row.job_id === "json-explicit"),
+          "explicit legacy import",
         );
-        expect(repairedGrant?.grant_definition_revision).toBeNull();
-        expect(repairedGrant?.grant_definition_updated_at).toBeNull();
-        for (const id of ["explicit", "session", "sql-owner"]) {
-          const row = repaired.find((candidate) => candidate.job_id === id);
-          const before = original.find((candidate) => candidate.job_id === id);
-          if (!customStore && id !== "sql-owner") {
-            expect(row).toEqual(before);
-          } else {
-            expect(row?.state_json).toBe(before?.state_json);
-            expect(row?.agent_id).toBe(before?.agent_id);
-          }
-        }
+        expect(importedExplicit.agent_id).toBe("research");
+        expect(JSON.parse(importedExplicit.job_json)).toMatchObject({ agentId: "research" });
+        const importedSession = expectDefined(
+          repaired.find((row) => row.job_id === "json-session"),
+          "session-qualified legacy import",
+        );
+        expect(JSON.parse(importedSession.job_json)).toMatchObject({
+          sessionKey: "agent:research:main",
+        });
+        expect(JSON.parse(importedSession.job_json)).not.toHaveProperty("agentId");
+        await expect(fs.stat(storePath)).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(fs.readFile(`${storePath}.migrated`, "utf8")).resolves.toBe(legacySource);
+      }
+      const savedBackups = await backups();
+      expect(savedBackups).toHaveLength(1);
+      const backup = new DatabaseSync(savedBackups[0]!, { readOnly: true });
+      try {
         expect(
-          JSON.parse(repaired.find((row) => row.job_id === "sql-owner")?.job_json ?? "null"),
-        ).toMatchObject({ agentId: "research" });
-        if (customStore) {
-          expect(repaired.find((row) => row.job_id === "json-import")?.agent_id).toBe("ops");
-        }
-        const savedBackups = await backups();
-        expect(savedBackups).toHaveLength(1);
-        const backup = new DatabaseSync(savedBackups[0]!, { readOnly: true });
-        try {
-          expect(
-            backup.prepare("SELECT agent_id FROM cron_jobs WHERE job_id = 'historical'").get()
-              ?.agent_id,
-          ).toBeNull();
-        } finally {
-          backup.close();
-        }
-        const repairedDefinitions = rows(storePath);
-        await repair(state);
-        expect(rows(storePath)).toEqual(repairedDefinitions);
-        expect(await backups()).toEqual(savedBackups);
-      },
-    );
-  },
-);
+          backup.prepare("SELECT agent_id FROM cron_jobs WHERE job_id = 'historical'").get()
+            ?.agent_id,
+        ).toBeNull();
+      } finally {
+        backup.close();
+      }
+      const repairedDefinitions = rows(storePath);
+      await repair(state);
+      expect(rows(storePath)).toEqual(repairedDefinitions);
+      expect(await backups()).toEqual(savedBackups);
+      if (machineStore) {
+        expect(readOtherRows()).toEqual(otherRowsBefore);
+        await expect(fs.readFile(`${storePath}.migrated`, "utf8")).resolves.toBe(legacySource);
+      }
+    },
+  );
+});
 
 it("retains the marker and a verified backup when SQL ownership changes after inspection", async () => {
   await withOpenClawTestState(

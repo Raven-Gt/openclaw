@@ -485,10 +485,11 @@ describe("applyJobResult dynamic cadence", () => {
     expect(job.state.pacedNextRunAtMs).toBeUndefined();
   });
 
-  it("clears a paced marker when maintenance normalizes the schedule", () => {
+  it("preserves a pending paced slot without repairing a missing every anchor", () => {
     const state = makeState();
     const pacedNextRunAtMs = ENDED_AT + 30 * 60_000;
     const job = makeCronJob({
+      agentId: "main",
       createdAtMs: STARTED_AT,
       updatedAtMs: STARTED_AT,
       pacing: { min: "15m" },
@@ -499,7 +500,8 @@ describe("applyJobResult dynamic cadence", () => {
 
     recomputeNextRunsForMaintenance(state, { deferredNotifications: [], nowMs: ENDED_AT + 1_000 });
 
-    expect(job.schedule).toEqual({ kind: "every", everyMs: 60 * 60_000, anchorMs: STARTED_AT });
-    expect(job.state.pacedNextRunAtMs).toBeUndefined();
+    expect(job.schedule).toEqual({ kind: "every", everyMs: 60 * 60_000 });
+    expect(job.state.nextRunAtMs).toBe(pacedNextRunAtMs);
+    expect(job.state.pacedNextRunAtMs).toBe(pacedNextRunAtMs);
   });
 });

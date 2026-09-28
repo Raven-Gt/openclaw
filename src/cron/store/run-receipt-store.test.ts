@@ -119,9 +119,9 @@ it("rechecks unrepaired delivery in the current row before activating a prepared
     .get(cronStoreKey(storePath), job.id);
   try {
     expect(() =>
-      runOpenClawStateWriteTransaction(({ db }) =>
+      runOpenClawStateWriteTransaction(({ db: transactionDb }) =>
         activateCronRunReceiptInDatabase({
-          database: db,
+          database: transactionDb,
           handle,
           startedAtMs: 2,
           resolveAgentId: (current) => current.agentId!,
@@ -129,9 +129,9 @@ it("rechecks unrepaired delivery in the current row before activating a prepared
       ),
     ).toThrow(CronRunReceiptRevisionError);
     expect(() =>
-      runOpenClawStateWriteTransaction(({ db }) =>
+      runOpenClawStateWriteTransaction(({ db: transactionDb }) =>
         assertCronRunReceiptCurrentInDatabase({
-          database: db,
+          database: transactionDb,
           handle,
           resolveAgentId: (current) => current.agentId!,
         }),

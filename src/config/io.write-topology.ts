@@ -43,8 +43,8 @@ function cloneConfigPathParents(
   }
 }
 
-// Validation and commits share ownership preparation. Cron migration, runtime refresh,
-// and persistence remain in the committing writer.
+// Validation and commits share ownership preparation. The committing writer owns
+// cron safety rechecks, runtime refresh, and persistence; Doctor owns cron repair.
 export function prepareConfigWriteTopology(
   params: ReadConfigFileSnapshotWithPluginMetadataResult & {
     nextConfig: OpenClawConfig;
