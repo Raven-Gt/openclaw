@@ -478,7 +478,7 @@ describe("agent harness host capability", () => {
     const host = createAgentHarnessHostCapabilities({ attempt, pluginId: "codex" });
 
     expect(host.capabilities.preparedEnvironment?.()).toEqual({
-      credentialScrubEnv: {},
+      credentialScrubEnv: { GITHUB_APP_PRIVATE_KEY: "" },
       localIdentityEnv: {},
       managedLocalIdentity: false,
     });
