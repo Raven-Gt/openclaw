@@ -118,11 +118,7 @@ export type ChatGuardianNotice = {
 
 export type { ToolApprovalReview } from "../../../../src/shared/tool-approval-reviews.js";
 
-export type ChatQueueDisplayItem = ChatQueueItem & {
-  serverQueued?: true;
-  /** A pane-owned control request, never another copy of the queued payload. */
-  serverSteerPending?: true;
-};
+export type ChatQueueDisplayItem = ChatQueueItem & { serverQueued?: true };
 
 export type ChatQueueItem = {
   id: string;
