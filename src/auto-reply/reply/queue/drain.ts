@@ -1148,6 +1148,11 @@ export function scheduleFollowupDrain(
           }
 
           for (const groupItems of contextGroups) {
+            // A later snapshotted group can acquire steering custody while an earlier
+            // group runs. Return to the outer loop so its wait owner preserves FIFO.
+            if (queue.items.some((item) => item.steerPending)) {
+              break;
+            }
             // Earlier groups await model work. Recheck membership so overflow
             // eviction cannot leave a stale snapshot eligible for delivery.
             const currentGroupItems = groupItems.filter((item) => queue.items.includes(item));

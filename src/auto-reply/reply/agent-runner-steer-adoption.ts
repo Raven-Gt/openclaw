@@ -458,8 +458,11 @@ export function createQueuedReplySteer(params: QueuedReplySteerParams): QueuedTu
         })
         .finally(() => {
           assertActionCurrent = undefined;
-          releaseSteering?.();
-          inFlight = undefined;
+          try {
+            releaseSteering?.();
+          } finally {
+            inFlight = undefined;
+          }
         })
         .catch((error: unknown) => {
           if (!acknowledged) {
@@ -475,9 +478,15 @@ export function createQueuedReplySteer(params: QueuedReplySteerParams): QueuedTu
         });
       return acknowledgment.promise;
     } catch (error) {
-      parked.fallback();
-      releaseSteering?.();
-      inFlight = undefined;
+      try {
+        parked.fallback();
+      } finally {
+        try {
+          releaseSteering?.();
+        } finally {
+          inFlight = undefined;
+        }
+      }
       throw error;
     }
   };

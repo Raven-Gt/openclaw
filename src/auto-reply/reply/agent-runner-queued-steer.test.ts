@@ -291,6 +291,58 @@ describe("retained queued source promotion", () => {
     expect(f.onAdopted).not.toHaveBeenCalled();
   });
 
+  it("can retry a rejected promotion even when releasing its steering hold throws", async () => {
+    const queueMessage = vi
+      .fn<ReplyBackendMessageInjectionV2["queueMessage"]>()
+      .mockRejectedValueOnce(new Error("runtime unavailable"))
+      .mockResolvedValue(undefined);
+    const f = fixture("release-failure", queueMessage);
+    const release = vi.fn().mockImplementationOnce(() => {
+      throw new Error("steering release failed");
+    });
+    f.run.turnAdoptionLifecycle!.holdSteering = () => release;
+    await expect(f.steer(() => {})).resolves.toMatchObject({ status: "queued" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(release).toHaveBeenCalledOnce();
+    await expect(f.steer(() => {})).resolves.toMatchObject({ status: "accepted" });
+    await f.settled.promise;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(queueMessage).toHaveBeenCalledTimes(2);
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(getExistingFollowupQueue(f.key)?.items).toEqual([f.older, f.newer]);
+  });
+
+  it.each(["receipt", "adoption"] as const)(
+    "settles accepted custody without replay when its %s callback rejects",
+    async (failure) => {
+      const queueMessage = vi.fn<ReplyBackendMessageInjectionV2["queueMessage"]>(
+        async (_text, options, assertCurrent) => {
+          assertCurrent();
+          options?.onQueueAccepted?.(true);
+        },
+      );
+      const f = fixture("accepted-callback-" + failure, queueMessage);
+      if (failure === "receipt") {
+        const recorder = createUserTurnTranscriptRecorder({
+          message: { role: "user", content: "approved", timestamp: 1 },
+          target: () => undefined,
+        });
+        vi.spyOn(recorder, "confirmSteerTargetRunIdForPersistence").mockRejectedValue(
+          new Error("receipt unavailable"),
+        );
+        f.run.userTurnTranscriptRecorder = recorder;
+      } else {
+        f.onAdopted.mockRejectedValue(new Error("adoption unavailable"));
+      }
+      await expect(f.steer(() => {})).resolves.toMatchObject({ status: "accepted" });
+      await f.settled.promise;
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(f.steer(() => {})).resolves.toEqual({ status: "not_queued" });
+      expect(queueMessage).toHaveBeenCalledOnce();
+      expect(getExistingFollowupQueue(f.key)?.items).toEqual([f.older, f.newer]);
+    },
+  );
+
   it("does not inject into a successor when a predecessor outlives the captured target", async () => {
     const queueMessage = vi.fn<ReplyBackendMessageInjectionV2["queueMessage"]>(async () => {});
     const f = fixture("successor", queueMessage);
