@@ -120,6 +120,23 @@ exec "$@"
   );
 }
 
+async function warnAboutLaunchAgentWrapperOverwrite(
+  wrapperPath: string,
+  stdout: NodeJS.WritableStream | undefined,
+  warn: ((message: string) => void) | undefined,
+): Promise<void> {
+  const existingWrapper = await fs.readFile(wrapperPath, "utf8").catch(() => null);
+  if (existingWrapper === null || isGeneratedLaunchAgentEnvironmentWrapper(existingWrapper)) {
+    return;
+  }
+  const warning = `Existing generated LaunchAgent env wrapper at ${wrapperPath} contains custom behavior and will be overwritten; move custom behavior to openclaw gateway install --wrapper <path> or OPENCLAW_WRAPPER.`;
+  if (warn) {
+    warn(warning);
+  } else {
+    stdout?.write(`${formatLine("Warning", warning)}\n`);
+  }
+}
+
 function isLaunchAgentEnvironmentWrapperArgs(params: {
   programArguments: string[];
   envFilePath: string;
@@ -161,15 +178,7 @@ async function prepareLaunchAgentProgramArguments(params: {
     mode: LAUNCH_AGENT_ENV_FILE_MODE,
     definitionTransaction: params.definitionTransaction,
   });
-  const existingWrapper = await fs.readFile(wrapperPath, "utf8").catch(() => null);
-  if (existingWrapper !== null && !isGeneratedLaunchAgentEnvironmentWrapper(existingWrapper)) {
-    const warning = `Existing generated LaunchAgent env wrapper at ${wrapperPath} contains custom behavior and will be overwritten; move custom behavior to openclaw gateway install --wrapper <path> or OPENCLAW_WRAPPER.`;
-    if (params.warn) {
-      params.warn(warning);
-    } else {
-      params.stdout?.write(`${formatLine("Warning", warning)}\n`);
-    }
-  }
+  await warnAboutLaunchAgentWrapperOverwrite(wrapperPath, params.stdout, params.warn);
   await publishServiceFile({
     filePath: wrapperPath,
     contents: generatedWrapper,
@@ -408,15 +417,6 @@ async function ensureSecureDirectory(
   }
 }
 
-async function ensureLaunchAgentEnvironmentDirectories(
-  environment: Record<string, string | undefined> | undefined,
-): Promise<void> {
-  const tmpDir = environment?.TMPDIR?.trim();
-  if (tmpDir) {
-    await ensureSecureDirectory(tmpDir, LAUNCH_AGENT_PRIVATE_DIR_MODE);
-  }
-}
-
 export async function writeLaunchAgentPlist(
   args: GatewayServiceInstallArgs,
   publication?: LaunchAgentFilePublication,
@@ -443,7 +443,10 @@ export async function writeLaunchAgentPlist(
   await ensureSecureDirectory(home);
   await ensureSecureDirectory(libraryDir);
   await ensureSecureDirectory(path.dirname(plistPath));
-  await ensureLaunchAgentEnvironmentDirectories(environment);
+  const tmpDir = environment?.TMPDIR?.trim();
+  if (tmpDir) {
+    await ensureSecureDirectory(tmpDir, LAUNCH_AGENT_PRIVATE_DIR_MODE);
+  }
   const prepared = await prepareLaunchAgentProgramArguments({
     env,
     label,

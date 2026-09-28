@@ -23,6 +23,14 @@ type SystemdExecResult = ExecResult & { inspectionReason?: ServiceInspectionReas
 
 export type SystemdUnitScope = "system" | "user";
 
+export function isRunningAsRoot(): boolean {
+  try {
+    return process.geteuid?.() === 0;
+  } catch {
+    return false;
+  }
+}
+
 async function execSystemdCommand(
   command: "systemctl" | "busctl",
   args: string[],

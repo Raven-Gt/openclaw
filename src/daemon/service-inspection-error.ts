@@ -139,7 +139,7 @@ export function findServiceOwnershipRefusal(
   return undefined;
 }
 
-/** Neither unsettled native children nor ownership refusals are diagnostic failures. */
+/** Diagnostic fallback cannot hide unsettled native work or an ownership refusal. */
 export function assertServiceInspectionFallbackAllowed(error: unknown): void {
   if (hasCommandProcessCleanupError(error)) {
     throw error;

@@ -1,13 +1,14 @@
-import { Container, Spacer } from "@earendil-works/pi-tui";
+import {
+  Container,
+  Spacer,
+  type DefaultTextStyle,
+  type MarkdownOptions,
+} from "@earendil-works/pi-tui";
 import { markdownTheme } from "../theme/theme.js";
 import type { TuiImageSource } from "../tui-images.js";
 import { HyperlinkMarkdown } from "./hyperlink-markdown.js";
 import { MessageImages, type TuiImageRenderer } from "./message-images.js";
 
-type DefaultTextStyle = ConstructorParameters<typeof HyperlinkMarkdown>[4];
-type MarkdownOptions = ConstructorParameters<typeof HyperlinkMarkdown>[5];
-
-/** Container-backed markdown message that can update text in place. */
 export class MarkdownMessageComponent extends Container {
   private body: HyperlinkMarkdown;
   private images: MessageImages;

@@ -16,6 +16,7 @@ import {
   disableSystemdUserUnitForRemoval,
   execSystemctl,
   execSystemctlUser,
+  isRunningAsRoot,
   isSystemctlAvailable,
   reloadSystemdUserManager,
 } from "./systemd-exec.js";
@@ -29,7 +30,6 @@ import {
   resolveSystemdUnitPathForName,
 } from "./systemd-service-files.js";
 import { activateSystemdServiceIdentity } from "./systemd-service-identity.js";
-import { isRunningAsRoot } from "./systemd-system.js";
 
 async function runSystemdServiceAction(
   params: GatewayServiceControlArgs,

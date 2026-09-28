@@ -100,20 +100,16 @@ export function createTuiRunLifecycle(context: TuiRunLifecycleContext) {
     pendingTerminalLifecycleErrors.delete(runId);
   };
 
-  const clearPendingTerminalLifecycleErrors = () => {
-    for (const pending of pendingTerminalLifecycleErrors.values()) {
-      clearTimeout(pending);
-    }
-    pendingTerminalLifecycleErrors.clear();
-  };
-
   const clearTrackedRunState = () => {
     runCoordinator.clear();
     clearPendingSubmit(state);
     reconnectPendingRunId = null;
     clearLocalRunIds?.();
     clearLocalBtwRunIds?.();
-    clearPendingTerminalLifecycleErrors();
+    for (const timer of pendingTerminalLifecycleErrors.values()) {
+      clearTimeout(timer);
+    }
+    pendingTerminalLifecycleErrors.clear();
     btw.clear();
     clearStreamingWatchdog();
   };
@@ -290,13 +286,10 @@ export function createTuiRunLifecycle(context: TuiRunLifecycleContext) {
     armStreamingWatchdog(activeRunId);
   };
 
-  const finalizeRun = (params: {
-    runId: string;
-    wasActiveRun: boolean;
-    status: "idle" | "error";
-    displayedFinal?: boolean;
-  }) => {
-    runCoordinator.noteFinalizedRun(params.runId, { displayedFinal: params.displayedFinal });
+  const settleRunActivity = (
+    params: { runId: string; wasActiveRun: boolean; status: "idle" | "aborted" | "error" },
+    reconcileIdle: boolean,
+  ) => {
     clearActiveRunIfMatch(params.runId);
     const promotedRemainingRun = promoteMostRecentSessionRun();
     flushPendingHistoryRefreshIfIdle();
@@ -308,10 +301,22 @@ export function createTuiRunLifecycle(context: TuiRunLifecycleContext) {
         if (streamingWatchdogRunId === params.runId) {
           clearStreamingWatchdog();
         }
-        clearStaleStreamingIfNoTrackedRunRemains();
+        if (reconcileIdle) {
+          clearStaleStreamingIfNoTrackedRunRemains();
+        }
       }
     }
     void refreshSessionInfo?.();
+  };
+
+  const finalizeRun = (params: {
+    runId: string;
+    wasActiveRun: boolean;
+    status: "idle" | "error";
+    displayedFinal?: boolean;
+  }) => {
+    runCoordinator.noteFinalizedRun(params.runId, { displayedFinal: params.displayedFinal });
+    settleRunActivity(params, true);
   };
 
   const terminateRun = (params: {
@@ -321,18 +326,7 @@ export function createTuiRunLifecycle(context: TuiRunLifecycleContext) {
   }) => {
     runCoordinator.noteCompletedRun(params.runId);
     runCoordinator.dropSessionRun(params.runId);
-    clearActiveRunIfMatch(params.runId);
-    const promotedRemainingRun = promoteMostRecentSessionRun();
-    flushPendingHistoryRefreshIfIdle();
-    if (!promotedRemainingRun) {
-      if (params.wasActiveRun) {
-        setActivityStatus(params.status);
-        clearStreamingWatchdog();
-      } else if (streamingWatchdogRunId === params.runId) {
-        clearStreamingWatchdog();
-      }
-    }
-    void refreshSessionInfo?.();
+    settleRunActivity(params, false);
   };
 
   const hasConcurrentActiveRun = (runId: string) => {
@@ -418,7 +412,6 @@ export function createTuiRunLifecycle(context: TuiRunLifecycleContext) {
     clearStreamingWatchdog,
     clearStaleStreamingIfNoTrackedRunRemains,
     clearTrackedRunState,
-    dispose: clearTrackedRunState,
     finalizeRun,
     flushPendingHistoryRefreshIfIdle,
     hasConcurrentActiveRun,

@@ -7,8 +7,10 @@ import type {
 } from "../worker/node-supervisor-protocol.js";
 import type { NodeWorkerProcessIdentity } from "./node-worker-process-identity.js";
 
-type NodeWorkerLaunchState = NodeWorkerSupervisorReceipt["state"];
-export type NodeWorkerTerminalState = Exclude<NodeWorkerLaunchState, "pending" | "running">;
+export type NodeWorkerTerminalState = Exclude<
+  NodeWorkerSupervisorReceipt["state"],
+  "pending" | "running"
+>;
 
 export type NodeWorkerCleanupMode = "process-group" | "owned-anchor";
 
@@ -34,7 +36,7 @@ export type NodeWorkerLaunchRow = Selectable<OpenClawStateDatabase["node_worker_
 
 export type NodeWorkerLaunchReceipt = NodeWorkerSupervisorIdentity & {
   gatewayNamespace: string;
-  state: NodeWorkerLaunchState;
+  state: NodeWorkerSupervisorReceipt["state"];
   supervisor: NodeWorkerProcessIdentity;
   worker: NodeWorkerProcessIdentity | null;
   workerCleanupMode: NodeWorkerCleanupMode | null;

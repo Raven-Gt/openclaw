@@ -612,6 +612,7 @@ const BROAD_CHANGED_FALLBACK_PATTERNS = [
   /^test\/helpers\//u,
 ];
 const PRECISE_SOURCE_TEST_TARGETS = new Map<string, string[]>([
+  ["src/plugins/runtime.retention.test-support.ts", ["src/plugins/runtime.retention.test.ts"]],
   [
     "src/agents/bash-tools.process-liveness-child.test-support.ts",
     ["src/agents/bash-tools.process.liveness.test.ts"],
@@ -1750,6 +1751,7 @@ function resolveImportSpecifiers(
   extensions: readonly string[] = IMPORTABLE_FILE_EXTENSIONS,
   aliases: readonly ImportGraphAlias[] = [],
   aliasResolutions?: Map<string, string[]>,
+  runtimeOnly = false,
 ): string[] {
   if (!specifier.startsWith(".")) {
     if (aliasResolutions?.has(specifier)) {
@@ -1773,6 +1775,9 @@ function resolveImportSpecifiers(
           `./${target.replace("*", wildcard ?? "")}`,
           fileSet,
           extensions,
+          [],
+          undefined,
+          runtimeOnly,
         )) {
           resolved.add(file);
         }
@@ -1800,8 +1805,12 @@ function resolveImportSpecifiers(
     );
   }
 
-  const resolved = candidates.find((candidate) => fileSet.has(candidate));
-  return resolved ? [resolved] : [];
+  // A .js runtime sibling must not hide the TypeScript source selected by
+  // extension substitution. Combined graphs retain both kinds of consumers.
+  const resolved = [...new Set(candidates.filter((candidate) => fileSet.has(candidate)))];
+  return runtimeOnly || ![".js", ".jsx", ".mjs", ".cjs"].includes(ext)
+    ? resolved.slice(0, 1)
+    : resolved;
 }
 
 const cachedImportGraphs = new Map<string, { graph: ImportGraph; additionalPaths: string }>();
@@ -2181,6 +2190,8 @@ function findDirectImporters(
                 resolution.files,
                 extensions,
                 resolution.aliases,
+                undefined,
+                resolution.runtimeOnly,
               ).includes(importedFile),
           )
         : imports.has(importedFile);
@@ -2343,6 +2354,7 @@ function getImportGraph(
         extensions,
         aliases,
         aliasResolutions,
+        options.runtimeOnly,
       )) {
         const importers = reverseImports.get(imported) ?? [];
         importers.push(file);
@@ -2398,6 +2410,7 @@ export function hasImportGraphImpactOnTargets(
           extensions,
           aliases,
           aliasResolutions,
+          options.runtimeOnly,
         )) {
           if (changed.has(dependency)) {
             return true;
@@ -2477,6 +2490,26 @@ export function resolveAffectedTestsFromImportGraph(
     ...changedTests,
     ...walkAffectedTestsFromImportGraph(paths, getImportGraph(cwd, options, paths), options.direct),
   ]).toSorted((left, right) => left.localeCompare(right));
+}
+
+/** Complete transitive consumers, including erased type imports unless runtimeOnly is requested. */
+export function resolveImportGraphDependents(
+  changedPaths: readonly string[],
+  cwd = process.cwd(),
+  options: ImportGraphOptions = {},
+) {
+  const roots = new Set(changedPaths);
+  const { reverseImports } = getImportGraph(cwd, options, [...roots]);
+  const seen = new Set(roots);
+  // Set iteration visits newly admitted consumers once, including across cycles.
+  for (const current of seen) {
+    for (const importer of reverseImports.get(current) ?? []) {
+      seen.add(importer);
+    }
+  }
+  return [...seen]
+    .filter((file) => !roots.has(file))
+    .toSorted((left, right) => left.localeCompare(right));
 }
 
 /** Changed resolved dependencies enter the same graph at their literal import consumers. */
@@ -2873,7 +2906,7 @@ const EXACT_TOOLING_TARGETS = new Map<string, string[]>([
   [".github/workflows/update-migration.yml", [packageAcceptance, workflowGuards]],
   [
     ".github/actions/setup-node-env/action.yml",
-    ["setup-node-env-bun", packageAcceptance, workflowGuards],
+    ["setup-node-env-bun", "setup-node-env-semantic-memory", packageAcceptance, workflowGuards],
   ],
   [
     ".github/actions/setup-node-env/dependency-fingerprint.mjs",

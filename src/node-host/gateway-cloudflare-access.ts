@@ -105,7 +105,7 @@ export async function resolveNodeHostCloudflareAccess(params: {
   return { clientId, clientSecret };
 }
 
-function nodeHostGatewayHttpUrl(gateway: { host?: string; port?: number; tls?: boolean }): URL {
+function nodeHostGatewayOrigin(gateway: { host?: string; port?: number; tls?: boolean }): URL {
   const host = gateway.host ?? "127.0.0.1";
   const urlHost =
     host.includes(":") && !(host.startsWith("[") && host.endsWith("]")) ? `[${host}]` : host;
@@ -118,7 +118,7 @@ export function nodeHostGatewayMatchesUrl(
   gateway: { host?: string; port?: number; tls?: boolean },
   target: URL,
 ): boolean {
-  const configured = nodeHostGatewayHttpUrl(gateway);
+  const configured = nodeHostGatewayOrigin(gateway);
   return configured.protocol === target.protocol && configured.host === target.host;
 }
 
@@ -126,5 +126,5 @@ export function nodeHostGatewaysShareOrigin(
   left: { host?: string; port?: number; tls?: boolean },
   right: { host?: string; port?: number; tls?: boolean },
 ): boolean {
-  return nodeHostGatewayMatchesUrl(left, nodeHostGatewayHttpUrl(right));
+  return nodeHostGatewayMatchesUrl(left, nodeHostGatewayOrigin(right));
 }

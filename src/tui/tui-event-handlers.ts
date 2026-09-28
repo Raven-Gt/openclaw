@@ -124,7 +124,6 @@ export function createEventHandlers(context: EventHandlerContext) {
     clearStreamingWatchdog,
     clearStaleStreamingIfNoTrackedRunRemains,
     clearTrackedRunState,
-    dispose,
     finalizeRun,
     flushPendingHistoryRefreshIfIdle,
     hasConcurrentActiveRun,
@@ -751,6 +750,6 @@ export function createEventHandlers(context: EventHandlerContext) {
     captureHistoryRunMembership: () => runCoordinator.captureHistoryRunMembership(),
     reconcileHistoryAfterGap,
     flushPendingHistoryRefreshIfIdle,
-    dispose,
+    dispose: clearTrackedRunState,
   };
 }

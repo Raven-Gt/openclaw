@@ -7,7 +7,12 @@ import { sanitizeForLog } from "../../packages/terminal-core/src/ansi.js";
 import { quoteCliArg } from "../cli/quote-cli-arg.js";
 import { isMissingPathError } from "../infra/errors.js";
 import { ServiceOwnershipRefusalError } from "./service-inspection-error.js";
-import { execBusctlSystem, execSystemctl, readSystemctlDetail } from "./systemd-exec.js";
+import {
+  execBusctlSystem,
+  execSystemctl,
+  isRunningAsRoot,
+  readSystemctlDetail,
+} from "./systemd-exec.js";
 
 type SystemSystemdOwnership =
   | { status: "absent"; unitName: string }
@@ -251,17 +256,6 @@ async function inspectSystemSystemdOwnership(
   // Close the manager-query-to-filesystem-snapshot race. Publication and
   // activation repeat the complete probe because root installers share no lock.
   return await querySystemManager(unitName, run);
-}
-
-export function isRunningAsRoot(): boolean {
-  if (typeof process.geteuid !== "function") {
-    return false;
-  }
-  try {
-    return process.geteuid() === 0;
-  } catch {
-    return false;
-  }
 }
 
 function formatSystemSystemdOwnershipError(ownership: SystemSystemdConflict): string {
