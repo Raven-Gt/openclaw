@@ -674,22 +674,33 @@ describe("node workspace retain coordinator", () => {
     await coordinator.stop();
   });
 
-  it("does not add the current-build retention pin to cloud-enrolled nodes", async () => {
-    const bundleRetention = {
-      currentBuild: vi.fn(),
-      isEnvironmentOwnedNode: () => true,
-    };
-    const { coordinator } = createHarness({
-      environments: [
-        environment({
-          nodeSetupId: "cloud-setup",
-          profileSnapshot: { executionMode: "remote-exec" },
-        }),
-      ],
-      bundleRetention,
+  it("retains the current build until live cloud environments record it", async () => {
+    const previousHash = "b".repeat(64);
+    const currentBuild = receipt("c".repeat(64));
+    const environments = [environment({ state: "ready", bootstrapReceipt: receipt(previousHash) })];
+    const { coordinator, invoke } = createHarness({
+      environments,
+      placements: [],
+      bundleRetention: {
+        currentBuild: async () => currentBuild,
+        isEnvironmentOwnedNode: () => true,
+      },
     });
     await coordinator.start();
-    expect(bundleRetention.currentBuild).not.toHaveBeenCalled();
+    expect(invoke.mock.calls[0]?.[0].params).toMatchObject({
+      bundleHashes: [previousHash, currentBuild.bundleHash],
+      bundleStatusHash: previousHash,
+    });
+
+    environments[0] = environment({ state: "ready", bootstrapReceipt: currentBuild });
+    await coordinator.schedule(node.nodeId);
+    expect(invoke.mock.calls[1]?.[0].params).toMatchObject({
+      bundleHashes: [currentBuild.bundleHash],
+    });
+
+    environments[0] = environment({ state: "destroyed", bootstrapReceipt: currentBuild });
+    await coordinator.schedule(node.nodeId);
+    expect(invoke.mock.calls[2]?.[0].params).toMatchObject({ bundleHashes: [] });
     await coordinator.stop();
   });
 
