@@ -5,6 +5,11 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { GatewaySessionStoreTarget } from "../../gateway/session-utils-store.types.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { stringifyRouteThreadId } from "../../plugin-sdk/channel-route.js";
+import {
+  buildAgentMainSessionKey,
+  isUnscopedSessionKeySentinel,
+  normalizeAgentId,
+} from "../../routing/session-key.js";
 import type { InputProvenance } from "../../sessions/input-provenance.js";
 import { isCronRunSessionKey, parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import {
@@ -12,7 +17,7 @@ import {
   createUserTurnTranscriptRecorder,
 } from "../../sessions/user-turn-transcript.js";
 import type { DeliveryContext } from "../../utils/delivery-context.types.js";
-import { resolveSessionAgentId } from "../agent-scope.js";
+import { listAgentIds, resolveSessionAgentId } from "../agent-scope.js";
 import { resolveActiveEmbeddedRunSessionId } from "../embedded-agent-runner/active-run-projections.js";
 import {
   type EmbeddedAgentQueueMessageOptions,
@@ -230,6 +235,41 @@ export async function startSessionsSendAgentRun(params: {
       }),
     };
   }
+}
+
+export function resolveConfiguredAgentMainSessionKey(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  mainKey: string;
+}): string | undefined {
+  const agentId = normalizeAgentId(params.agentId);
+  if (!listAgentIds(params.cfg).includes(agentId)) {
+    return undefined;
+  }
+  return buildAgentMainSessionKey({ agentId, mainKey: params.mainKey });
+}
+
+export function isConfiguredAgentMainSessionKey(params: {
+  cfg: OpenClawConfig;
+  agentId?: string;
+  sessionKey: string;
+  mainKey: string;
+}): boolean {
+  if (isUnscopedSessionKeySentinel(params.sessionKey)) {
+    return false;
+  }
+  if (params.sessionKey === params.mainKey) {
+    return true;
+  }
+  const agentId = params.agentId ?? parseAgentSessionKey(params.sessionKey)?.agentId;
+  return agentId
+    ? params.sessionKey ===
+        resolveConfiguredAgentMainSessionKey({
+          cfg: params.cfg,
+          agentId,
+          mainKey: params.mainKey,
+        })
+    : false;
 }
 
 export async function createConfiguredAgentMainSession(params: {
