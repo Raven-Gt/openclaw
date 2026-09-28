@@ -16,7 +16,7 @@ export const WorkerIdentifierSchema = Type.String({
   pattern: "^\\S(?:.*\\S)?$",
 });
 
-export const WorkerFrameIdSchema = Type.String({
+const WorkerFrameIdSchema = Type.String({
   minLength: 1,
   maxLength: WORKER_PROTOCOL_MAX_FRAME_ID_LENGTH,
 });
@@ -78,7 +78,7 @@ export function workerErrorResponseSchema<const ErrorSchema extends TSchema>(err
   });
 }
 
-export const WorkerErrorResponseFrameSchema = workerErrorResponseSchema(WorkerErrorShapeSchema);
+const WorkerErrorResponseFrameSchema = workerErrorResponseSchema(WorkerErrorShapeSchema);
 
 export function workerResponseSchema<const Payload extends TSchema, const Errors extends TSchema[]>(
   payload: Payload,
@@ -122,7 +122,7 @@ export const WorkerTranscriptUsageSchema = closedObject({
   }),
 });
 
-export const WorkerTranscriptAssistantDiagnosticSchema = closedObject({
+const WorkerTranscriptAssistantDiagnosticSchema = closedObject({
   type: WorkerIdentifierSchema,
   timestamp: Type.Integer({ minimum: 0 }),
   error: Type.Optional(

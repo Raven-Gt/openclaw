@@ -11,7 +11,7 @@ const personalArguments = `Personal actions: ${personalActions}. List takes only
 const workshopArguments =
   "Omit target for Workshop proposals: list returns pending proposals (limit maximum 50, default 20); read/prepare_patch/patch/update use skill_name; inspect/revise use proposal_id or name; update needs complete proposal_content.";
 
-export function createLibrarySkillWorkshopDescriptor(
+function createLibrarySkillWorkshopDescriptor(
   multipleProfiles: boolean,
   workspace?: AnyAgentTool,
 ): Pick<AnyAgentTool, "name" | "label" | "displaySummary" | "description"> {
