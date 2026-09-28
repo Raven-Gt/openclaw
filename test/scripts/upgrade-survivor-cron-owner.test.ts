@@ -43,8 +43,9 @@ function fixture(candidateProjection = false) {
       runtime_updated_at_ms INTEGER, schedule_identity TEXT, sort_order INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL, PRIMARY KEY (store_key, job_id)
     ) STRICT`);
-    if (candidateProjection)
+    if (candidateProjection) {
       db.exec("ALTER TABLE cron_jobs ADD COLUMN grant_definition_generation INTEGER");
+    }
   } finally {
     db.close();
   }

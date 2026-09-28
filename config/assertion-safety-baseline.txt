@@ -2230,7 +2230,7 @@ src/context-engine/registry.ts	4
 src/context-engine/runtime-settings.ts	2
 src/cron/delivery-channel-validation.ts	2
 src/cron/delivery-context.ts	1
-src/cron/delivery-plan.ts	9
+src/cron/delivery-plan.ts	4
 src/cron/delivery-target-validation.ts	3
 src/cron/delivery.ts	1
 src/cron/isolated-agent/delivery-dispatch-awareness.ts	1
@@ -2253,7 +2253,7 @@ src/cron/runtime-authority.ts	3
 src/cron/schedule-identity.ts	2
 src/cron/service/active-run-cancellation.ts	1
 src/cron/service/failure-alerts.ts	1
-src/cron/service/jobs.ts	6
+src/cron/service/jobs.ts	5
 src/cron/service/list-page-validation.ts	2
 src/cron/service/store.ts	1
 src/cron/service/timer.ts	1

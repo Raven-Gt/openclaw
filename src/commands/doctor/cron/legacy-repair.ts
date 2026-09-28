@@ -342,7 +342,9 @@ export async function applyLegacyCronStoreRepair(params: {
   const retirementChanges: string[] = [];
   if (resolveRetired) {
     for (const job of state.rawJobs) {
-      if (!canRepairCronDeliveryForDoctor(job.delivery)) continue;
+      if (!canRepairCronDeliveryForDoctor(job.delivery)) {
+        continue;
+      }
       const payload = asOptionalRecord(job.payload);
       const jobId = normalizeOptionalStringifiedId(job.id);
       if (!payload || !jobId) {

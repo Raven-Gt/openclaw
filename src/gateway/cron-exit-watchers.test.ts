@@ -183,7 +183,9 @@ describe("createCronExitWatchers", () => {
       expect(watchers.activeJobIds()).toEqual(["healthy-exit"]);
     } finally {
       const settled = watchers.cancelAll();
-      for (const run of runs) run.deferred.resolve({ exitCode: 0, reason: "manual-cancel" });
+      for (const run of runs) {
+        run.deferred.resolve({ exitCode: 0, reason: "manual-cancel" });
+      }
       await settled;
     }
   });

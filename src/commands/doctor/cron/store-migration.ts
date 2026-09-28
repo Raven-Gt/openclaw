@@ -159,9 +159,13 @@ function normalizeStoredCronJobIdentity(raw: Record<string, unknown>): {
 }
 
 function resolveLegacyCronDeliveryMode(mode: unknown): "none" | "announce" | "webhook" | undefined {
-  if (mode === undefined || mode === null) return "announce";
+  if (mode === undefined || mode === null) {
+    return "announce";
+  }
   const normalized = normalizeOptionalLowercaseString(mode);
-  if (normalized === "deliver") return "announce";
+  if (normalized === "deliver") {
+    return "announce";
+  }
   return normalized === "none" || normalized === "announce" || normalized === "webhook"
     ? normalized
     : undefined;

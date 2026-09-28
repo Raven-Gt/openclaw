@@ -84,7 +84,7 @@ function inspectRows(databasePath, storePath) {
         "SELECT * FROM cron_jobs WHERE store_key = ? AND job_id GLOB 'owner-proof-*' ORDER BY sort_order, job_id",
       )
       .all(storePath)
-      .map((row) => ({ ...row })),
+      .map((row) => Object.assign({}, row)),
   );
 }
 
@@ -273,40 +273,46 @@ function seed(p) {
   config.agents.entries.ops.default = true;
   config.cron = { enabled: false, store: storePath };
   const definitions = [
-    ["historical", {}],
-    ["explicit", { agentId: "research" }],
-    ["session", { sessionKey: "agent:research:main" }],
-    ["sql-owner", {}],
-    ...deliveryCases.map(({ name, delivery }) => [
+    { name: "historical", overrides: {} },
+    { name: "explicit", overrides: { agentId: "research" } },
+    { name: "session", overrides: { sessionKey: "agent:research:main" } },
+    { name: "sql-owner", overrides: {} },
+    ...deliveryCases.map(({ name, delivery }) => ({
       name,
-      {
+      overrides: {
         agentId: "ops",
         sessionTarget: "isolated",
         payload: { kind: "agentTurn", message: "Synthetic delivery migration", toolsAllow: [] },
         delivery,
       },
-    ]),
-    ["json-import", {}],
-  ].map(([name, owner], index) => ({
-    id: `${prefix}${name}`,
-    name: `Authored ${name}`,
-    description: `Keep description ${index}`,
-    enabled: false,
-    createdAtMs: 1_800_000_000_000 + index,
-    updatedAtMs: 1_800_000_000_000 + index,
-    schedule: { kind: "every", everyMs: 86_400_000, anchorMs: 1_800_000_000_000 },
-    sessionTarget: "main",
-    wakeMode: "next-heartbeat",
-    payload: { kind: "systemEvent", text: `Synthetic ownership event ${name}` },
-    authoredNote: { keep: name },
-    ...owner,
-    state: {
-      lastRunAtMs: 1_700_000_000_000 + index,
-      lastRunStatus: "ok",
-      lastStatus: "ok",
-      lastDurationMs: 10 + index,
-    },
-  }));
+    })),
+    { name: "json-import", overrides: {} },
+  ].map(({ name, overrides }, index) =>
+    Object.assign(
+      {
+        id: `${prefix}${name}`,
+        name: `Authored ${name}`,
+        description: `Keep description ${index}`,
+        enabled: false,
+        createdAtMs: 1_800_000_000_000 + index,
+        updatedAtMs: 1_800_000_000_000 + index,
+        schedule: { kind: "every", everyMs: 86_400_000, anchorMs: 1_800_000_000_000 },
+        sessionTarget: "main",
+        wakeMode: "next-heartbeat",
+        payload: { kind: "systemEvent", text: `Synthetic ownership event ${name}` },
+        authoredNote: { keep: name },
+      },
+      overrides,
+      {
+        state: {
+          lastRunAtMs: 1_700_000_000_000 + index,
+          lastRunStatus: "ok",
+          lastStatus: "ok",
+          lastDurationMs: 10 + index,
+        },
+      },
+    ),
+  );
   const db = new DatabaseSync(p.databasePath);
   let baselineSchema;
   try {
@@ -525,7 +531,7 @@ function assertUpdated(p, observations, packageRoot) {
       .all(fixture.storePath),
   );
   assert.deepEqual(
-    migration.map((row) => ({ ...row })),
+    migration.map((row) => Object.assign({}, row)),
     [
       {
         status: "completed",
@@ -614,12 +620,12 @@ async function runRuntime(p) {
       Date.now() + readPositiveIntEnv("OPENCLAW_UPGRADE_SURVIVOR_START_BUDGET_SECONDS", 90) * 1000;
     let completed = false;
     while (Date.now() < deadline) {
-      const history = gateway(p.artifacts, `history-${name}`, "cron.runs", {
+      const runHistory = gateway(p.artifacts, `history-${name}`, "cron.runs", {
         id: `${prefix}${name}`,
         runId: result.runId,
         limit: 10,
       });
-      const entry = history.entries?.find((row) => row.runId === result.runId);
+      const entry = runHistory.entries?.find((row) => row.runId === result.runId);
       if (entry) {
         assert.equal(entry.status, "ok", `Cron execution failed for ${name}`);
         completed = true;
@@ -656,7 +662,7 @@ function assertRuntime(p) {
   );
   const runs = readJson(path.join(p.artifacts, "cron-owner-runtime-runs.json"));
   assert.deepEqual(
-    receipts.map((row) => ({ ...row })),
+    receipts.map((row) => Object.assign({}, row)),
     [
       {
         job_id: `${prefix}explicit`,
@@ -691,14 +697,21 @@ observeProcess();
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const [stage, ...args] = process.argv.slice(2);
   const p = paths();
-  if (stage === "configure") configure(p);
-  else if (stage === "seed-session") seedSession(p);
-  else if (stage === "seed") seed(p);
-  else if (stage === "assert-updated") assertUpdated(p, ...args);
-  else if (stage === "prepare-runtime") prepareRuntime(p);
-  else if (stage === "run-runtime") await runRuntime(p);
-  else if (stage === "assert-runtime") assertRuntime(p);
-  else {
+  if (stage === "configure") {
+    configure(p);
+  } else if (stage === "seed-session") {
+    seedSession(p);
+  } else if (stage === "seed") {
+    seed(p);
+  } else if (stage === "assert-updated") {
+    assertUpdated(p, ...args);
+  } else if (stage === "prepare-runtime") {
+    prepareRuntime(p);
+  } else if (stage === "run-runtime") {
+    await runRuntime(p);
+  } else if (stage === "assert-runtime") {
+    assertRuntime(p);
+  } else {
     assert.equal(stage, "assert-idempotent");
     const fixture = readJson(path.join(p.artifacts, fixtureName));
     assert.deepEqual(
