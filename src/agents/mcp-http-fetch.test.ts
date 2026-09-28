@@ -27,6 +27,7 @@ vi.mock("node:dns/promises", () => ({
 }));
 
 vi.mock("./mcp-oauth.js", () => ({
+  recordMcpOAuthAuthorizationRequired: vi.fn(),
   resolveMcpOAuthAccessToken: oauthResolveMock,
 }));
 

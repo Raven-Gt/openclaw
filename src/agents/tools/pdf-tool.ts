@@ -37,7 +37,6 @@ import { getModelProviderRequestTransport } from "../provider-request-config.js"
 import { createSandboxBridgeReadFile } from "../sandbox-media-paths.js";
 import { optionalFiniteNumberSchema } from "../schema/typebox.js";
 import { completeWithPreparedSimpleCompletionModel } from "../simple-completion-execution.js";
-import { prepareSimpleCompletionModel } from "../simple-completion-runtime.js";
 import type { ToolFsPolicy } from "../tool-fs-policy.js";
 import { readFiniteNumberParam, ToolInputError, type AnyAgentTool } from "./common.js";
 import { coerceImageModelConfig, type ImageModelConfig } from "./image-tool.helpers.js";
@@ -219,6 +218,8 @@ async function runPdfPrompt(params: {
         }
         return resolved;
       };
+      const { prepareSimpleCompletionModel } = await import("../simple-completion-runtime.js");
+      assertModelCurrent();
       const prepared = await prepareSimpleCompletionModel(
         {
           cfg: effectiveCfg,

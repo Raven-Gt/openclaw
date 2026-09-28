@@ -1,5 +1,5 @@
 import type { SqliteWalCheckpointSnapshot } from "../../infra/sqlite-wal-checkpoint.js";
-import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "../../state/openclaw-agent-db-lease.js";
+import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "../../state/openclaw-agent-db-contract.js";
 import type {
   SqliteSessionReclamationPlan,
   SqliteSessionReclamationResult,

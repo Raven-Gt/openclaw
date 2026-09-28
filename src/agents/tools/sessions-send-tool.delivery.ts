@@ -29,8 +29,8 @@ import {
 } from "../embedded-agent-runner/runs.js";
 import { jsonResult } from "./common.js";
 import { resolveGatewayToolOperatorSelection } from "./gateway-caller-context.js";
+import { callInProcessGatewayToolWithCreation } from "./gateway.js";
 import {
-  callInProcessGatewayToolWithCreation,
   hasInProcessGatewayToolContext,
   type AgentToolGatewayRequestCaller,
 } from "./in-process-gateway.js";

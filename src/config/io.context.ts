@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import { ensureOwnerDisplaySecret } from "../agents/owner-display.js";
+import type { DeferredPluginMigration } from "../infra/deferred-plugin-migrations.contract.js";
 import {
   readDeferredPluginMigrations,
   readDeferredPluginMigrationsAsync,
-  type DeferredPluginMigration,
 } from "../infra/deferred-plugin-migrations.js";
 import {
   loadShellEnvFallback,

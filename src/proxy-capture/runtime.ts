@@ -212,38 +212,22 @@ export function initializeDebugProxyCapture(
   installDebugProxyGlobalFetchPatch(owner, captureInstalledFetch, deps);
 }
 
-/** Internal fetch seams retain this admission before awaiting network work. */
-export function prepareHttpCapture(
-  resolved?: DebugProxySettings,
-  deps: DebugProxyCaptureRuntimeDeps = {},
-) {
-  const settings = resolveEnabledDebugProxySettings(resolved);
-  if (!settings) {
-    return undefined;
-  }
-  const admission = resolveCaptureOwner(settings, resolveRuntimeDeps(deps), {
-    explicit: resolved !== undefined,
-  })?.admission;
-  return admission
-    ? (params: HttpCaptureParams | HttpCaptureErrorParams) => {
-        if (admission.current) {
-          if ("response" in params) {
-            void captureOwnedHttpExchange(params, admission.current);
-          } else {
-            void captureOwnedHttpError(params, admission.current);
-          }
-        }
-      }
-    : undefined;
-}
-
 /** @deprecated Use captureHttpExchangeAsync and await capture finalization at shutdown. */
 export function captureHttpExchange(
   params: HttpCaptureParams,
   resolved?: DebugProxySettings,
   deps: DebugProxyCaptureRuntimeDeps = {},
 ): void {
-  prepareHttpCapture(resolved, deps)?.(params);
+  const settings = resolveEnabledDebugProxySettings(resolved);
+  if (!settings) {
+    return;
+  }
+  const owner = resolveCaptureOwner(settings, resolveRuntimeDeps(deps), {
+    explicit: resolved !== undefined,
+  });
+  if (owner) {
+    void captureOwnedHttpExchange(params, owner);
+  }
 }
 
 function captureInstalledFetch(

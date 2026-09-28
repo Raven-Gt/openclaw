@@ -11,6 +11,7 @@ import type { AgentExecutionAuthBinding } from "../agents/execution-auth-binding
 import { describeFailoverError } from "../agents/failover-error.js";
 import type { FailoverReason } from "../agents/failover/signal.js";
 import { DEFAULT_AGENT_WORKSPACE_DIR } from "../agents/workspace-default.js";
+import { GEMINI_CLI_DEFAULT_MODEL_REF } from "../commands/onboard-inference-ambient.js";
 import type {
   detectInferenceBackends,
   InferenceBackendKind,
@@ -265,7 +266,7 @@ export type ActivateSetupInferenceDeps = {
   readConfigFileSnapshot?: typeof import("../config/config.js").readConfigFileSnapshot;
   runEmbeddedAgent?: typeof import("../agents/embedded-agent.js").runEmbeddedAgent;
   runCliAgent?: typeof import("../agents/cli-runner.js").runCliAgent;
-  ensureCodexRuntimePlugin?: typeof import("../commands/codex-runtime-plugin-install.js").ensureCodexRuntimePluginForModelSelection;
+  ensureCodexRuntimePlugin?: typeof import("../commands/runtime-plugin-install.js").ensureCodexRuntimePluginForModelSelection;
   transformConfigWithPendingPluginInstalls?: typeof import("../plugins/install-record-commit.js").transformConfigWithPendingPluginInstalls;
   resolvePluginProviders?: typeof resolvePluginProvidersCore;
   resolveManifestProviderAuthChoice?: typeof resolveManifestProviderAuthChoice;
@@ -515,10 +516,7 @@ export async function resolveToolFreeCliSetupError(
   if (route.runner !== "cli") {
     return undefined;
   }
-  const [{ resolveCliBackendConfig }, { GEMINI_CLI_DEFAULT_MODEL_REF }] = await Promise.all([
-    import("../agents/cli-backends.js"),
-    import("../commands/onboard-inference-ambient.js"),
-  ]);
+  const { resolveCliBackendConfig } = await import("../agents/cli-backends.js");
   const backend = resolveCliBackendConfig(route.provider, route.runConfig, {
     agentId: route.agentId,
   });
