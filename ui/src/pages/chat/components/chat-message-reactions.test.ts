@@ -99,14 +99,15 @@ describe("message reaction controls", () => {
     const { request, element } = await setup();
     const chip = container.querySelector<HTMLButtonElement>("[data-emoji]")!;
     expect(chip.getAttribute("aria-pressed")).toBe("false");
-    expect(container.querySelector("openclaw-tooltip")?.getAttribute("content")).toContain(
+    expect(container.querySelector(".chat-reaction-details-link")?.textContent?.trim()).toContain(
       "Maya, Noah",
     );
     const write = createDeferred<unknown>();
     request.mockReturnValueOnce(write.promise);
-    chip.click();
+    container.querySelector<HTMLElement>(".chat-reaction-count")!.click();
     await element.updateComplete;
-    expect(chip.disabled).toBe(true);
+    expect(chip.getAttribute("aria-disabled")).toBe("true");
+    chip.click();
     expect(button("Add reaction").disabled).toBe(true);
     write.reject(new Error("offline"));
     await Promise.resolve();
@@ -187,12 +188,13 @@ describe("message reaction controls", () => {
 
   it("labels agent names without treating their reaction as the current human's", async () => {
     const { request, element } = await setup(true, mixedSummary);
-    expect(container.querySelector("openclaw-tooltip")?.getAttribute("content")).toBe(
+    expect(container.querySelector(".chat-reaction-details-link")?.textContent?.trim()).toBe(
       "Maya, Atlas (agent) reacted with 👍",
     );
     const chip = container.querySelector<HTMLButtonElement>("[data-emoji]")!;
     expect(chip.getAttribute("aria-pressed")).toBe("false");
-    expect(chip.closest(".chat-reaction-group")?.getAttribute("data-reacted")).toBe("false");
+    expect(container.querySelector(".chat-reaction-count")?.tagName).toBe("SPAN");
+    expect(container.querySelector(".chat-reaction-count")?.closest("button")).toBe(chip);
     chip.click();
     await settle(element);
     // agentId is the existing session target, never a supplied reactor identity.

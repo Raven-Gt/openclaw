@@ -67,7 +67,9 @@ it("supports keyboard picker selection, focus names and non-mutating people dial
   chip.focus();
   expect(chip.getAttribute("aria-describedby")).toBeTruthy();
   const tooltip = host.querySelector("openclaw-tooltip")!;
-  expect(tooltip.getAttribute("content")).toBe("Maya, Atlas (agent) reacted with 👍");
+  expect(tooltip.querySelector(".chat-reaction-details-link")?.textContent?.trim()).toBe(
+    "Maya, Atlas (agent) reacted with 👍",
+  );
   const add = host.querySelector<HTMLButtonElement>('[aria-label="Add reaction"]')!;
   add.focus();
   await userEvent.keyboard("{Enter}");
@@ -88,9 +90,11 @@ it("supports keyboard picker selection, focus names and non-mutating people dial
     emoji: "👍",
     reactors,
   });
-  const details = host.querySelector<HTMLButtonElement>('[aria-label="Who reacted with 👍"]')!;
-  details.focus();
-  await userEvent.keyboard("{Enter}");
+  chip.focus();
+  await expect
+    .element(page.getByRole("button", { name: "Who reacted with 👍", exact: true }))
+    .toBeVisible();
+  await userEvent.keyboard("{Tab}{Enter}");
   await element.updateComplete;
   await Promise.resolve();
   await element.updateComplete;
@@ -103,5 +107,5 @@ it("supports keyboard picker selection, focus names and non-mutating people dial
   await userEvent.keyboard("{Escape}");
   await element.updateComplete;
   await expect.element(page.getByRole("dialog", { name: "Who reacted" })).not.toBeInTheDocument();
-  expect(document.activeElement).toBe(details);
+  expect(document.activeElement).toBe(chip);
 });

@@ -91,13 +91,14 @@ async function expectCompactPicker(picker: Locator) {
       editing: element.ownerDocument.activeElement instanceof HTMLInputElement,
     };
   });
-  expect(geometry.pickerEmojiSize).toBe(geometry.reactionEmojiSize);
+  expect(geometry.pickerEmojiSize).toBe("16px");
+  expect(geometry.reactionEmojiSize).toBe("12px");
   expect(geometry.pickerEmojiFont).toBe(geometry.reactionEmojiFont);
-  expect(geometry.width).toBeLessThanOrEqual(geometry.coarsePointer ? 204 : 124);
-  expect(geometry.targetWidth).toBeGreaterThanOrEqual(geometry.coarsePointer ? 44 : 24);
+  expect(geometry.width).toBeLessThanOrEqual(geometry.coarsePointer ? 204 : 156);
+  expect(geometry.targetWidth).toBeGreaterThanOrEqual(geometry.coarsePointer ? 44 : 32);
   expect(geometry.targetHeight).toBeGreaterThanOrEqual(geometry.coarsePointer ? 44 : 24);
   expect(Math.abs(geometry.center - geometry.triggerCenter)).toBeLessThanOrEqual(1);
-  expect(geometry.height).toBeLessThanOrEqual(geometry.coarsePointer ? 150 : 110);
+  expect(geometry.height).toBeLessThanOrEqual(geometry.coarsePointer ? 150 : 125);
   expect(geometry.left).toBeGreaterThanOrEqual(8);
   expect(geometry.right).toBeLessThanOrEqual(geometry.viewport - 8);
   expect(geometry.searchTop).toBeGreaterThanOrEqual(geometry.choicesBottom);
@@ -128,7 +129,9 @@ suite.define(() => {
       await human.locator('[data-emoji="👀"]').waitFor({ state: "visible" });
       expect(await thumb.getAttribute("aria-pressed")).toBe("false");
       await thumb.hover();
-      const namesBubble = thumb.locator("../..").locator("wa-tooltip[open] .tooltip-content");
+      const namesBubble = thumb
+        .locator("..")
+        .getByRole("button", { name: "Who reacted with 👍", exact: true });
       await namesBubble.waitFor({ state: "visible" });
       expect(await namesBubble.textContent()).toContain(
         "Maya, Atlas (agent), Aria reacted with 👍",
@@ -179,7 +182,9 @@ suite.define(() => {
       expect(ids).toContain(agentReactionMessageId);
 
       await gateway.deferNext("chat.reactions.set");
-      await thumb.click();
+      expect(await agent.locator("button.chat-reaction-count").count()).toBe(0);
+      await thumb.locator(".chat-reaction-count").click();
+      expect(await gateway.getRequests("chat.reactions.people")).toHaveLength(0);
       const add = requireRecord((await gateway.waitForRequest("chat.reactions.set")).params);
       expect(add).toEqual({
         sessionKey: reactionSessionKey,
@@ -192,7 +197,9 @@ suite.define(() => {
       expect(await thumb.isDisabled()).toBe(true);
       await gateway.setMethodResponse("chat.reactions.list", reactionList(true));
       await gateway.resolveDeferred("chat.reactions.set", { ok: true, changed: true });
-      await agent.locator('[data-emoji="👍"][aria-pressed="true"]:not(:disabled)').waitFor();
+      await agent
+        .locator('[data-emoji="👍"][aria-pressed="true"][aria-disabled="false"]')
+        .waitFor();
       expect(await thumb.locator("..").textContent()).toContain("4");
 
       await gateway.setMethodResponse("chat.reactions.list", reactionList(true, true));
@@ -210,13 +217,30 @@ suite.define(() => {
         reactors: [maya, atlas, aria, currentPerson, noah],
       });
       const writesBeforeDetails = (await gateway.getRequests("chat.reactions.set")).length;
-      await agent.getByRole("button", { name: "Who reacted with 👍", exact: true }).focus();
-      await page.keyboard.press("Enter");
+      // Activating the pill dismisses its tooltip until the pointer leaves it.
+      await page.mouse.move(1200, 70);
+      await thumb.hover();
+      const detailsBubble = agent.getByRole("button", { name: "Who reacted with 👍", exact: true });
+      await detailsBubble.waitFor({ state: "visible" });
+      await detailsBubble.click();
       await page.getByRole("dialog").waitFor({ state: "visible" });
       const people = page.locator(".chat-reaction-dialog");
       await people.getByText("Maya", { exact: true }).waitFor();
       await people.getByText("Atlas (agent)", { exact: true }).waitFor();
       await people.getByText("Noah", { exact: true }).waitFor();
+      expect((await gateway.getRequests("chat.reactions.set")).length).toBe(writesBeforeDetails);
+      await page.keyboard.press("Escape");
+      await people.waitFor({ state: "hidden" });
+      expect(await thumb.evaluate((button) => document.activeElement === button)).toBe(true);
+      await addReaction.focus();
+      await thumb.focus();
+      await detailsBubble.waitFor({ state: "visible" });
+      await page.keyboard.press("Tab");
+      expect(await detailsBubble.evaluate((button) => document.activeElement === button)).toBe(
+        true,
+      );
+      await page.keyboard.press("Enter");
+      await people.waitFor({ state: "visible" });
       expect((await gateway.getRequests("chat.reactions.set")).length).toBe(writesBeforeDetails);
       await page.keyboard.press("Escape");
       await people.waitFor({ state: "hidden" });
@@ -233,7 +257,9 @@ suite.define(() => {
       });
       await gateway.setMethodResponse("chat.reactions.list", reactionList(false, true));
       await gateway.resolveDeferred("chat.reactions.set", { ok: true, changed: true });
-      await agent.locator('[data-emoji="👍"][aria-pressed="false"]:not(:disabled)').waitFor();
+      await agent
+        .locator('[data-emoji="👍"][aria-pressed="false"][aria-disabled="false"]')
+        .waitFor();
       expect(await thumb.locator("..").textContent()).toContain("4");
 
       await gateway.deferNext("chat.reactions.set");
@@ -266,7 +292,7 @@ suite.define(() => {
   });
 
   it.each([false, true])(
-    "reveals names by tapping the count without a reaction write (incognito: %s)",
+    "reveals a tappable names bubble without splitting the pill or writing a reaction (incognito: %s)",
     async (incognito) => {
       const context = await suite.newBrowserContext({
         viewport: { width: 390, height: 844 },
@@ -298,9 +324,10 @@ suite.define(() => {
         };
         const gateway = await installMockGateway(page, scenario);
         await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
-        const count = page.getByRole("button", { name: "Who reacted with 👍", exact: true });
+        const chip = page.locator(`[data-emoji="👍"]`);
+        const count = chip.locator(".chat-reaction-count");
         await count.waitFor({ state: "visible" });
-        const box = await count.boundingBox();
+        const box = await chip.boundingBox();
         expect(box?.width).toBeGreaterThanOrEqual(40);
         expect(box?.height).toBeGreaterThanOrEqual(40);
         const add = page.getByRole("button", { name: "Add reaction", exact: true }).last();
@@ -313,6 +340,10 @@ suite.define(() => {
         const write = requireRecord((await gateway.waitForRequest("chat.reactions.set")).params);
         expect(write).toMatchObject({ emoji: "🚀", active: true });
         await count.tap();
+        const details = page.getByRole("button", { name: "Who reacted with 👍", exact: true });
+        await details.waitFor({ state: "visible" });
+        expect(await gateway.getRequests("chat.reactions.set")).toHaveLength(1);
+        await details.tap();
         await page
           .getByRole("dialog", { name: "Who reacted", exact: true })
           .waitFor({ state: "visible" });
@@ -322,6 +353,19 @@ suite.define(() => {
           .getByText("Atlas (agent)", { exact: true })
           .waitFor();
         expect(await gateway.getRequests("chat.reactions.set")).toHaveLength(1);
+        await page.getByRole("button", { name: "Close", exact: true }).tap();
+        await count.tap();
+        await details.waitFor({ state: "visible" });
+        await count.tap();
+        const toggle = requireRecord(
+          (await gateway.waitForRequest("chat.reactions.set", { after: 1 })).params,
+        );
+        expect(toggle).toMatchObject({
+          messageId: agentReactionMessageId,
+          emoji: "👍",
+          active: true,
+        });
+        expect(await gateway.getRequests("chat.reactions.people")).toHaveLength(1);
       } finally {
         await suite.closeBrowserContext(context);
       }

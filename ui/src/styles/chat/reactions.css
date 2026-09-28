@@ -43,7 +43,6 @@ openclaw-chat-message-reactions {
 }
 
 .chat-reaction-chip,
-.chat-reaction-group,
 .chat-reaction-add {
   display: inline-flex;
   align-items: center;
@@ -60,30 +59,27 @@ openclaw-chat-message-reactions {
   line-height: 20px;
 }
 
-.chat-reaction-chip[aria-pressed="true"],
-.chat-reaction-group[data-reacted="true"] {
+.chat-reaction-chip[aria-pressed="true"] {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, var(--bg));
   color: var(--text);
 }
 
-.chat-reaction-chip:hover:not(:disabled),
-.chat-reaction-group:hover {
+.chat-reaction-chip:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--text);
 }
 
 .chat-reaction-chip:focus-visible,
 .chat-reaction-add:focus-visible,
-.chat-reaction-toggle:focus-visible,
-.chat-reaction-count:focus-visible,
+.chat-reaction-details-link:focus-visible,
 .chat-reaction-picker button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 .chat-reaction-chip:disabled,
-.chat-reaction-toggle:disabled,
+.chat-reaction-toggle[aria-disabled="true"],
 .chat-reaction-add:disabled {
   opacity: 0.6;
 }
@@ -109,35 +105,24 @@ openclaw-chat-message-reactions {
   height: 18px;
 }
 
-.chat-reaction-group {
-  gap: 0;
-  padding: 0;
+.chat-reaction-tooltip {
+  --openclaw-tooltip-padding: 0;
 }
 
-.chat-reaction-toggle,
-.chat-reaction-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 26px;
+.chat-reaction-details-link {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
   border: 0;
-  border-radius: 999px;
   background: transparent;
   color: inherit;
   font: inherit;
+  text-align: center;
+  cursor: pointer;
 }
 
-.chat-reaction-toggle {
-  padding: 3px 4px 3px 8px;
-}
-
-.chat-reaction-count {
-  min-width: 22px;
-  padding: 3px 8px 3px 3px;
-}
-
-.chat-reaction-count:hover {
-  background: var(--bg-hover);
+.chat-reaction-details-link:hover {
+  text-decoration: underline;
 }
 
 .chat-reaction-error {
@@ -179,7 +164,8 @@ openclaw-chat-message-reactions {
 }
 
 .chat-reaction-popover {
-  --chat-reaction-picker-cell: calc(var(--chat-reaction-emoji-size) + 12px);
+  --chat-reaction-picker-emoji-size: 16px;
+  --chat-reaction-picker-cell: calc(var(--chat-reaction-picker-emoji-size) + 16px);
   --chat-reaction-picker-gap: 4px;
   --chat-reaction-picker-padding: 6px;
 
@@ -234,7 +220,7 @@ openclaw-chat-message-reactions {
   border-radius: 8px;
   background: transparent;
   font: inherit;
-  font-size: var(--chat-reaction-emoji-size);
+  font-size: var(--chat-reaction-picker-emoji-size);
   line-height: 1;
 }
 
@@ -276,8 +262,7 @@ openclaw-chat-message-reactions {
 
   .chat-reaction-chip,
   .chat-reaction-add,
-  .chat-reaction-toggle,
-  .chat-reaction-count {
+  .chat-reaction-toggle {
     min-height: 40px;
     min-width: 40px;
   }

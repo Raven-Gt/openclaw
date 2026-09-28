@@ -190,6 +190,14 @@ export class ChatMessageReactions extends OpenClawLightDomElement {
   }
 
   protected override updated() {
+    const modal = this.querySelector("openclaw-modal-dialog");
+    if (modal && this.peopleEmoji) {
+      modal.setReturnFocusTarget(
+        [...this.querySelectorAll<HTMLButtonElement>(".chat-reaction-toggle")].find(
+          (button) => button.dataset.emoji === this.peopleEmoji,
+        ) ?? null,
+      );
+    }
     const popup = this.querySelector<WaPopup>("wa-popup");
     const trigger = this.querySelector<HTMLButtonElement>(".chat-reaction-add");
     if (popup && trigger && this.pickerOpen) {
@@ -206,6 +214,24 @@ export class ChatMessageReactions extends OpenClawLightDomElement {
       });
     }
   };
+
+  private prepareReactionPointer(this: void, event: PointerEvent) {
+    const trigger = event.currentTarget as HTMLButtonElement;
+    const tooltip = trigger.closest("openclaw-tooltip");
+    if (tooltip) {
+      tooltip.openOnClick = event.pointerType === "touch" || event.pointerType === "pen";
+    }
+  }
+
+  private activateReaction(event: MouseEvent, emoji: string) {
+    const tooltip = (event.currentTarget as HTMLButtonElement).closest("openclaw-tooltip");
+    // The tooltip's capture handler reveals names on the first touch. A second
+    // tap toggles the pill; the names bubble can open details without a write.
+    if (tooltip?.openOnClick && tooltip.hasAttribute("open")) {
+      return;
+    }
+    this.selectEmoji(emoji);
+  }
 
   private renderPicker() {
     const names = this.query.trim()
@@ -297,29 +323,41 @@ export class ChatMessageReactions extends OpenClawLightDomElement {
     const disabled = state.pending || state.loading || !this.controller?.canReact;
     return html`<div class="chat-reactions" aria-busy=${String(state.pending || state.loading)}>
         ${state.reactions.map(
-          (reaction) => html`<openclaw-tooltip content=${this.names(reaction)}>
-            <span class="chat-reaction-group" data-reacted=${String(reaction.reactedByMe)}>
-              <button
-                type="button"
-                class="chat-reaction-toggle"
-                data-emoji=${reaction.emoji}
-                aria-label=${t("chat.reactions.toggle", { emoji: reaction.emoji, count: String(reaction.count) })}
-                aria-pressed=${String(reaction.reactedByMe)}
-                ?disabled=${disabled}
-                @click=${() => this.selectEmoji(reaction.emoji)}
-              >
-                <span>${reaction.emoji}</span>
-              </button>
-              <button
-                type="button"
-                class="chat-reaction-count"
-                aria-label=${t("chat.reactions.peopleForEmoji", { emoji: reaction.emoji })}
-                aria-haspopup="dialog"
-                @click=${() => void this.loadPeople(reaction.emoji)}
-              >
-                ${reaction.count}
-              </button>
-            </span>
+          (reaction) => html`<openclaw-tooltip
+            class="chat-reaction-tooltip"
+            .disabled=${this.pickerOpen || this.peopleEmoji !== null}
+          >
+            <button
+              type="button"
+              class="chat-reaction-chip chat-reaction-toggle"
+              data-emoji=${reaction.emoji}
+              aria-label=${t("chat.reactions.toggle", { emoji: reaction.emoji, count: String(reaction.count) })}
+              aria-pressed=${String(reaction.reactedByMe)}
+              aria-disabled=${String(disabled)}
+              @pointerdown=${this.prepareReactionPointer}
+              @keydown=${(event: KeyboardEvent) => {
+                const tooltip = (event.currentTarget as HTMLButtonElement).closest(
+                  "openclaw-tooltip",
+                );
+                if (tooltip) {
+                  tooltip.openOnClick = false;
+                }
+              }}
+              @click=${(event: MouseEvent) => this.activateReaction(event, reaction.emoji)}
+            >
+              <span class="chat-reaction-emoji" aria-hidden="true">${reaction.emoji}</span>
+              <span class="chat-reaction-count" aria-hidden="true">${reaction.count}</span>
+            </button>
+            <button
+              slot="content"
+              type="button"
+              class="chat-reaction-details-link"
+              aria-label=${t("chat.reactions.peopleForEmoji", { emoji: reaction.emoji })}
+              aria-haspopup="dialog"
+              @click=${() => void this.loadPeople(reaction.emoji)}
+            >
+              ${this.names(reaction)}
+            </button>
           </openclaw-tooltip>`,
         )}
         ${

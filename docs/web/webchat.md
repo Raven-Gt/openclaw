@@ -86,10 +86,12 @@ find another. You can also select an existing emoji to add your reaction. Select
 a highlighted emoji again to remove your own reaction. Each
 person or agent counts once per emoji, even if a request is retried.
 
-Reaction chips show the emoji and the number of people and agents who selected it. Hover or
-focus an emoji to see names in a small bubble. Select the count to open the
-complete, paginated **Who reacted** list without changing your reaction; this also
-works on touch screens. People who can read the session can see its
+Each reaction chip is one button: its emoji and count toggle the same reaction,
+not separate actions. Hover or focus the chip to see names in a small bubble,
+then select that bubble to open the complete, paginated **Who reacted** list
+without changing your reaction. Keyboard users can Tab from the chip into the
+bubble. On touch screens, the first tap reveals the names bubble; select it for
+details, or tap the chip again to toggle your reaction. People who can read the session can see its
 reactions. Adding or removing a reaction requires the existing session
 participation permission; it does not require owning the original message.
 
