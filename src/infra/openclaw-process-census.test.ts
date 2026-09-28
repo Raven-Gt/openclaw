@@ -78,6 +78,8 @@ beforeEach(() => {
   });
   directory.mockReset().mockImplementation(() => Array.from(rows.keys(), String));
   read.mockReset().mockImplementation((file: string) => {
+    // Native Windows path operations can add a drive and separators to these POSIX fixtures.
+    file = file.replaceAll("\\", "/").replace(/^[A-Za-z]:/, "");
     if (file.endsWith("/package.json")) {
       return JSON.stringify({
         name: file === "/app/package.json" ? "openclaw" : "unrelated-service",
