@@ -125,7 +125,9 @@ export function saveCronStoreChangesInDatabase(
     }
     if (!after) {
       if (current) {
-        deleteCronJobRowInDatabase(db, storeKey, jobId);
+        deleteCronJobRowInDatabase(db, storeKey, jobId, {
+          preserveScratch: opts?.preserveRemovedJobScratch,
+        });
       }
       currentById.delete(jobId);
       continue;

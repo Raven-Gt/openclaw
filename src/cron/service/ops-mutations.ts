@@ -656,8 +656,8 @@ export async function removeAgentJobsTransactional<T>(
     state.store.jobs = state.store.jobs.filter((job) => !removedJobIds.has(job.id));
     const postPersistNotifications: DeferredCronNotifications = [];
     recomputeNextRunsForMaintenance(state, { deferredNotifications: postPersistNotifications });
-    // Cron is durable first, but notifications stay speculative until the roster commits.
-    await persistOrRestore(state, snapshot);
+    // Cron is durable first; scratch cleanup and notifications wait for the roster outcome.
+    await persistOrRestore(state, snapshot, { preserveRemovedJobScratch: true });
     let result: T;
     try {
       result = await commit();

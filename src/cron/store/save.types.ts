@@ -13,6 +13,7 @@ export type CronStoreSaveOptions = {
 
 export type CronStoreChangesOptions = {
   preserveConcurrentAdds?: boolean;
+  preserveRemovedJobScratch?: boolean;
 };
 
 export type PreparedCronStoreChanges = {

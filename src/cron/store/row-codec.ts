@@ -604,15 +604,18 @@ export function deleteCronJobRowInDatabase(
   db: DatabaseSync,
   storeKey: string,
   jobId: string,
+  opts?: { preserveScratch?: boolean },
 ): void {
   revokeCronJobStandingGrants(db, jobId);
-  executeSqliteQuerySync(
-    db,
-    getCronStoreKysely(db)
-      .deleteFrom("cron_job_scratch")
-      .where("store_key", "=", storeKey)
-      .where("job_id", "=", jobId),
-  );
+  if (!opts?.preserveScratch) {
+    executeSqliteQuerySync(
+      db,
+      getCronStoreKysely(db)
+        .deleteFrom("cron_job_scratch")
+        .where("store_key", "=", storeKey)
+        .where("job_id", "=", jobId),
+    );
+  }
   executeSqliteQuerySync(
     db,
     getCronStoreKysely(db)

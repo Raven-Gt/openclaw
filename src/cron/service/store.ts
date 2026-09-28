@@ -44,6 +44,7 @@ type CronPersistence = {
 type PersistOptions = {
   stateOnly?: boolean;
   preserveConcurrentAdds?: boolean;
+  preserveRemovedJobScratch?: boolean;
   suppressScheduledJobId?: string;
   postPersistNotifications?: DeferredCronNotifications;
   transactionHooks?: CronStoreTransactionHooks;
@@ -435,6 +436,7 @@ async function persistOrRestoreUsing(
         state.store,
         {
           ...(opts.preserveConcurrentAdds ? { preserveConcurrentAdds: true } : {}),
+          ...(opts.preserveRemovedJobScratch ? { preserveRemovedJobScratch: true } : {}),
           ...(opts.transactionHooks ? { transactionHooks: opts.transactionHooks } : {}),
         },
       );
