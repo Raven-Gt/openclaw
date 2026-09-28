@@ -18,6 +18,7 @@ import { TestReactiveControllerHost } from "./reactive-controller-host.test-supp
 const REMOTE_PROJECT = {
   identity: "openclaw/openclaw",
   cloneUrl: "https://github.com/openclaw/openclaw.git",
+  defaultBranch: "main",
 };
 
 function createRepositoryFixture(
@@ -101,6 +102,159 @@ function createRepositoryFixture(
 }
 
 describe("DraftPlaceState repository selection", () => {
+  it("adopts the configured default repository until the user chooses a folder", () => {
+    const configured = createRepositoryFixture();
+    configured.readPreference.mockReturnValue({ folder: "/workspace" });
+    let projectsReady = false;
+    vi.spyOn(configured.browser, "projectsReady", "get").mockImplementation(() => projectsReady);
+    vi.spyOn(configured.browser, "projectsLoading", "get").mockImplementation(() => !projectsReady);
+    vi.spyOn(configured.browser, "defaultRemoteProject", "get").mockReturnValue({
+      identity: "acme/private-repo",
+      cloneUrl: "https://ghe.example.test/acme/private-repo.git",
+      defaultBranch: "main",
+    });
+    vi.spyOn(configured.browser, "defaultRemoteProjectProfileId", "get").mockReturnValue("aws");
+    configured.state.adoptAgentDefaults();
+    configured.state.restorePreferenceSelections();
+    expect(configured.state.placementPreferenceReady).toBe(false);
+    expect(configured.browser.remoteProject).toBeNull();
+
+    projectsReady = true;
+    configured.state.restorePreferenceSelections();
+    expect(configured.browser.remoteProject).toEqual({
+      identity: "acme/private-repo",
+      cloneUrl: "https://ghe.example.test/acme/private-repo.git",
+      defaultBranch: "main",
+    });
+    expect(configured.state.baseRef).toBe("main");
+    expect(configured.state.cloudProfileId).toBe("aws");
+    expect(configured.state.remoteRepository).toEqual({
+      url: "https://ghe.example.test/acme/private-repo.git",
+      ref: "main",
+    });
+    expect(
+      buildSelectedSessionCreateParams(configured.state, {
+        message: "Inspect the issue",
+        visibility: "normal",
+      }),
+    ).toMatchObject({
+      message: "",
+      repository: { url: "https://ghe.example.test/acme/private-repo.git", ref: "main" },
+    });
+    expect(configured.state.placementPreferenceReady).toBe(true);
+
+    configured.persistPreference.mockClear();
+    configured.state.clearProjectSelection();
+    expect(configured.persistPreference).toHaveBeenCalledWith(
+      "main",
+      "/workspace",
+      expect.objectContaining({ defaultRepositoryOptOut: true, remoteProject: null }),
+    );
+  });
+
+  it("does not clone a configured worker repository onto the Gateway", () => {
+    const configured = createRepositoryFixture();
+    configured.readPreference.mockReturnValue({
+      folder: "/workspace",
+      remoteProject: {
+        identity: "acme/private-repo",
+        cloneUrl: "https://ghe.example.test/acme/private-repo.git",
+        defaultBranch: "main",
+      },
+    });
+    vi.spyOn(configured.browser, "projectsReady", "get").mockReturnValue(true);
+    vi.spyOn(configured.browser, "defaultRemoteProject", "get").mockReturnValue({
+      identity: "acme/private-repo",
+      cloneUrl: "https://ghe.example.test/acme/private-repo.git",
+      defaultBranch: "main",
+    });
+    vi.spyOn(configured.browser, "defaultRemoteProjectProfileId", "get").mockReturnValue(
+      "missing-worker-profile",
+    );
+
+    configured.state.adoptAgentDefaults();
+    configured.state.restorePreferenceSelections();
+
+    expect(configured.browser.remoteProject).toBeNull();
+    expect(configured.state.remoteRepository).toBeUndefined();
+    expect(configured.state.cloudProfileId).toBe("");
+  });
+
+  it("moves a saved configured repository from the Gateway onto its worker profile", () => {
+    const configured = createRepositoryFixture();
+    configured.readPreference.mockReturnValue({
+      folder: "/workspace",
+      remoteProject: {
+        identity: "acme/private-repo",
+        cloneUrl: "https://ghe.example.test/acme/private-repo.git",
+        defaultBranch: "main",
+      },
+      baseRef: "main",
+      where: { kind: "local" },
+    });
+    let projectsReady = false;
+    vi.spyOn(configured.browser, "projectsReady", "get").mockImplementation(() => projectsReady);
+    vi.spyOn(configured.browser, "defaultRemoteProject", "get").mockImplementation(() =>
+      projectsReady
+        ? {
+            identity: "acme/private-repo",
+            cloneUrl: "https://ghe.example.test/acme/private-repo.git",
+            defaultBranch: "main",
+          }
+        : null,
+    );
+    vi.spyOn(configured.browser, "defaultRemoteProjectProfileId", "get").mockImplementation(() =>
+      projectsReady ? "aws" : "",
+    );
+
+    configured.state.adoptAgentDefaults();
+    configured.state.restorePreferenceSelections();
+    expect(configured.browser.remoteProject).toBeNull();
+    expect(configured.state.placementPreferenceReady).toBe(false);
+
+    projectsReady = true;
+    configured.state.restorePreferenceSelections();
+
+    expect(configured.browser.remoteProject?.cloneUrl).toBe(
+      "https://ghe.example.test/acme/private-repo.git",
+    );
+    expect(configured.state.cloudProfileId).toBe("aws");
+    expect(configured.state.remoteRepository).toEqual({
+      url: "https://ghe.example.test/acme/private-repo.git",
+      ref: "main",
+    });
+  });
+
+  it("remembers a remote project and restores its default branch", () => {
+    const selected = createRepositoryFixture();
+    selected.state.selectRemoteProject(REMOTE_PROJECT);
+    expect(selected.persistPreference).toHaveBeenCalledWith(
+      "",
+      "/workspace",
+      expect.objectContaining({ projectId: "", remoteProject: REMOTE_PROJECT }),
+    );
+    expect(selected.state.baseRef).toBe("main");
+
+    const restored = createRepositoryFixture();
+    vi.spyOn(restored.browser, "projectsReady", "get").mockReturnValue(true);
+    restored.readPreference.mockReturnValue({
+      remoteProject: REMOTE_PROJECT,
+      baseRef: "main",
+      where: { kind: "cloud", id: "aws" },
+    });
+    restored.state.adoptAgentDefaults();
+    restored.state.restorePreferenceSelections();
+
+    expect(restored.browser.remoteProject).toEqual(REMOTE_PROJECT);
+    expect(restored.state.baseRef).toBe("main");
+    expect(restored.state.cloudProfileId).toBe("aws");
+    expect(restored.state.remoteRepository).toEqual({
+      url: REMOTE_PROJECT.cloneUrl,
+      ref: "main",
+    });
+    expect(restored.state.placementPreferenceReady).toBe(true);
+  });
+
   it("leaves the worktree base to the Gateway unless a branch was selected", async () => {
     const { state, request, requestUpdate } = createRepositoryFixture({ workspaceGit: true });
     const discovered = createDeferred();

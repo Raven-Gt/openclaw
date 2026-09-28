@@ -41,7 +41,10 @@ type GitHubDetailTarget =
 
 /** Host consumers depend on this public read contract, not the plugin's source graph. */
 type GitHubPublicApi = {
-  GITHUB_API_ORIGIN: string;
+  configureGitHubApi: (apiBaseUrl: string | undefined) => void;
+  getConfiguredGitHubApiUrls: () => { baseUrl: string; graphqlUrl: string };
+  GITHUB_API_BASE_URL: string;
+  GITHUB_GRAPHQL_URL: string;
   GITHUB_REQUEST_TIMEOUT_MS: number;
   ControlUiGitHubError: new (
     statusCode: number,
@@ -151,6 +154,8 @@ export const gitHubPublicApi = createLazyFacadeObjectValue<GitHubPublicApi>(() =
     dirName: "github",
     artifactBasename: "api.js",
   });
+  const configure = () =>
+    library.configureGitHubApi(getRuntimeConfigSnapshot()?.gateway?.github?.apiBaseUrl);
   const resolveScope = (env: NodeJS.ProcessEnv = process.env) => {
     const token = githubApiToken(env);
     return { token, cacheScope: library.githubApiCredentialCacheScope(token) };
@@ -176,6 +181,22 @@ export const gitHubPublicApi = createLazyFacadeObjectValue<GitHubPublicApi>(() =
   };
   return {
     ...library,
+    get GITHUB_API_BASE_URL() {
+      configure();
+      return library.getConfiguredGitHubApiUrls().baseUrl;
+    },
+    get GITHUB_GRAPHQL_URL() {
+      configure();
+      return library.getConfiguredGitHubApiUrls().graphqlUrl;
+    },
+    fetchGitHubApi(...args) {
+      configure();
+      return library.fetchGitHubApi(...args);
+    },
+    fetchGitHubJson(...args) {
+      configure();
+      return library.fetchGitHubJson(...args);
+    },
     resolveGitHubApiCredentialScope: resolveScope,
     formatControlUiGitHubPreviewError(error) {
       return isTrustedSecretSurfaceUnavailableError(error)
@@ -183,6 +204,7 @@ export const gitHubPublicApi = createLazyFacadeObjectValue<GitHubPublicApi>(() =
         : library.formatControlUiGitHubPreviewError(error);
     },
     loadControlUiGitHubPreview(target, identity, fetchImpl, refresh) {
+      configure();
       return library.loadControlUiGitHubPreview(
         target,
         resolveReadIdentity(identity),
@@ -191,6 +213,7 @@ export const gitHubPublicApi = createLazyFacadeObjectValue<GitHubPublicApi>(() =
       );
     },
     loadGitHubDetail(target, identity, fetchImpl, refresh) {
+      configure();
       return library.loadGitHubDetail(target, resolveReadIdentity(identity), fetchImpl, refresh);
     },
   };

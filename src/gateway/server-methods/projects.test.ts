@@ -3,6 +3,7 @@ import path from "node:path";
 import type { StatementSync } from "node:sqlite";
 import { beforeEach, expect, test, vi } from "vitest";
 import { observeSqliteReadSql } from "../../../test/helpers/sqlite-statement-execution-counter.js";
+import * as githubReadIdentity from "../../agents/github-read-identity.js";
 import { insertRegistryWorktree } from "../../agents/worktrees/registry.js";
 import { loadCombinedSessionStoreForGatewayCore } from "../../config/sessions/combined-store-gateway.js";
 import {
@@ -37,6 +38,7 @@ import {
 } from "./projects.test-support.js";
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
   listRegistryRecords.mockClear();
   resolveRepositoryIdentity.mockClear();
 });
@@ -44,6 +46,61 @@ beforeEach(() => {
 function withProjectState(run: (state: OpenClawTestState) => Promise<void>) {
   return withOpenClawTestState({ layout: "state-only", prefix: "projects-rpc-" }, run);
 }
+
+test("projects.searchRemote uses the opted-in native system GitHub identity", async () => {
+  const token = vi
+    .spyOn(githubReadIdentity, "readCachedNativeGitHubToken")
+    .mockResolvedValue("native-system-token");
+  const search = vi.spyOn(projectGitHubSearch, "searchRemoteProjects").mockResolvedValue({
+    credential: "configured",
+    projects: [],
+  });
+  try {
+    expect(
+      await invokeProjectMethod(
+        "projects.searchRemote",
+        { query: "acme/private-repo" },
+        { gateway: { projects: { nativeGitHubSearch: true } } },
+      ),
+    ).toEqual({
+      ok: true,
+      payload: { credential: "configured", projects: [] },
+      error: undefined,
+    });
+    expect(token).toHaveBeenCalledWith(process.env);
+    expect(search).toHaveBeenCalledWith("acme/private-repo", { token: "native-system-token" });
+  } finally {
+    search.mockRestore();
+    token.mockRestore();
+  }
+});
+
+test("projects.list exposes a normalized configured default repository", async () => {
+  const config = {
+    gateway: {
+      github: { host: "ghe.example.test" },
+      projects: {
+        defaultRepository: {
+          url: "https://ghe.example.test/Acme/Private-Repo.git",
+          ref: "main",
+        },
+      },
+    },
+    cloudWorkers: { projectProfiles: { "ghe.example.test/acme/private-repo": "example-azure" } },
+  };
+
+  expect(await invokeProjectMethod("projects.list", {}, config)).toMatchObject({
+    ok: true,
+    payload: {
+      defaultRepository: {
+        identity: "acme/private-repo",
+        url: "https://ghe.example.test/acme/private-repo.git",
+        ref: "main",
+        profileId: "example-azure",
+      },
+    },
+  });
+});
 
 test.each([
   {

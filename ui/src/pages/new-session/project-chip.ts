@@ -29,6 +29,7 @@ export function projectCloneInput(value: string): string | null {
 export type DraftRemoteProject = Readonly<{
   identity: string;
   cloneUrl: string;
+  defaultBranch?: string;
   projectId?: string;
 }>;
 
@@ -343,6 +344,9 @@ export function renderProjectChip(params: {
                                   params.onSelectRemoteProject({
                                     identity: project.fullName,
                                     cloneUrl: project.cloneUrl,
+                                    ...(project.defaultBranch
+                                      ? { defaultBranch: project.defaultBranch }
+                                      : {}),
                                   }),
                               },
                               params.submitting || !params.projectAddAvailable,

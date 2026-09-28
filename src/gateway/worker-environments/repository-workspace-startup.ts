@@ -1,4 +1,9 @@
-import { getSessionRepositoryWorkspaceStore } from "../../state/session-repository-workspaces.js";
+import fs from "node:fs/promises";
+import { hasErrnoCode } from "../../infra/errno.js";
+import {
+  getSessionRepositoryWorkspaceStore,
+  repositoryWorkspaceArtifactsAreEphemeral,
+} from "../../state/session-repository-workspaces.js";
 import type { SessionRepositoryWorkspaceRecord } from "../../state/session-repository-workspaces.types.js";
 import {
   stageSessionRepositoryCheckpoint,
@@ -27,6 +32,21 @@ export async function syncSessionRepositoryWorkspace(params: {
 }) {
   const store = getSessionRepositoryWorkspaceStore();
   let repository = params.repository;
+  if (repository.checkpointRef && repositoryWorkspaceArtifactsAreEphemeral()) {
+    try {
+      await fs.access(store.artifactPath(repository.workspaceId));
+    } catch (error) {
+      if (!hasErrnoCode(error, "ENOENT")) {
+        throw error;
+      }
+      params.assertCurrent();
+      repository = store.discardCheckpoint({
+        workspaceId: repository.workspaceId,
+        expectedRevision: repository.revision,
+        assertCurrent: params.assertCurrent,
+      });
+    }
+  }
   const prepared = params.preparedRepository;
   if (prepared && repository.baseCommit && prepared.baseCommit !== repository.baseCommit) {
     throw new Error("Prepared repository does not match the pinned session commit");

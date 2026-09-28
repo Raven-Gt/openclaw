@@ -2,6 +2,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../../config/runtime-snapshot.js";
 import { NodeWorkerWorkspaceRuntime } from "../../node-host/node-worker-workspace.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { closeOpenClawStateDatabaseByPathAsync } from "../../state/openclaw-state-db-cache.js";
@@ -45,6 +49,8 @@ let nodeDatabasePath: string | undefined;
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  clearRuntimeConfigSnapshot();
   for (const pathname of [nodeDatabasePath, databasePath]) {
     if (pathname) {
       await closeOpenClawStateDatabaseByPathAsync(pathname);
@@ -56,7 +62,7 @@ afterEach(async () => {
   nodeDatabasePath = undefined;
 });
 
-async function fixture(runSetupScript = false, preparedNode = false) {
+async function fixture(runSetupScript = false, preparedNode = false, ephemeralArtifacts = false) {
   state = await createOpenClawTestState({
     label: "repository-startup",
     layout: "state-only",
@@ -102,6 +108,15 @@ async function fixture(runSetupScript = false, preparedNode = false) {
   ]);
   const baseCommit = await requireWorkspaceResultGit(remote, ["rev-parse", "HEAD"]);
   const base = await captureWorkspaceManifest({ root: remote, baseCommit });
+  if (ephemeralArtifacts) {
+    setRuntimeConfigSnapshot({
+      gateway: {
+        projects: {
+          workspaceArtifacts: { root: state.path("ephemeral-artifacts"), ephemeral: true },
+        },
+      },
+    });
+  }
   const store = getSessionRepositoryWorkspaceStore();
   databasePath = store.path;
   let current = true;
@@ -286,6 +301,29 @@ it("accepts the initial SQLite and bare Git checkpoint before sync can finish or
     ]),
   ).toBe("true");
   expect(f.resume).toHaveBeenCalledOnce();
+});
+
+it("reconstructs from the pinned branch when an ephemeral checkpoint was lost", async () => {
+  const f = await fixture(false, false, true);
+  await f.start();
+  const accepted = f.store.get(f.repository.workspaceId)!;
+  expect(accepted.checkpointRef).toMatch(/^refs\/openclaw\/worker-results\//u);
+  await fs.rm(f.store.artifactPath(accepted.workspaceId), { recursive: true, force: true });
+  f.syncWorkspace.mockClear();
+
+  await f.start({ repository: accepted, recovery: true });
+
+  expect(f.syncWorkspace).toHaveBeenCalledTimes(1);
+  expect(f.syncWorkspace.mock.calls[0]?.[0].source).toMatchObject({
+    kind: "repository",
+    ref: accepted.requestedRef ?? undefined,
+    branch: accepted.branch,
+    baseCommit: accepted.baseCommit,
+  });
+  expect(f.syncWorkspace.mock.calls[0]?.[0].source).not.toHaveProperty("checkpoint");
+  expect(f.store.get(accepted.workspaceId)?.checkpointRef).toMatch(
+    /^refs\/openclaw\/worker-results\//u,
+  );
 });
 
 it("does not run setup when the repository did not request it", async () => {

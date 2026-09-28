@@ -57,6 +57,7 @@ import { executeWorkerInferenceStoreCommand } from "../gateway/worker-environmen
 import { startWorkerPlacementDispatchInWorker } from "../gateway/worker-environments/placement-dispatch-store.worker.js";
 import { isPlacementTurnClaimCommand } from "../gateway/worker-environments/placement-turn-claims.worker-contract.js";
 import { executePlacementTurnClaimCommand } from "../gateway/worker-environments/placement-turn-claims.worker.js";
+import { executePreparedPoolPresenceCommand } from "../gateway/worker-environments/prepared-pool-presence-runtime.js";
 import { isWorkerEnvironmentCommand } from "../gateway/worker-environments/store-worker-contract.js";
 import { executeWorkerEnvironmentCommand } from "../gateway/worker-environments/store.worker.js";
 import {
@@ -349,6 +350,16 @@ export function executeSharedStateCommand(
     return executeOnboardingRecommendationCommand(command, {
       database: open(),
       ...stateOptions(),
+    });
+  }
+  if (
+    command.type === "preparedPoolPresence.read" ||
+    command.type === "preparedPoolPresence.write"
+  ) {
+    return executePreparedPoolPresenceCommand({
+      command,
+      database: open(),
+      env: getSqliteWorkerStateContext().environment,
     });
   }
   if (command.type === "userPreferences.read" || command.type === "userPreferences.write") {

@@ -3,6 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { Selectable, Updateable } from "kysely";
+import { getRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { executeSqliteQueryTakeFirstSync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
 import { sessionChanges } from "../sessions/session-row-changes.js";
 import { executeExistingOpenClawStateRead } from "./openclaw-state-db-readonly.js";
@@ -28,6 +30,26 @@ const ensured = new WeakSet<DatabaseSync>();
 const query = (db: DatabaseSync) => getNodeSqliteKysely<Pick<DB, typeof table>>(db);
 const manifestPattern = /^sha256:[a-f0-9]{64}$/u;
 const resultRefPattern = /^refs\/openclaw\/worker-results\/[A-Za-z0-9-]+$/u;
+
+export function repositoryWorkspaceArtifactsAreEphemeral(
+  config: OpenClawConfig | null = getRuntimeConfigSnapshot(),
+): boolean {
+  return config?.gateway?.projects?.workspaceArtifacts?.ephemeral === true;
+}
+
+function resolveRepositoryWorkspaceArtifactRoot(
+  databasePath: string,
+  config: OpenClawConfig | null = getRuntimeConfigSnapshot(),
+): string {
+  const configured = config?.gateway?.projects?.workspaceArtifacts?.root;
+  if (configured) {
+    if (!path.isAbsolute(configured) || path.normalize(configured) !== configured) {
+      throw new Error("Repository workspace artifact root must be an absolute normalized path");
+    }
+    return configured;
+  }
+  return path.join(path.dirname(databasePath), "repository-workspaces");
+}
 
 function bounded(value: string, field: string, limit: number): string {
   const result = value.trim();
@@ -107,10 +129,16 @@ export async function findSessionRepositoryWorkspaces(
 }
 
 export function createSessionRepositoryWorkspaceStore(
-  options: { database?: OpenClawStateDatabase; path?: string; now?: () => number } = {},
+  options: {
+    database?: OpenClawStateDatabase;
+    path?: string;
+    now?: () => number;
+    config?: OpenClawConfig;
+  } = {},
 ) {
   const databasePath =
     options.database?.path ?? path.resolve(options.path ?? resolveOpenClawStateSqlitePath());
+  const artifactRoot = resolveRepositoryWorkspaceArtifactRoot(databasePath, options.config);
   const now = options.now ?? Date.now;
   const read = () => openOpenClawStateDatabase({ path: databasePath }).db;
   const write = <T>(operation: (db: DatabaseSync) => T) =>
@@ -161,7 +189,7 @@ export function createSessionRepositoryWorkspaceStore(
     if (!/^[a-f0-9-]{36}$/u.test(workspaceId)) {
       throw new Error("Repository workspace id is invalid");
     }
-    return path.join(path.dirname(databasePath), "repository-workspaces", `${workspaceId}.git`);
+    return path.join(artifactRoot, `${workspaceId}.git`);
   };
   return {
     path: databasePath,
@@ -268,6 +296,9 @@ export function createSessionRepositoryWorkspaceStore(
         }
         return { checkpoint_ref: input.checkpointRef, manifest_hash: input.manifestHash };
       });
+    },
+    discardCheckpoint(input: WorkspaceMutation): SessionRepositoryWorkspaceRecord {
+      return mutate(input, () => ({ checkpoint_ref: null, manifest_hash: null }));
     },
     async delete(input: { workspaceId: string; assertCurrent: () => void }): Promise<void> {
       const root = artifactPath(input.workspaceId);

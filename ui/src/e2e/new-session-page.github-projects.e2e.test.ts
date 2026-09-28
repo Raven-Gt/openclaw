@@ -27,12 +27,67 @@ const remoteSearchResult = {
       description: "Personal AI assistant",
       cloneUrl: "https://github.com/openclaw/openclaw.git",
       webUrl: "https://github.com/openclaw/openclaw",
+      defaultBranch: "main",
       private: false,
     },
   ],
 };
 
 suite.define(() => {
+  it("starts from the configured repository when the user has no saved project choice", async () => {
+    const pageOptions = {
+      locale: "en-US",
+      serviceWorkers: "block" as const,
+      viewport: { height: 900, width: 1280 },
+    };
+    await suite.withPage(pageOptions, async ({ page }) => {
+      const gateway = await installMockGateway(page, {
+        workspace: WORKSPACE,
+        workspaceGit: false,
+        featureMethods: ["projects.list", "sessions.create"],
+        methodResponses: { "projects.list": { projects: [] } },
+      });
+      await page.goto(`${suite.server.baseUrl}new`);
+      await gateway.waitForRequest("projects.list");
+      expect(await page.locator("#new-session-project-trigger").textContent()).not.toContain(
+        "acme/private-repo",
+      );
+      await captureProjectUiProof(suite, page, "configured-repository-before.png");
+    });
+
+    await suite.withPage(pageOptions, async ({ page }) => {
+      const gateway = await installMockGateway(page, {
+        workspace: WORKSPACE,
+        workspaceGit: false,
+        featureMethods: ["projects.list", "sessions.create"],
+        methodResponses: {
+          "projects.list": {
+            projects: [],
+            defaultRepository: {
+              identity: "acme/private-repo",
+              url: "https://ghe.example.test/acme/private-repo.git",
+              ref: "main",
+            },
+          },
+          "sessions.create": { key: "agent:main:configured-repository-e2e" },
+        },
+      });
+      await page.goto(`${suite.server.baseUrl}new`);
+      await gateway.waitForRequest("projects.list");
+      await pollLocatorText(page.locator("#new-session-project-trigger")).toContain(
+        "acme/private-repo",
+      );
+      await captureProjectUiProof(suite, page, "configured-repository-after.png");
+      await page.locator(".new-session-page__message").fill("inspect the repository");
+      await page.getByRole("button", { name: "Start session" }).click();
+      const created = await gateway.waitForRequest("sessions.create");
+      expect(created.params).toMatchObject({
+        projectGitUrl: "https://ghe.example.test/acme/private-repo.git",
+        message: "inspect the repository",
+      });
+    });
+  });
+
   it("offers a worktree for a GitHub result before its checkout exists", async () => {
     await suite.withPage(
       {
@@ -90,7 +145,7 @@ suite.define(() => {
         );
         const baseRef = checkoutBaseRefInput(checkoutPopover);
         expect(await baseRef.getAttribute("placeholder")).toBe("From");
-        expect(await baseRef.inputValue()).toBe("");
+        expect(await baseRef.inputValue()).toBe("main");
         expect(await checkoutPopover.locator("datalist option").count()).toBe(0);
         await captureProjectUiProof(suite, page, "github-worktree-selected.png", {
           surface: checkoutPopover.locator('wa-popup [part="popup"]'),

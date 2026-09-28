@@ -5,7 +5,7 @@ import type {
   ProjectsSearchRemoteResult,
 } from "../../packages/gateway-protocol/src/index.js";
 import { pruneMapToMaxSize } from "../infra/map-size.js";
-import { parseProjectGitUrl } from "../projects/project-git-url.js";
+import { parseConfiguredProjectGitUrl } from "../projects/project-git-url.runtime.js";
 import { gitHubPublicApi } from "./github-public-api.js";
 
 const SEARCH_CACHE_MS = 60_000;
@@ -37,12 +37,13 @@ function parseRepository(value: unknown): RemoteProject | null {
   if (!fullName || !name) {
     return null;
   }
-  const clone = parseProjectGitUrl(readNonBlankString(value.clone_url) ?? "");
+  const clone = parseConfiguredProjectGitUrl(readNonBlankString(value.clone_url) ?? "");
   const webUrl = boundedString(readNonBlankString(value.html_url), 2048);
   if (!clone || !webUrl) {
     return null;
   }
   const description = boundedString(readNonBlankString(value.description), 500);
+  const defaultBranch = boundedString(readNonBlankString(value.default_branch), 255);
   return {
     name: name.slice(0, 100),
     fullName: fullName.slice(0, 200),
@@ -50,6 +51,7 @@ function parseRepository(value: unknown): RemoteProject | null {
     webUrl,
     private: value.private === true,
     ...(description ? { description } : {}),
+    ...(defaultBranch ? { defaultBranch } : {}),
   };
 }
 
@@ -78,7 +80,7 @@ async function loadExactRepository(
   fetchImpl: typeof fetch,
   token: string | undefined,
 ): Promise<RemoteProject | null> {
-  const url = new URL(`/repos/${query}`, gitHubPublicApi.GITHUB_API_ORIGIN);
+  const url = new URL(`repos/${query}`, `${gitHubPublicApi.GITHUB_API_BASE_URL}/`);
   // Optional enrichment lane: a miss, API error, or transport rejection must
   // degrade to search-only results, never sink the whole picker query.
   try {
@@ -92,7 +94,7 @@ async function loadAffiliatedRepositories(
   fetchImpl: typeof fetch,
   token: string,
 ): Promise<RemoteProject[]> {
-  const url = new URL("/user/repos", gitHubPublicApi.GITHUB_API_ORIGIN);
+  const url = new URL("user/repos", `${gitHubPublicApi.GITHUB_API_BASE_URL}/`);
   url.searchParams.set("affiliation", "owner,collaborator,organization_member");
   url.searchParams.set("sort", "updated");
   url.searchParams.set("direction", "desc");
@@ -112,7 +114,7 @@ async function loadRepositorySearch(
   fetchImpl: typeof fetch,
   token: string | undefined,
 ): Promise<RemoteProject[]> {
-  const url = new URL("/search/repositories", gitHubPublicApi.GITHUB_API_ORIGIN);
+  const url = new URL("search/repositories", `${gitHubPublicApi.GITHUB_API_BASE_URL}/`);
   url.searchParams.set("q", `${query} in:name,description`);
   url.searchParams.set("per_page", String(SEARCH_RESULT_LIMIT));
   return repositoryArray(await gitHubPublicApi.fetchGitHubJson(url.href, fetchImpl, token));
@@ -153,10 +155,21 @@ async function searchProjectsUncached(params: {
 /** Searches affiliated and public GitHub repositories for the project picker. */
 export function searchRemoteProjects(
   query: string,
-  options: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch; now?: number } = {},
+  options: {
+    env?: NodeJS.ProcessEnv;
+    fetchImpl?: typeof fetch;
+    now?: number;
+    token?: string;
+  } = {},
 ): Promise<ProjectsSearchRemoteResult> {
   const normalizedQuery = query.trim().toLowerCase();
-  const { token, cacheScope } = gitHubPublicApi.resolveGitHubApiCredentialScope(options.env);
+  const { token, cacheScope } =
+    options.token === undefined
+      ? gitHubPublicApi.resolveGitHubApiCredentialScope(options.env)
+      : {
+          token: options.token,
+          cacheScope: gitHubPublicApi.githubApiCredentialCacheScope(options.token),
+        };
   // Gateway reloads run in-process, so cache results must stay credential-scoped.
   const cacheKey = `${normalizedQuery}\0${cacheScope}`;
   const now = options.now ?? Date.now();

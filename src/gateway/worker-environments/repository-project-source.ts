@@ -2,7 +2,7 @@ import { normalizeAgentIdStrict } from "@openclaw/normalization-core/agent-id";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { z } from "zod";
 import { MANAGED_GITHUB_PROFILE_ID_PATTERN } from "../../config/github-identity-profile-id.js";
-import { parseProjectGitUrl } from "../../projects/project-git-url.js";
+import { parseConfiguredProjectGitUrl } from "../../projects/project-git-url.runtime.js";
 
 const AgentId = z
   .string()
@@ -55,7 +55,7 @@ const RepositoryProject = z.object({
       url: z
         .string()
         .max(2048)
-        .refine((value) => parseProjectGitUrl(value)?.url === value),
+        .refine((value) => parseConfiguredProjectGitUrl(value)?.url === value),
       repositoryId: z
         .string()
         .min(1)
