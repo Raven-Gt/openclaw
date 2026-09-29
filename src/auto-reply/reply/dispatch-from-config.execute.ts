@@ -63,7 +63,6 @@ export async function executeDispatch(state: PrepareDispatchExecutionReadyState)
     sessionTtsAuto,
     shouldForwardProgressCallback,
     shouldRouteToOriginating,
-    shouldSuppressDefaultToolProgressMessages,
     trackDispatchLifecycleWork,
     typing,
     waitForPendingDirectBlockReplyDelivery,
@@ -297,10 +296,12 @@ export async function executeDispatch(state: PrepareDispatchExecutionReadyState)
                     ) {
                       return;
                     }
-                    if (toolResultProgressCallback && isFastModeAutoProgress) {
-                      if (toolResultProgressVisible || !shouldDeliverFastModeAutoProgress) {
-                        return;
-                      }
+                    if (
+                      toolResultProgressCallback &&
+                      isFastModeAutoProgress &&
+                      (toolResultProgressVisible || !shouldDeliverFastModeAutoProgress)
+                    ) {
+                      return;
                     }
                     if (state.sendPolicyDenied) {
                       return;
@@ -352,12 +353,11 @@ export async function executeDispatch(state: PrepareDispatchExecutionReadyState)
                       return;
                     }
                     if (
-                      shouldSuppressDefaultToolProgressMessages() &&
-                      !bypassToolSummarySuppression
+                      !state.shouldSendToolSummaries() &&
+                      !bypassToolSummarySuppression &&
+                      !requiresDurableToolResultDelivery(deliveryPayload)
                     ) {
-                      if (!requiresDurableToolResultDelivery(deliveryPayload)) {
-                        return;
-                      }
+                      return;
                     }
                     const askUserQuestionId = readAskUserQuestionId(deliveryPayload);
                     if (
@@ -399,26 +399,11 @@ export async function executeDispatch(state: PrepareDispatchExecutionReadyState)
                     steps,
                     source: payload.source,
                   };
-                  markProgress();
-                  await waitForPendingDirectBlockReplyDelivery(
-                    getDispatchAbortOperation()?.abortSignal,
-                  );
+                  await forwardToolProgress(() => state.onPlanUpdateFromReplyOptions?.(normalized));
                   if (isDispatchOperationAborted()) {
                     return;
                   }
-                  markInboundDedupeReplayUnsafe();
-                  if (
-                    shouldForwardProgressCallback({
-                      forwardWhenSourceDeliverySuppressed: true,
-                      requiresToolSummaryVisibility: true,
-                    })
-                  ) {
-                    await state.onPlanUpdateFromReplyOptions?.(normalized);
-                  }
-                  if (isDispatchOperationAborted()) {
-                    return;
-                  }
-                  if (payload.phase !== "update" || shouldSuppressDefaultToolProgressMessages()) {
+                  if (payload.phase !== "update" || !state.shouldSendToolSummaries()) {
                     return;
                   }
                   await state.sendPlanUpdate({
@@ -454,16 +439,7 @@ export async function executeDispatch(state: PrepareDispatchExecutionReadyState)
             return result;
           }),
         trackDispatchLifecycleWork,
-      ).then(
-        async (result) => {
-          await flushBlockTtsText();
-          return result;
-        },
-        async (error: unknown) => {
-          await flushBlockTtsText();
-          throw error;
-        },
-      ),
+      ).finally(flushBlockTtsText),
   ).catch(async (error: unknown) => {
     await releasePendingContinuation();
     await flushDeferredFinalText();

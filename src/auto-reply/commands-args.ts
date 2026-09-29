@@ -11,18 +11,12 @@ function normalizeArgValue(value: unknown): string | undefined {
   if (value == null) {
     return undefined;
   }
-  let text: string;
-  if (typeof value === "string") {
-    text = normalizeOptionalString(value) ?? "";
-  } else if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-    text = normalizeOptionalString(String(value)) ?? "";
-  } else if (typeof value === "symbol" || typeof value === "function") {
-    text = normalizeOptionalString(value.toString()) ?? "";
-  } else {
-    // Objects and arrays are rare but preserve structured test values losslessly enough for text.
-    text = JSON.stringify(value);
+  if (typeof value === "object") {
+    return JSON.stringify(value) || undefined;
   }
-  return text ? text : undefined;
+  return normalizeOptionalString(
+    typeof value === "symbol" || typeof value === "function" ? value.toString() : String(value),
+  );
 }
 
 function formatActionArgs(

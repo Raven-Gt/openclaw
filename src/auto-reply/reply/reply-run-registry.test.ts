@@ -261,7 +261,7 @@ describe("reply run registry", () => {
     }
   });
 
-  it("runs completeThen callbacks after active state clears", () => {
+  it("runs registered callbacks after active state clears", () => {
     const operation = createTestReplyOperation({
       sessionId: "session-complete",
     });
@@ -270,7 +270,8 @@ describe("reply run registry", () => {
       expect(isReplyRunActiveForSessionId("session-complete")).toBe(false);
     });
 
-    operation.completeThen(afterClear);
+    runAfterReplyOperationClear(operation, afterClear);
+    operation.complete();
 
     expect(operation.result).toEqual({ kind: "completed" });
     expect(afterClear).toHaveBeenCalledTimes(1);
