@@ -157,6 +157,8 @@ flow:
                       ref: jobId
                     afterTs:
                       ref: runStartedAt
+                    runId:
+                      expr: "runResponse?.runId"
                     timeoutMs:
                       expr: "liveTurnTimeoutMs(env, 90000)"
               - assert:
@@ -166,9 +168,11 @@ flow:
               - set: failedRuns
                 value:
                   expr: "[...failedRuns, failedRun]"
+        # The repair's verification run can finish before this step observes run 2, so the
+        # boundary is the last failed run's own completion, not the observer's clock.
         - set: failuresSettledAt
           value:
-            expr: "Date.now()"
+            expr: "failedRuns[failedRuns.length - 1].ts + 1"
 
     - name: the owner conversation repairs the job instead of alerting
       actions:

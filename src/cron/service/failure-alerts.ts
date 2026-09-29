@@ -467,50 +467,18 @@ export function reconcileInterruptedFailureRepair(
   return true;
 }
 
-/** Resolves incidents after execution succeeds, notifying only when a failure was reported. */
-export function maybeEmitFailureRecovery(params: {
-  job: CronJob;
-  alertConfig: ResolvedFailureAlert | null;
-  runAtMs?: number;
-  triggerOnly?: boolean;
-  replay?: boolean;
-  deferredNotifications: DeferredCronNotifications;
-}): void {
-  const incident = params.job.state.failureAlertIncident;
-  if (!incident || (params.triggerOnly && incident.scope !== "trigger")) {
+/**
+ * Resolves the incident after execution succeeds. Recovery is visible in run history and
+ * job state only: a working automation just works, so no notification is sent. Clearing
+ * the incident and cooldown lets the next failure alert again.
+ */
+export function resolveFailureIncident(job: CronJob, opts?: { triggerOnly?: boolean }): void {
+  const incident = job.state.failureAlertIncident;
+  if (!incident || (opts?.triggerOnly && incident.scope !== "trigger")) {
     return;
   }
-  // A repair that never led to an alert owns this streak's messaging, recovery included.
-  const silentRepair = incident.repair !== undefined && !incident.repair.alerted;
-  delete params.job.state.failureAlertIncident;
-  params.job.state.lastFailureAlertAtMs = undefined;
-  const route = params.alertConfig;
-  if (
-    silentRepair ||
-    params.replay ||
-    !incident.signature ||
-    !route ||
-    (params.job.delivery?.bestEffort === true && !params.job.failureAlert)
-  ) {
-    return;
-  }
-  startFailureNotification(params.job);
-  const job = cronNotificationJob(params.job);
-  const payload: ReplyPayload = {
-    text: [
-      `Automation "${job.name || job.id}" recovered`,
-      params.triggerOnly
-        ? "The trigger check completed successfully; no run was needed."
-        : "The latest run completed successfully.",
-    ].join("\n"),
-  };
-  params.deferredNotifications.push({
-    kind: "failure-alert",
-    job,
-    payload,
-    runAtMs: params.runAtMs,
-    route,
-  });
+  delete job.state.failureAlertIncident;
+  job.state.lastFailureAlertAtMs = undefined;
 }
 
 /** Finalizes execution or required-delivery alerts after scheduling policy settles. */
@@ -532,13 +500,7 @@ export function finalizeCronFailureNotifications(
   },
 ): void {
   if (params.result.status === "ok" && params.completionStatus === "succeeded") {
-    maybeEmitFailureRecovery({
-      job: params.job,
-      alertConfig: params.alertConfig,
-      runAtMs: params.result.startedAt,
-      replay: params.replay,
-      deferredNotifications: params.deferredNotifications,
-    });
+    resolveFailureIncident(params.job);
     return;
   }
   recordUnresolvedFailure(params.job, params.result.failureNotificationDetail);

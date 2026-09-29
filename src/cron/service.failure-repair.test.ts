@@ -67,24 +67,6 @@ describe("CronService failure repair", () => {
     });
   });
 
-  it("does not send a recovered notice for a silent repair", async () => {
-    const startRepair = vi.fn<StartRepair>(async () => "completed");
-    await withRepair(
-      startRepair,
-      async ({ cron, sendCronFailureAlert, runIsolatedAgentJob, addJob }) => {
-        const job = await addJob("meeting sync", owned);
-        await cron.run(job.id, "force");
-        await cron.run(job.id, "force");
-        expect(startRepair).toHaveBeenCalledOnce();
-
-        runIsolatedAgentJob.mockResolvedValueOnce({ status: "ok", delivered: true });
-        await cron.run(job.id, "force");
-        expect(sendCronFailureAlert).not.toHaveBeenCalled();
-        expect(cron.getJob(job.id)?.state.failureAlertIncident).toBeUndefined();
-      },
-    );
-  });
-
   it("alerts as today when the owner conversation is unavailable, without a second alert", async () => {
     const startRepair = vi.fn<StartRepair>(async () => "unavailable");
     await withRepair(startRepair, async ({ cron, sendCronFailureAlert, addJob }) => {

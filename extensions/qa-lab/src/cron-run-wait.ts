@@ -4,6 +4,7 @@ import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 
 type QaCronRunLogEntry = {
   ts?: number;
+  runId?: string;
   status?: "ok" | "error" | "skipped";
   summary?: string;
   error?: string;
@@ -22,6 +23,8 @@ export async function waitForCronRunCompletion(params: {
   ) => Promise<unknown>;
   jobId: string;
   afterTs: number;
+  /** Wait for this exact run; other runs of the job can finish first. */
+  runId?: string;
   timeoutMs?: number;
   intervalMs?: number;
   gatewayCallTimeoutMs?: number;
@@ -55,6 +58,7 @@ export async function waitForCronRunCompletion(params: {
       (entry) =>
         typeof entry.ts === "number" &&
         entry.ts >= params.afterTs &&
+        (params.runId === undefined || entry.runId === params.runId) &&
         (entry.status === "ok" || entry.status === "error" || entry.status === "skipped"),
     );
     if (completed) {
