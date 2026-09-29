@@ -566,6 +566,7 @@ export async function remove(
       transactionHooks: withCronMutationCommitHook("cron.remove"),
     });
     const activeMarker = noteActiveCronJobRemoval(id, opts?.commitGuard);
+    const activeRunCancellationRequested = activeMarker?.cancellation?.kind === "requested";
     const sessionStorePath =
       state.deps.resolveSessionStorePath?.(agentId) ?? state.deps.sessionStorePath;
     if (
@@ -589,7 +590,11 @@ export async function remove(
     pruneCronJobScratchAfterCommit(state, [id]);
     armTimer(state);
     emit(state, { jobId: id, action: "removed", job: removedJob });
-    return { ok: true, removed: true } as const;
+    return {
+      ok: true,
+      removed: true,
+      ...(activeRunCancellationRequested ? { activeRunCancellationRequested: true as const } : {}),
+    } as const;
   });
   if (!sessionCleanup) {
     return result;
