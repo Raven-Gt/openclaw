@@ -78,6 +78,61 @@ it("shares role credentials across embedding batches and refreshes after expiry"
   }
 });
 
+it("assumes a profile role in the region selected by the Bedrock endpoint", async () => {
+  const dir = tempDirs.make("bedrock-embedding-role-region-");
+  const credentialsFile = path.join(dir, "credentials");
+  const configFile = path.join(dir, "config");
+  await writeFile(
+    credentialsFile,
+    "[source]\naws_access_key_id = TEST_SOURCE\naws_secret_access_key = synthetic-secret\n",
+  );
+  await writeFile(
+    configFile,
+    "[profile role]\nrole_arn = arn:aws-us-gov:iam::123456789012:role/synthetic\nsource_profile = source\n",
+  );
+  for (const name of Object.keys(process.env).filter((name) => name.startsWith("AWS_"))) {
+    vi.stubEnv(name, undefined);
+  }
+  vi.stubEnv("AWS_CONFIG_FILE", configFile);
+  vi.stubEnv("AWS_SHARED_CREDENTIALS_FILE", credentialsFile);
+  vi.stubEnv("AWS_PROFILE", "role");
+  vi.stubEnv("AWS_EC2_METADATA_DISABLED", "true");
+  const signatures: string[] = [];
+  const server = createServer((req, res) => {
+    signatures.push(req.headers.authorization ?? "");
+    res.setHeader("content-type", "text/xml");
+    res.end(
+      `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>TEST_ASSUMED</AccessKeyId><SecretAccessKey>synthetic-secret</SecretAccessKey><SessionToken>synthetic-session</SessionToken><Expiration>${new Date(Date.now() + 3600000).toISOString()}</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>`,
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected loopback listener");
+    }
+    vi.stubEnv("AWS_ENDPOINT_URL_STS", `http://127.0.0.1:${address.port}`);
+    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockImplementation(async function (
+      this: BedrockRuntimeClient,
+    ) {
+      expect((await this.config.credentials()).accessKeyId).toBe("TEST_ASSUMED");
+      return { $metadata: {}, body: new TextEncoder().encode('{"embedding":[1,0]}') };
+    });
+    const { provider } = await createBedrockEmbeddingProvider({
+      config: {},
+      model: "",
+      remote: { baseUrl: "https://bedrock-runtime.us-gov-west-1.amazonaws.com" },
+    });
+    expect(await provider.embed("memory")).toEqual([1, 0]);
+    expect(signatures).toEqual([expect.stringContaining("/us-gov-west-1/sts/aws4_request")]);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
