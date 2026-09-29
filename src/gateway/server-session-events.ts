@@ -26,7 +26,7 @@ import type {
 import { resolveVisibleActiveSessionRunState } from "./server-methods/session-active-runs.js";
 import { hasSessionChangeReceivers } from "./session-change-receivers.js";
 import { buildGatewaySessionSnapshot } from "./session-event-payload.js";
-import { sessionEventPublicationRows } from "./session-event-prepared-row.js";
+import { withPreparedEventRow } from "./session-event-prepared-row.js";
 import {
   resolvePrivateSessionEventBroadcastScope,
   resolveSessionEventAgentScope,
@@ -54,20 +54,6 @@ function hasCompleteTranscriptTarget(update: InternalSessionTranscriptUpdate): b
     normalizeOptionalString(update.target?.sessionKey) &&
     normalizeOptionalString(update.target?.storePath),
   );
-}
-
-async function withPreparedEventRow(
-  projection: SessionRowProjection | undefined,
-  query: { key: string; agentId: string; storePath?: string } | undefined,
-  publish: () => void,
-) {
-  if (!projection || !query) {
-    publish();
-    return;
-  }
-  await sessionEventPublicationRows(projection).withReadyRows(() => [query], publish, {
-    includeAncestors: true,
-  });
 }
 
 function readTranscriptUpdateLifecycleOwner(
@@ -508,7 +494,7 @@ async function handleTranscriptUpdateBroadcast(
     routingAgentId
       ? { key: sessionKey, agentId: routingAgentId, storePath: publicationStorePath }
       : undefined,
-    () => {
+    (read) => {
       if (params.getSessionRowProjection?.() !== projection) {
         return;
       }
@@ -527,13 +513,14 @@ async function handleTranscriptUpdateBroadcast(
           return;
         }
       }
-      const sessionRow = routingAgentId
-        ? projection?.snapshot({
+      const record = routingAgentId
+        ? read?.describe({
             key: sessionKey,
             agentId: routingAgentId,
             storePath: publicationStorePath,
-          }).row
-        : null;
+          })
+        : undefined;
+      const sessionRow = record && read?.present(record);
       const activeRunState =
         sessionRow &&
         (sessionRow.key !== "global" || routingAgentId !== undefined || compatibilityOwnerAgentId)
@@ -566,6 +553,7 @@ async function handleTranscriptUpdateBroadcast(
             ...sessionSnapshot,
           },
           connIds,
+          read ? { sessionRows: read } : undefined,
         );
         return;
       }
@@ -580,7 +568,12 @@ async function handleTranscriptUpdateBroadcast(
         sessionSnapshot,
       });
       if (projected.payload) {
-        params.broadcastToConnIds("session.message", projected.payload, connIds);
+        params.broadcastToConnIds(
+          "session.message",
+          projected.payload,
+          connIds,
+          read ? { sessionRows: read } : undefined,
+        );
         return;
       }
 
@@ -602,7 +595,7 @@ async function handleTranscriptUpdateBroadcast(
           ...sessionSnapshot,
         },
         sessionEventConnIds,
-        { dropIfSlow: true },
+        { dropIfSlow: true, ...(read ? { sessionRows: read } : {}) },
       );
     },
   );
@@ -682,7 +675,7 @@ export function createLifecycleEventBroadcastHandler(params: {
         : undefined;
     const observation = !captured ? projection?.observeGeneration(query) : undefined;
     try {
-      await withPreparedEventRow(projection, query, () => {
+      await withPreparedEventRow(projection, query, (read) => {
         const current = captured ?? projection?.capture(query);
         if (
           params.getSessionRowProjection?.() !== projection ||
@@ -691,7 +684,8 @@ export function createLifecycleEventBroadcastHandler(params: {
         ) {
           return;
         }
-        const sessionRow = projection?.snapshot(query).row;
+        const record = read?.describe(query);
+        const sessionRow = record && read?.present(record);
         const activeRunState = capacityState ?? (sessionRow ? readActiveState(sessionRow) : null);
         params.broadcastToConnIds(
           "sessions.changed",
@@ -722,7 +716,7 @@ export function createLifecycleEventBroadcastHandler(params: {
               : {}),
           },
           connIds,
-          { dropIfSlow: true },
+          { dropIfSlow: true, ...(read ? { sessionRows: read } : {}) },
         );
       });
     } finally {

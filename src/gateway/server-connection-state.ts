@@ -137,7 +137,8 @@ export function createGatewayConnectionState(params: {
         return undefined;
       }
       const query = { key: source.sessionKey, agentId: scope[1] };
-      const record = projection.describe(query);
+      const read = eventScope.sessionRows ?? projection;
+      const record = read.describe(query);
       if (
         !record ||
         (typeof source.sessionId === "string" && source.sessionId !== record.entry.sessionId)
@@ -148,7 +149,7 @@ export function createGatewayConnectionState(params: {
         ? source
         : {
             ...buildGatewaySessionSnapshot({
-              sessionRow: projection.snapshot(query).row,
+              sessionRow: read.present(record),
               agentId: scope[0],
               includeSession: true,
             }),
@@ -163,10 +164,10 @@ export function createGatewayConnectionState(params: {
       ) {
         return () => undefined;
       }
-      const presentRecipient = prepareSessionRowPublication(projection, Date.now());
+      const presentRecipient = prepareSessionRowPublication(projection, Date.now(), read);
       const encodedRows = new WeakMap<object, string>();
       const preparedAncestors = new WeakMap<object, ReturnType<typeof prepareSessionAncestor>>();
-      const ancestors = projection.ancestorRows(record);
+      const ancestors = projection.ancestorRows(record, eventScope.sessionRows);
       const enrichment = { includeDerivedTitles: true, includeLastMessage: true };
       let projectedAgentRuns = projection.state.rowContext.projectedAgentRuns;
       let registrations: (readonly [string, ChatAbortControllerEntry])[] = [];
@@ -277,7 +278,12 @@ export function createGatewayConnectionState(params: {
         };
       };
     },
-    onBroadcast: (event, payload, opts) => eventWebPush.handleEvent(event, payload, opts),
+    onBroadcast: (event, payload, opts) =>
+      eventWebPush.handleEvent(
+        event,
+        payload,
+        opts ? { agentId: opts.agentId, sessionKeys: opts.sessionKeys } : undefined,
+      ),
   });
   const mentionInbox = createMentionInbox({
     scheduler: params.scheduler,

@@ -43,7 +43,7 @@ export async function loadSessionDiff(
       params.agentId ??
       parseAgentSessionKey(params.sessionKey)?.agentId,
   );
-  const repository = resolveRepositoryWorkspaceAccess({ ...loaded, agentId }, context);
+  const repository = await resolveRepositoryWorkspaceAccess({ ...loaded, agentId }, context);
   if (repository) {
     if (repository.kind === "stored") {
       return await loadRepositoryArtifactDiff(repository, params);

@@ -202,7 +202,11 @@ export function createGatewayBroadcaster(params: {
   prepareSessionEventProjection?: (
     event: string,
     payload: unknown,
-    scope: { sessionKeys: readonly string[]; agentId?: string },
+    scope: {
+      sessionKeys: readonly string[];
+      agentId?: string;
+      sessionRows?: GatewayBroadcastOpts["sessionRows"];
+    },
   ) => ((client: GatewayWsClient) => SessionEventProjection | undefined) | undefined;
   sessionMessageSubscribers?: SessionMessageSubscriberRegistry;
   canReceiveSessionEvent?: (
@@ -587,6 +591,7 @@ export function createGatewayBroadcaster(params: {
           projectSession = params.prepareSessionEventProjection?.(event, payload, {
             sessionKeys,
             agentId,
+            ...(opts?.sessionRows ? { sessionRows: opts.sessionRows } : {}),
           });
           skipSourcePayload = canSkipSourcePayload && projectSession !== undefined;
           sessionProjectionPrepared = true;

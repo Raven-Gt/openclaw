@@ -190,6 +190,44 @@ describe("gateway connection state", () => {
           await projection.ensureMaterialized();
           committedConfig = relaxed;
           publish("committed relaxation without a projection mark", [ownKey, foreignKey]);
+
+          await upsertSessionEntryCore(
+            { agentId: "main", sessionKey: ownKey },
+            { parentSessionKey: foreignKey },
+          );
+          const later = makeClient("later-policy-reader", { count: 0 });
+          later.client.connect = { ...peer.client.connect };
+          later.client.authenticatedUserProfile = peer.client.authenticatedUserProfile;
+          prepareGatewayRecipientProfile(later.client);
+          state.clients.add(later.client);
+          peer.send.mockClear();
+          peer.send.mockImplementationOnce(() => {
+            committedConfig = restricted;
+          });
+          await projection.withPreparedExactRows(
+            () => [{ key: ownKey, agentId: "main" }],
+            (read) => {
+              state.broadcast(
+                "sessions.changed",
+                { sessionKey: ownKey, agentId: "main", reason: "metadata" },
+                { sessionKeys: [ownKey], agentId: "main", sessionRows: read },
+              );
+            },
+            { includeAncestors: true },
+          );
+          expect(peer.send).toHaveBeenCalledOnce();
+          expect(later.send).toHaveBeenCalledOnce();
+          expect(JSON.parse(peer.send.mock.lastCall![0]).payload).toMatchObject({
+            session: { key: ownKey },
+            ancestorSessions: [{ key: foreignKey }],
+          });
+          expect(JSON.parse(later.send.mock.lastCall![0]).payload).toMatchObject({
+            session: { key: ownKey },
+            ancestorSessions: [],
+          });
+          expect(JSON.parse(later.send.mock.lastCall![0]).payload).not.toHaveProperty(
+            "ancestorSessionRefs",
+          );
         } finally {
           detach();
           projection.dispose();

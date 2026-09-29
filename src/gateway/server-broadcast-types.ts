@@ -1,6 +1,7 @@
 import type { GatewayClientCap } from "../../packages/gateway-protocol/src/client-info.js";
 import type { LiveTextProjectionText } from "./live-text-continuity.js";
 import type { GatewayClient } from "./server-methods/client-types.js";
+import type { SessionRowReadView } from "./session-row-prepared-read.js";
 
 type GatewayBroadcastStateVersion = {
   presence?: number;
@@ -16,6 +17,8 @@ export type GatewayBroadcastOpts = {
   excludeClientCapability?: GatewayClientCap;
   /** Canonical subscription keys for session-scoped delivery. */
   sessionKeys?: readonly string[];
+  /** Prepared facts remain valid only during this synchronous publication. */
+  sessionRows?: SessionRowReadView;
   /** Target recipients were selected from subscriptions at ingress. */
   sessionSubscriptionVerified?: boolean;
   /** Question owner authorizes ordinary own-run recipients without a broad question grant. */

@@ -96,7 +96,9 @@ export async function recoverPendingWorkspaceResults(
     if (!pending.repositoryWorkspaceId) {
       return workspace;
     }
-    const repository = getSessionRepositoryWorkspaceStore().get(pending.repositoryWorkspaceId);
+    const repository = await getSessionRepositoryWorkspaceStore().get(
+      pending.repositoryWorkspaceId,
+    );
     if (
       !repository ||
       repository.agentId !== placement.agentId ||
@@ -237,6 +239,7 @@ export async function recoverPendingWorkspaceResults(
           try {
             let active: WorkerOwnedPendingPlacement = pendingPlacement;
             const workspace = await resolveWorkspace(active, pending, recovery.workspace);
+            recovery.assertCurrent();
             const root = sessionWorkspaceRoot(workspace);
             const priorWorkspaceResultConflict = await resolvePriorWorkspaceResultConflict(
               recovery.resolveConflict,
