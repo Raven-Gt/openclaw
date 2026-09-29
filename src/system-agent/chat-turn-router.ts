@@ -190,7 +190,7 @@ export class ChatTurnRouter {
       },
       denied: () => {
         this.proposalResolution = "declined";
-        return { text: "Denied. No change.", action: "none" as const };
+        return { text: "Denied. No change.", action: "none" as const, applied: false };
       },
     });
   }
@@ -346,7 +346,7 @@ export class ChatTurnRouter {
         },
       };
     }
-    return { text: baseText, action: "none" };
+    return { text: baseText, action: "none", applied: result?.applied === true };
   }
 
   async resolveAssistantTurn(
@@ -589,8 +589,10 @@ export class ChatTurnRouter {
         deps: this.commandDeps(),
         beforePersistentApply: async () => {
           await this.callbacks.requirePersistentApplyInference(capture);
-          assertPersistentApplyAuthority?.();
         },
+        ...(assertPersistentApplyAuthority
+          ? { assertPersistentApply: assertPersistentApplyAuthority }
+          : {}),
         onVerifiedInferenceChanged: this.callbacks.rebindVerifiedInference,
       });
     } catch (error) {

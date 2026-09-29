@@ -185,6 +185,7 @@ describe("SystemAgentChatEngine approval", () => {
     expect(assertAuthority).toHaveBeenCalledOnce();
     expect(runConfigSet).not.toHaveBeenCalled();
     expect(reply?.text).toContain("delegated authority ended");
+    expect(reply?.applied).toBe(false);
   });
 
   it("applies a seeded proposal on a bare yes with verified inference", async () => {

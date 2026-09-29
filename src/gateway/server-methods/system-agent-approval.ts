@@ -12,8 +12,10 @@ import {
   type SystemAgentApprovalRequestPayload,
 } from "../../infra/system-agent-approvals.js";
 import { runWithGatewayIndependentRootWorkContinuation } from "../../process/gateway-work-admission.js";
+import type { SystemAgentChatReply } from "../../system-agent/chat-wizard-host.js";
 import { describeSystemAgentPersistentOperation } from "../../system-agent/operations.js";
 import type { AgentRuntimeDelegatedAuthority } from "../agent-runtime-identity-token.js";
+import { sameWorkerSessionTurnClaim } from "../worker-environments/placement-record.js";
 import {
   broadcastApprovalResolvedEvent,
   buildRequestedApprovalEvent,
@@ -24,6 +26,35 @@ import type { GatewayRequestContext } from "./types.js";
 
 type SystemAgentChatSession =
   GatewayRequestContext["systemAgentSessions"] extends Map<string, infer Session> ? Session : never;
+
+function sameApprovalAuthority(
+  left: AgentRuntimeDelegatedAuthority,
+  right: AgentRuntimeDelegatedAuthority,
+): boolean {
+  if (
+    left.kind !== right.kind ||
+    left.claimId !== right.claimId ||
+    left.lifecycleGeneration !== right.lifecycleGeneration ||
+    left.operationalRunInstance.instanceId !== right.operationalRunInstance.instanceId ||
+    left.operationalRunInstance.runId !== right.operationalRunInstance.runId
+  ) {
+    return false;
+  }
+  return left.kind === "worker" && right.kind === "worker"
+    ? sameWorkerSessionTurnClaim(left.turnClaim, right.turnClaim)
+    : true;
+}
+
+function isSystemAgentChatReply(value: unknown): value is SystemAgentChatReply {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "text" in value &&
+    typeof value.text === "string" &&
+    "action" in value &&
+    typeof value.action === "string"
+  );
+}
 
 export function queueDelegatedApproval(params: {
   context: GatewayRequestContext;
@@ -78,12 +109,28 @@ export function queueDelegatedApproval(params: {
     }
   };
   assertLiveApprovalAuthority();
-  if (params.session.pendingApproval?.proposalHash === params.proposal.hash) {
-    return params.session.pendingApproval.id;
-  }
   const manager = params.context.systemAgentApprovalManager;
   if (!manager) {
     throw new Error("OpenClaw approval registry unavailable");
+  }
+  const pending = params.session.pendingApproval;
+  if (pending) {
+    const closed = manager.forceDenyIfDelegatedAuthorityClosed(pending.id);
+    const snapshot = manager.getSnapshot(pending.id);
+    if (
+      pending.proposalHash === params.proposal.hash &&
+      !closed &&
+      snapshot &&
+      (snapshot.resolvedAtMs === undefined || snapshot.decision === "allow-once") &&
+      snapshot.agentRuntimeDelegatedAuthority &&
+      sameApprovalAuthority(snapshot.agentRuntimeDelegatedAuthority, runtimeApprovalAuthority)
+    ) {
+      return pending.id;
+    }
+    manager.expire(pending.id, "system-agent:replaced");
+    if (params.session.pendingApproval?.id === pending.id) {
+      params.session.pendingApproval = undefined;
+    }
   }
   const description = describeSystemAgentPersistentOperation(params.proposal.operation);
   const request: SystemAgentApprovalRequestPayload = {
@@ -150,7 +197,7 @@ export function queueDelegatedApproval(params: {
       try {
         const reply = await runWithGatewayIndependentRootWorkContinuation(
           () =>
-            runSystemAgentGatewayTask(async () => {
+            runSystemAgentGatewayTask(async (): Promise<SystemAgentChatReply | null> => {
               // The original request has returned; keep approval, audit, and restart drain-visible.
               if (params.sessions.get(params.sessionId) !== params.session) {
                 return null;
@@ -167,11 +214,14 @@ export function queueDelegatedApproval(params: {
                   applyAuthorized = true;
                 },
               );
+              if (approvalReply !== null && !isSystemAgentChatReply(approvalReply)) {
+                throw new Error("OpenClaw approval returned an invalid application result");
+              }
               return decision !== "deny" && !applyAuthorized ? null : approvalReply;
             }),
           "system-agent:task",
         );
-        publishApplicationResult(decision, reply ? "applied" : "not-applied");
+        publishApplicationResult(decision, reply?.applied === true ? "applied" : "not-applied");
       } catch (error) {
         publishApplicationResult(decision, "not-applied");
         throw error;
