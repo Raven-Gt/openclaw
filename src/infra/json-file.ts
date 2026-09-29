@@ -36,10 +36,15 @@ export function writeJsonTarget(pathname: string, data: unknown): void {
 
 // oxlint-disable-next-line typescript-eslint/no-unnecessary-type-parameters -- legacy typed JSON loader alias.
 export function loadJsonFileThroughSymlink<T = unknown>(pathname: string): T | undefined {
-  const direct = tryReadJsonSync<T>(pathname);
-  if (direct !== null) {
-    return direct;
+  let resolved: string;
+  try {
+    resolved = fs.realpathSync(pathname);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ELOOP") {
+      return undefined;
+    }
+    throw error;
   }
-  const target = resolveJsonSymlinkTarget(pathname);
-  return target ? (tryReadJsonSync<T>(target) ?? undefined) : undefined;
+  return tryReadJsonSync<T>(resolved) ?? undefined;
 }
