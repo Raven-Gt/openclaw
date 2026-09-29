@@ -14,8 +14,10 @@ import {
   handlePendingApprovalRequest,
 } from "./approval-shared.js";
 import { runSystemAgentGatewayTask } from "./system-agent-execution.js";
-import type { SystemAgentChatSession } from "./system-agent.js";
 import type { GatewayRequestContext } from "./types.js";
+
+type SystemAgentChatSession =
+  GatewayRequestContext["systemAgentSessions"] extends Map<string, infer Session> ? Session : never;
 
 export function queueDelegatedApproval(params: {
   context: GatewayRequestContext;

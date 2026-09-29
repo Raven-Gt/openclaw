@@ -121,13 +121,13 @@ export type SystemAgentApprovalViewBase = ApprovalViewBase & {
   operationSummary: string;
 };
 
-export type SystemAgentApprovalPendingView = SystemAgentApprovalViewBase & {
+type SystemAgentApprovalPendingView = SystemAgentApprovalViewBase & {
   phase: "pending";
   actions: ApprovalActionView[];
   expiresAtMs: number;
 };
 
-export type SystemAgentApprovalResolvedView = SystemAgentApprovalViewBase & {
+type SystemAgentApprovalResolvedView = SystemAgentApprovalViewBase & {
   phase: "resolved";
   decision: ExecApprovalDecision;
   resolvedBy?: string | null;
@@ -135,7 +135,7 @@ export type SystemAgentApprovalResolvedView = SystemAgentApprovalViewBase & {
   terminalStatus?: "expired" | "cancelled";
 };
 
-export type SystemAgentApprovalExpiredView = SystemAgentApprovalViewBase & {
+type SystemAgentApprovalExpiredView = SystemAgentApprovalViewBase & {
   phase: "expired";
 };
 
