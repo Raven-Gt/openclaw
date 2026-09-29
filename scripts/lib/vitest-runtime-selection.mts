@@ -1,3 +1,4 @@
+import { agentVitestProjectOwners } from "../../test/vitest/vitest.agents-paths.mjs";
 import { databaseWorkerCoreTestFiles } from "../../test/vitest/vitest.database-worker-core-paths.mjs";
 import { matchesVitestCliSelection } from "../../test/vitest/vitest.pattern-file.ts";
 import { fullSuiteVitestShards } from "../../test/vitest/vitest.test-shards.mjs";
@@ -20,25 +21,35 @@ export function resolveVitestRuntimeCliSelections(
   }));
 }
 
-/** Keep known database-worker compilation outside dynamically imported test cases. */
+/** Keep known worker compilation outside dynamically imported test cases. */
 export function shouldPrepareVitestCoreWorkers(
   config: string,
   args: string[],
   env: NodeJS.ProcessEnv,
   includePatterns?: readonly string[] | null,
 ): boolean {
-  const infra = "test/vitest/vitest.infra.config.ts";
-  const includesInfra =
-    config === infra ||
+  const includesProject = (project: string) =>
+    config === project ||
     config === "vitest.config.ts" ||
     config === "test/vitest/vitest.config.ts" ||
     fullSuiteVitestShards.some(
-      (shard) => shard.config === config && shard.projects.includes(infra),
+      (shard) => shard.config === config && shard.projects.includes(project),
     );
+  const codeModeWorker = "src/agents/code-mode.import-boundary.test.ts";
   return (
-    includesInfra &&
-    databaseWorkerCoreTestFiles.some((file) =>
-      matchesVitestCliSelection(file, [file], args, "", env, includePatterns),
-    )
+    (includesProject("test/vitest/vitest.infra.config.ts") &&
+      databaseWorkerCoreTestFiles.some((file) =>
+        matchesVitestCliSelection(file, [file], args, "", env, includePatterns),
+      )) ||
+    ((includesProject(agentVitestProjectOwners.core.config) ||
+      includesProject(agentVitestProjectOwners.all.config)) &&
+      matchesVitestCliSelection(
+        codeModeWorker,
+        [codeModeWorker],
+        args,
+        agentVitestProjectOwners.core.dir,
+        env,
+        includePatterns,
+      ))
   );
 }
