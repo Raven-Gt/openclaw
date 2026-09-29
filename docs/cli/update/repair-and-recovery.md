@@ -115,8 +115,11 @@ These captures are evidence for manual recovery. Active writers can change state
 during capture; an observed change leaves the capture incomplete and produces a
 warning. The set is not an atomic snapshot across active stores. Missing,
 unreadable, or incomplete captures do not establish a safe
-rollback point. Optional debug-proxy persistence waits until the owning command
-has preserved the original state and admitted the repaired schema.
+rollback point. The updater process keeps optional debug-proxy persistence
+disabled because its update history can use an older database schema. Doctor
+can resume capture after preserving the originals and admitting the repaired
+schema. A successful update that skips Doctor can therefore leave local HTTP
+tracing disabled for that invocation.
 
 Use `openclaw update status --json` to inspect retained evidence. Runtime rollback
 does not prove that an earlier original capture was restored. Status reports that
