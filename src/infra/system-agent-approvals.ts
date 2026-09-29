@@ -10,8 +10,11 @@ export type SystemAgentApprovalRequestPayload = {
   agentId?: string | null;
   sessionKey?: string | null;
   sessionId: string;
-  turnSourceChannel?: null;
-  turnSourceAccountId?: null;
+  runId?: string | null;
+  turnSourceChannel?: string | null;
+  turnSourceTo?: string | null;
+  turnSourceAccountId?: string | null;
+  turnSourceThreadId?: string | number | null;
 };
 
 export type SystemAgentApprovalRequest = {
@@ -20,6 +23,18 @@ export type SystemAgentApprovalRequest = {
   request: SystemAgentApprovalRequestPayload;
   createdAtMs: number;
   expiresAtMs: number;
+};
+
+export type SystemAgentApprovalApplicationStatus = "applied" | "not-applied";
+
+export type SystemAgentApprovalResolved = {
+  id: string;
+  decision: ExecApprovalDecision;
+  resolvedBy?: string | null;
+  ts: number;
+  request?: SystemAgentApprovalRequestPayload;
+  applicationStatus?: SystemAgentApprovalApplicationStatus;
+  terminalStatus?: "expired" | "cancelled";
 };
 
 export const SYSTEM_AGENT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
