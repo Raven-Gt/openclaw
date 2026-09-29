@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../test/helpers/promise.js";
 import type { CronStoredJob } from "../cron/types.js";
 
 const runCronIsolatedAgentTurn = vi.hoisted(() => vi.fn());
@@ -33,32 +34,75 @@ const job: CronStoredJob = {
   state: { failureAlertIncident: { signature: "incident-a", scope: "run", repair: { atMs: 1 } } },
 };
 
-async function repairWith(
-  result: Record<string, unknown>,
-  getJob: (jobId: string) => CronStoredJob | undefined = () => job,
-) {
-  runCronIsolatedAgentTurn.mockResolvedValueOnce(result);
-  return await runGatewayCronFailureRepair({
+// Stands in for the Gateway's cron event fan-out to one job's listeners.
+const jobChangeListeners = new Set<() => void>();
+
+function repairParams(
+  dispatched: CronStoredJob,
+  getJob: (jobId: string) => CronStoredJob | undefined,
+): Parameters<typeof runGatewayCronFailureRepair>[0] {
+  return {
     request: {
       jobId: job.id,
       ownerSessionKey,
       consecutiveErrors: 2,
       incidentSignature: "incident-a",
       repairAtMs: 1,
-      job,
+      job: dispatched,
     },
     getJob,
+    onJobChange: (_jobId, listener) => {
+      jobChangeListeners.add(listener);
+      return () => jobChangeListeners.delete(listener);
+    },
     storePath: "/tmp/openclaw-failure-repair-test/jobs.json",
     deps: {} as never,
     resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
     runSchedulerOwned: (run) => run(),
     log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-  });
+  };
 }
+
+async function repairWith(
+  result: Record<string, unknown>,
+  getJob: (jobId: string) => CronStoredJob | undefined = () => job,
+) {
+  runCronIsolatedAgentTurn.mockResolvedValueOnce(result);
+  return await runGatewayCronFailureRepair(repairParams(job, getJob));
+}
+
+const authorityLosses = [
+  { name: "disabled", change: (live: CronStoredJob) => ({ ...live, enabled: false }) },
+  {
+    name: "auto-disabled",
+    change: (live: CronStoredJob) => ({
+      ...live,
+      state: {
+        ...live.state,
+        autoDisabled: { reason: "consecutive-failures" as const, atMs: 1, consecutiveErrors: 3 },
+      },
+    }),
+  },
+  {
+    name: "handed to another owner",
+    change: (live: CronStoredJob) => ({
+      ...live,
+      owner: { agentId: "main", sessionKey: "agent:main:telegram:direct:other" },
+    }),
+  },
+  {
+    name: "moved to an operator-only stream schedule",
+    change: (live: CronStoredJob) => ({
+      ...live,
+      schedule: { kind: "stream" as const, command: ["tail", "-f", "app.log"] },
+    }),
+  },
+];
 
 afterEach(() => {
   runCronIsolatedAgentTurn.mockReset();
   duringReads.run = () => {};
+  jobChangeListeners.clear();
 });
 
 describe("runGatewayCronFailureRepair", () => {
@@ -124,22 +168,7 @@ describe("runGatewayCronFailureRepair", () => {
         payload: { kind: "agentTurn", message: "sync", toolsAllow: cap },
       };
       runCronIsolatedAgentTurn.mockResolvedValueOnce({ status: "ok", delivered: true });
-      await runGatewayCronFailureRepair({
-        request: {
-          jobId: job.id,
-          ownerSessionKey,
-          consecutiveErrors: 2,
-          incidentSignature: "incident-a",
-          repairAtMs: 1,
-          job: capped,
-        },
-        getJob: () => capped,
-        storePath: "/tmp/openclaw-failure-repair-test/jobs.json",
-        deps: {} as never,
-        resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
-        runSchedulerOwned: (run) => run(),
-        log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      });
+      await runGatewayCronFailureRepair(repairParams(capped, () => capped));
       const request = runCronIsolatedAgentTurn.mock.lastCall?.[0];
       expect(request?.job.payload.toolsAllow).toEqual(expected);
       expect(request?.job.scheduledToolPolicy).toEqual(capped.scheduledToolPolicy);
@@ -150,31 +179,7 @@ describe("runGatewayCronFailureRepair", () => {
   );
 
   it.each([
-    { name: "disabled", change: (live: CronStoredJob) => ({ ...live, enabled: false }) },
-    {
-      name: "auto-disabled",
-      change: (live: CronStoredJob) => ({
-        ...live,
-        state: {
-          ...live.state,
-          autoDisabled: { reason: "consecutive-failures" as const, atMs: 1, consecutiveErrors: 3 },
-        },
-      }),
-    },
-    {
-      name: "handed to another owner",
-      change: (live: CronStoredJob) => ({
-        ...live,
-        owner: { agentId: "main", sessionKey: "agent:main:telegram:direct:other" },
-      }),
-    },
-    {
-      name: "moved to an operator-only stream schedule",
-      change: (live: CronStoredJob) => ({
-        ...live,
-        schedule: { kind: "stream" as const, command: ["tail", "-f", "app.log"] },
-      }),
-    },
+    ...authorityLosses,
     { name: "resolved by a success", change: (live: CronStoredJob) => ({ ...live, state: {} }) },
   ])("starts no repair turn when the job was $name during preparation", async ({ change }) => {
     let current: CronStoredJob = job;
@@ -201,25 +206,63 @@ describe("runGatewayCronFailureRepair", () => {
       };
     };
     runCronIsolatedAgentTurn.mockResolvedValueOnce({ status: "ok", delivered: true });
-    await runGatewayCronFailureRepair({
-      request: {
-        jobId: job.id,
-        ownerSessionKey,
-        consecutiveErrors: 2,
-        incidentSignature: "incident-a",
-        repairAtMs: 1,
-        job: dispatched,
-      },
-      getJob: () => current,
-      storePath: "/tmp/openclaw-failure-repair-test/jobs.json",
-      deps: {} as never,
-      resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
-      runSchedulerOwned: (run) => run(),
-      log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    });
+    await runGatewayCronFailureRepair(repairParams(dispatched, () => current));
     expect(runCronIsolatedAgentTurn.mock.lastCall?.[0]?.job.payload.toolsAllow).toEqual([
       "read",
       "automations",
     ]);
+  });
+
+  it.each([...authorityLosses, { name: "removed", change: () => undefined }])(
+    "aborts the running repair turn before its next tool when the job is $name",
+    async ({ change }) => {
+      let current: CronStoredJob | undefined = job;
+      const toolEffects: string[] = [];
+      const held = createDeferred();
+      const heldAt = createDeferred();
+      runCronIsolatedAgentTurn.mockImplementationOnce(
+        async ({ abortSignal }: { abortSignal: AbortSignal }) => {
+          toolEffects.push("read");
+          // The model's next tool call is in flight while the job changes.
+          heldAt.resolve();
+          await held.promise;
+          if (abortSignal.aborted) {
+            return { status: "error", error: String(abortSignal.reason) };
+          }
+          toolEffects.push("write");
+          return { status: "ok", delivered: true };
+        },
+      );
+      const outcome = runGatewayCronFailureRepair(repairParams(job, () => current));
+      await heldAt.promise;
+      current = change(job);
+      for (const listener of jobChangeListeners) {
+        listener();
+      }
+      held.resolve();
+      await expect(outcome).resolves.toBe("failed");
+      expect(toolEffects).toEqual(["read"]);
+      expect(jobChangeListeners.size).toBe(0);
+    },
+  );
+
+  it("keeps the turn running when its own verification resolves the incident", async () => {
+    let current: CronStoredJob = job;
+    let aborted: boolean | undefined;
+    runCronIsolatedAgentTurn.mockImplementationOnce(
+      async ({ abortSignal }: { abortSignal: AbortSignal }) => {
+        // The repair's verification run succeeds and its own update emits a change.
+        current = { ...job, payload: { ...job.payload, message: "fixed" } as never, state: {} };
+        for (const listener of jobChangeListeners) {
+          listener();
+        }
+        aborted = abortSignal.aborted;
+        return { status: "ok", delivered: true };
+      },
+    );
+    await expect(runGatewayCronFailureRepair(repairParams(job, () => current))).resolves.toBe(
+      "completed",
+    );
+    expect(aborted).toBe(false);
   });
 });

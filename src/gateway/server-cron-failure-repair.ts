@@ -127,6 +127,8 @@ export function buildCronFailureRepairBrief(params: {
 export async function runGatewayCronFailureRepair(params: {
   request: CronFailureRepairRequest & { job: CronStoredJob };
   getJob: (jobId: string) => CronStoredJob | undefined;
+  /** Subscribes to changes of one job (update, removal, run outcome); returns unsubscribe. */
+  onJobChange: (jobId: string, listener: () => void) => () => void;
   storePath: string;
   deps: CliDeps;
   resolveCronAgent: (requested?: string | null) => { agentId: string; cfg: OpenClawConfig };
@@ -237,24 +239,41 @@ export async function runGatewayCronFailureRepair(params: {
               : {}),
             state: { nextRunAtMs: nowMs },
           };
-          return await runCronIsolatedAgentTurn({
-            cfg: agent.cfg,
-            deps: params.deps,
-            job: repairJob,
-            message,
-            sessionKey: `cron:${repairJob.id}`,
-            agentId: agent.agentId,
-            lane: "cron",
-            abortSignal: AbortSignal.timeout(CRON_FAILURE_REPAIR_TIMEOUT_MS + 60_000),
-            cronManagement: {
-              entitlement: {
-                source: "failure-repair",
-                jobId,
-                isCurrent: () => repairsIncident(params.getJob(jobId)),
-              },
-              isCurrent: () => Date.now() < deadlineMs,
-            },
+          // The whole turn, not just its automation calls, is bound to the job's authority:
+          // removing, disabling, auto-disabling, re-owning, or making the job ineligible aborts
+          // it before further tool effects. Resolving the incident does not; that is the
+          // repair's own verification succeeding, and only its automation calls are fenced.
+          const authority = new AbortController();
+          const unsubscribe = params.onJobChange(jobId, () => {
+            if (!authority.signal.aborted && !ownsJob(params.getJob(jobId))) {
+              authority.abort(new Error("automation repair lost its job's authority"));
+            }
           });
+          try {
+            return await runCronIsolatedAgentTurn({
+              cfg: agent.cfg,
+              deps: params.deps,
+              job: repairJob,
+              message,
+              sessionKey: `cron:${repairJob.id}`,
+              agentId: agent.agentId,
+              lane: "cron",
+              abortSignal: AbortSignal.any([
+                authority.signal,
+                AbortSignal.timeout(CRON_FAILURE_REPAIR_TIMEOUT_MS + 60_000),
+              ]),
+              cronManagement: {
+                entitlement: {
+                  source: "failure-repair",
+                  jobId,
+                  isCurrent: () => repairsIncident(params.getJob(jobId)),
+                },
+                isCurrent: () => !authority.signal.aborted && Date.now() < deadlineMs,
+              },
+            });
+          } finally {
+            unsubscribe();
+          }
         }),
       "cron:failure-repair",
     );

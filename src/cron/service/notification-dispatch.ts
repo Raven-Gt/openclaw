@@ -162,9 +162,8 @@ function transportFailureRepair(
     notificationId: job.state.lastFailureNotificationId,
     runAtMs: job.state.lastRunAtMs,
   };
-  const fallBack = (reason: string) => {
-    // A verification run can resolve the incident before a failing repair settles, and a
-    // job disabled meanwhile (by the user or the auto-disable notice) needs no alert. A
+  const fallBack = async (reason: string) => {
+    // A verification run can resolve the incident before a failing repair settles. A
     // stopped or restarted service no longer owns it: startup reconciliation alerts once.
     const live = findLiveJob();
     if (
@@ -172,10 +171,14 @@ function transportFailureRepair(
       state.lifecycleGeneration !== cycle.lifecycleGeneration ||
       !live ||
       live.state.failureAlertIncident?.repair?.atMs !== repairAtMs ||
-      live.state.failureAlertIncident?.repair?.alerted ||
-      !live.enabled ||
-      live.state.autoDisabled
+      live.state.failureAlertIncident?.repair?.alerted
     ) {
+      return;
+    }
+    if (!live.enabled || live.state.autoDisabled) {
+      // A job disabled meanwhile (by the user or the auto-disable notice) needs no alert;
+      // settle the repair so a restart does not report it as interrupted.
+      await recordFailureAlertOutcome(state, cycle, { status: "not-requested" });
       return;
     }
     state.deps.log.warn(
@@ -187,11 +190,11 @@ function transportFailureRepair(
   void start({ ...params.request, job: structuredClone(liveJob) })
     .then(async (outcome) => {
       if (outcome !== "completed") {
-        fallBack(outcome);
+        await fallBack(outcome);
         return;
       }
       // Close the repair's notification cycle: no alert was sent for it.
       await recordFailureAlertOutcome(state, cycle, { status: "not-requested" });
     })
-    .catch((err: unknown) => fallBack(formatErrorMessage(err)));
+    .catch(async (err: unknown) => await fallBack(formatErrorMessage(err)));
 }

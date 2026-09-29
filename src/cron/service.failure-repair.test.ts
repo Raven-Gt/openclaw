@@ -151,7 +151,7 @@ describe("CronService failure repair", () => {
     );
   });
 
-  it("drops the fallback alert when the job was disabled while the repair ran", async () => {
+  it("drops the fallback alert and settles when the job was disabled while the repair ran", async () => {
     const pending = createDeferred<"failed">();
     const startRepair = vi.fn<StartRepair>(() => pending.promise);
     await withRepair(startRepair, async ({ cron, sendCronFailureAlert, addJob }) => {
@@ -162,9 +162,11 @@ describe("CronService failure repair", () => {
 
       await cron.update(job.id, { enabled: false });
       pending.resolve("failed");
-      await pending.promise;
-      await vi.waitFor(() => expect(cron.getJob(job.id)?.enabled).toBe(false));
-      await Promise.resolve();
+      // Settled, so a restart does not report the aborted repair as interrupted.
+      await vi.waitFor(() =>
+        expect(cron.getJob(job.id)?.state.failureAlertIncident?.repair?.settled).toBe(true),
+      );
+      expect(cron.getJob(job.id)?.state.failureAlertIncident?.repair?.alerted).toBeUndefined();
       expect(sendCronFailureAlert).not.toHaveBeenCalled();
     });
   });
