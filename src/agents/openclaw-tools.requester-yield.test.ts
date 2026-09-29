@@ -8,6 +8,8 @@ import { createOpenClawCodingTools } from "./agent-tools.js";
 import { addSession, markExited } from "./bash-process-registry.js";
 import { createProcessSessionFixture } from "./bash-process-registry.test-helpers.js";
 import { resetProcessRegistryForTests } from "./bash-process-registry.test-support.js";
+import { createMediaGenerationOperation } from "./media-generation-activity.js";
+import { resetGeneratedMediaTaskActivityForTests } from "./media-generation-activity.test-support.js";
 import { createRequesterYieldCallback } from "./openclaw-tools.requester-yield.js";
 import { acknowledgeInternalToolResult } from "./runtime/internal-hooks.js";
 import {
@@ -18,6 +20,7 @@ import {
 } from "./subagents/registry/subagent-registry.test-helpers.js";
 import type { SubagentRunRecord } from "./subagents/registry/subagent-registry.types.js";
 import { buildRequesterSettleWakeIdentity } from "./subagents/registry/subagent-requester-settle-identity.js";
+import { isToolResultError } from "./tool-result-error.js";
 import { createSessionsYieldTool } from "./tools/sessions-yield-tool.js";
 
 const CRON_RUN_KEY = "agent:main:cron:daily-report:run:run-42";
@@ -92,10 +95,12 @@ describe("requester yield ownership", () => {
   beforeEach(() => {
     resetSubagentRegistryForTests();
     resetProcessRegistryForTests();
+    resetGeneratedMediaTaskActivityForTests();
   });
   afterEach(() => {
     resetSubagentRegistryForTests();
     resetProcessRegistryForTests();
+    resetGeneratedMediaTaskActivityForTests();
   });
 
   it.each([CRON_RUN_KEY])(
@@ -498,5 +503,60 @@ describe("requester yield ownership", () => {
     await expect(tool.execute("yield-call", {})).rejects.toThrow("runtime claim failed");
     expect(onYield).not.toHaveBeenCalled();
     expect(getSubagentRunByRunId("run-child")).toEqual(before);
+  });
+
+  it("tells the model detached tool results arrive as a later turn instead of failing", async () => {
+    const requesterSessionKey = "agent:main:telegram:group:-100";
+    createMediaGenerationOperation({
+      taskId: "task-image",
+      runId: "tool:image_generate:run-image",
+      taskKind: "image_generation",
+      requesterSessionKey,
+      requesterAgentId: "main",
+      createdAt: Date.now(),
+      status: "running",
+    });
+    const exec = backgroundProcess(requesterSessionKey);
+    exec.notifyOnExit = true;
+    const onYield = vi.fn();
+    const tool = createYieldToolForTurn({
+      requesterSessionKey,
+      requesterTurnRunId: "run-turn",
+      onYield,
+    });
+
+    const result = await tool.execute("yield-call", { message: "send the image on completion" });
+
+    expect(isToolResultError(result)).toBe(false);
+    expect(result.details).toMatchObject({
+      status: "already_pending",
+      message: expect.stringContaining("arrives in this session as a later turn"),
+      pendingToolRuns: [
+        { kind: "image_generation", id: "task-image" },
+        { kind: "background exec", id: "watch-ci" },
+      ],
+    });
+    expect(onYield).not.toHaveBeenCalled();
+  });
+
+  it("keeps the generic rejection once detached media has finished", async () => {
+    const requesterSessionKey = "agent:main:telegram:group:-100";
+    createMediaGenerationOperation({
+      taskId: "task-image",
+      runId: "tool:image_generate:run-image",
+      taskKind: "image_generation",
+      requesterSessionKey,
+      requesterAgentId: "main",
+      createdAt: Date.now(),
+      status: "succeeded",
+      endedAt: Date.now(),
+    });
+    backgroundProcess(requesterSessionKey);
+    const tool = createYieldToolForTurn({ requesterSessionKey, requesterTurnRunId: "run-turn" });
+
+    expect((await tool.execute("yield-call", {})).details).toMatchObject({
+      status: "error",
+      error: GENERIC_NO_CLAIM_ERROR,
+    });
   });
 });

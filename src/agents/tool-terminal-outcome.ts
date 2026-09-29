@@ -62,7 +62,11 @@ export function createToolTerminalObserver(
         buildToolMutationState(observation.toolName, executedArguments));
     const replaySafe = observation.replaySafe ?? mutation.replaySafe;
     let lastToolError: ToolErrorSummary | undefined;
-    if (observation.outcome === "failure") {
+    if (observation.outcome === "failure" && observation.toolName === "sessions_yield") {
+      // A rejected yield only steers the model, which keeps the turn. It is not a
+      // failed user action, so it must not become (or clear) the run's tool failure.
+      lastToolError = errors.read().lastToolError;
+    } else if (observation.outcome === "failure") {
       const mutatingAction = executionStarted && mutation.mutatingAction;
       const terminalDiagnostic =
         observation.failure?.terminalDiagnostic ??

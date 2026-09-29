@@ -70,6 +70,17 @@ import {
   QA_MESSAGE_DECISION_SEND_PROMPT_RE,
   QA_SUBAGENT_DIRECT_FALLBACK_PROMPT_RE,
   QA_SUBAGENT_DIRECT_FALLBACK_WORKER_RE,
+  QA_TOOL_FAILURE_WARNING_MISSING_PATH,
+  QA_TOOL_FAILURE_WARNING_PROMPT_RE,
+  QA_DELAYED_IMAGE_MS,
+  QA_DETACHED_IMAGE_NO_ACK_IMAGE_PROMPT,
+  QA_DETACHED_IMAGE_NO_ACK_PROMPT_RE,
+  QA_YIELD_IMAGE_FAILED_MARKER,
+  QA_YIELD_REJECTION_ACK_MARKER,
+  QA_YIELD_REJECTION_FAILING_IMAGE_PROMPT,
+  QA_YIELD_REJECTION_IMAGE_FAILURE_PROMPT_RE,
+  QA_YIELD_REJECTION_IMAGE_PROMPT,
+  QA_YIELD_REJECTION_PROMPT_RE,
   QA_SUBAGENT_EMPTY_PARENT_VISIBLE_MARKER,
   QA_SUBAGENT_EMPTY_PARENT_VISIBLE_PROMPT_RE,
   QA_SUBAGENT_EMPTY_WORKER_NO_OUTPUT_PROMPT_RE,
@@ -1017,6 +1028,68 @@ async function buildResponsesPayload(
         message: `Waiting for ${QA_SUBAGENT_DIRECT_FALLBACK_MARKER}.`,
       });
     }
+  }
+  const yieldRejectionImageFailure = QA_YIELD_REJECTION_IMAGE_FAILURE_PROMPT_RE.test(allInputText);
+  const detachedImageNoAck = QA_DETACHED_IMAGE_NO_ACK_PROMPT_RE.test(allInputText);
+  if (
+    yieldRejectionImageFailure ||
+    detachedImageNoAck ||
+    QA_YIELD_REJECTION_PROMPT_RE.test(allInputText)
+  ) {
+    // Completion turns are not offered message: a successful image is delivered
+    // by the generated-media fallback, a failed one is answered in final text.
+    // Retries must not restart the chain.
+    if (allInputText.includes("[Internal task completion event]")) {
+      return buildAssistantEvents(
+        yieldRejectionImageFailure && /generation task failed/i.test(allInputText)
+          ? `${QA_YIELD_IMAGE_FAILED_MARKER}: couldn't generate the image`
+          : "",
+      );
+    }
+    if (hasEmptyResponseRetryInstruction || hasReasoningOnlyRetryInstruction) {
+      return buildAssistantEvents("");
+    }
+    if (!hasCompletedToolOutput && canCallScenarioTool(toolDeclarationBody, "image_generate")) {
+      return buildToolCallEventsWithArgs("image_generate", {
+        prompt: detachedImageNoAck
+          ? QA_DETACHED_IMAGE_NO_ACK_IMAGE_PROMPT
+          : yieldRejectionImageFailure
+            ? QA_YIELD_REJECTION_FAILING_IMAGE_PROMPT
+            : QA_YIELD_REJECTION_IMAGE_PROMPT,
+        filename: "qa-detached-image.png",
+        size: "1024x1024",
+      });
+    }
+    if (detachedImageNoAck) {
+      return buildAssistantEvents("");
+    }
+    if (completedToolName === "image_generate" && canCallSessionsYield) {
+      return buildToolCallEventsWithArgs("sessions_yield", {
+        message: "Waiting for the QA yield rejection image.",
+      });
+    }
+    if (
+      completedToolName === "sessions_yield" &&
+      canCallScenarioTool(toolDeclarationBody, "message")
+    ) {
+      return buildToolCallEventsWithArgs("message", {
+        action: "send",
+        message: QA_YIELD_REJECTION_ACK_MARKER,
+        final: false,
+      });
+    }
+    return buildAssistantEvents("");
+  }
+  if (QA_TOOL_FAILURE_WARNING_PROMPT_RE.test(allInputText)) {
+    if (
+      !hasCompletedToolOutput &&
+      !hasEmptyResponseRetryInstruction &&
+      !hasReasoningOnlyRetryInstruction &&
+      canCallScenarioTool(toolDeclarationBody, "read")
+    ) {
+      return buildToolCallEventsWithArgs("read", { path: QA_TOOL_FAILURE_WARNING_MISSING_PATH });
+    }
+    return buildAssistantEvents("");
   }
   if (/remember this fact/i.test(prompt)) {
     return buildAssistantEvents(buildAssistantText(input, body));
@@ -2295,6 +2368,24 @@ export async function startQaMockOpenAiServer(params?: QaMockOpenAiServerOptions
         imageGenerationRequests.push(body);
         if (imageGenerationRequests.length > 20) {
           imageGenerationRequests.splice(0, imageGenerationRequests.length - 20);
+        }
+        // Keep these detached media runs pending after the originating turn ends.
+        if (
+          body.prompt === QA_YIELD_REJECTION_IMAGE_PROMPT ||
+          body.prompt === QA_YIELD_REJECTION_FAILING_IMAGE_PROMPT ||
+          body.prompt === QA_DETACHED_IMAGE_NO_ACK_IMAGE_PROMPT
+        ) {
+          await sleep(QA_DELAYED_IMAGE_MS);
+        }
+        if (body.prompt === QA_YIELD_REJECTION_FAILING_IMAGE_PROMPT) {
+          writeJson(res, 400, {
+            error: {
+              message: "QA image provider rejected the request.",
+              type: "invalid_request_error",
+              code: "qa_image_generation_failure",
+            },
+          });
+          return;
         }
         writeJson(res, 200, {
           data: [

@@ -1,0 +1,89 @@
+title: Real tool failure with nothing delivered posts one failure warning
+
+scenario:
+  id: tool-failure-warning-control
+  surface: channel
+  coverage:
+    primary:
+      - agent-runtime.failure-recovery-evidence
+    secondary:
+      - channels.message-final-reply
+  objective: Under message_tool visible replies (messages.visibleReplies and messages.groupChat.visibleReplies), a group turn whose only tool call genuinely fails and that ends empty without delivering anything must still post exactly one "⚠️ … failed" warning to the group.
+  gatewayConfigPatch:
+    messages:
+      visibleReplies: message_tool
+      groupChat:
+        visibleReplies: message_tool
+  successCriteria:
+    - The mock turn calls read on a missing workspace file, then ends with empty text.
+    - The group receives exactly one ⚠️ failure warning and no other outbound message.
+  docsRefs:
+    - docs/channels/qa-channel.md
+  codeRefs:
+    - src/agents/tool-terminal-outcome.ts
+    - src/agents/embedded-agent-runner/run/payloads.ts
+    - src/agents/embedded-agent-runner/run/tool-error-warning.ts
+    - extensions/qa-lab/src/providers/mock-openai/server.ts
+  execution:
+    kind: flow
+    summary: Drive a failing read -> empty final in a message_tool_only group and verify exactly one tool failure warning reaches the group.
+    config:
+      requiredProviderMode: mock-openai
+      conversationId: qa-tool-failure-warning-group
+      promptSnippet: tool failure warning qa check
+      prompt: "@openclaw tool failure warning qa check: read the QA notes file and summarize it."
+      settleMs: 8000
+
+flow:
+  steps:
+    - name: surfaces a real tool failure that left the group without a reply
+      actions:
+        - assert:
+            expr: "env.providerMode === config.requiredProviderMode"
+            message: this seeded scenario is mock-openai only
+        - call: waitForGatewayHealthy
+          args:
+            - ref: env
+            - 60000
+        - call: waitForQaChannelReady
+          args:
+            - ref: env
+            - 60000
+        - call: reset
+        - set: requestCursorBefore
+          value:
+            expr: "(await fetchJson(`${env.mock.baseUrl}/debug/request-cursor`)).cursor"
+        - sendInbound:
+            conversation:
+              id:
+                expr: config.conversationId
+              kind: group
+            senderId: qa-tool-failure-operator
+            senderName: QA Tool Failure Operator
+            text:
+              expr: config.prompt
+        # Poll the snapshot directly: transport waits abort on the failure-shaped
+        # outbound this scenario expects.
+        - set: firstWarning
+          value:
+            expr: "(async () => { const deadline = Date.now() + liveTurnTimeoutMs(env, 60000); do { const message = state.getSnapshot().messages.find((candidate) => candidate.direction === 'outbound' && candidate.conversation.id === config.conversationId && String(candidate.text ?? '').startsWith('⚠️')); if (message) { return message; } await sleep(100); } while (Date.now() < deadline); throw new Error(`timed out waiting for the tool failure warning; group outbound=${JSON.stringify(state.getSnapshot().messages.filter((candidate) => candidate.direction === 'outbound' && candidate.conversation.id === config.conversationId).map((candidate) => candidate.text))}`); })()"
+        - call: sleep
+          args:
+            - expr: config.settleMs
+        - set: groupOutbound
+          value:
+            expr: "state.getSnapshot().messages.filter((message) => message.direction === 'outbound' && message.conversation.id === config.conversationId)"
+        - set: scenarioRequests
+          value:
+            expr: "(await fetchJson(`${env.mock.baseUrl}/debug/requests?after=${requestCursorBefore}`)).filter((request) => String(request.allInputText ?? '').includes(config.promptSnippet))"
+        - set: warningOutbound
+          value:
+            expr: "groupOutbound.filter((message) => /^⚠️ .*failed/.test(String(message.text ?? '').trim()))"
+        - assert:
+            expr: "scenarioRequests.filter((request) => request.plannedToolName === 'read').length === 1"
+            message: expected exactly one failing read call
+        - assert:
+            expr: "warningOutbound.length === 1 && groupOutbound.length === 1"
+            message:
+              expr: "`expected exactly one tool failure warning and nothing else, saw ${JSON.stringify(groupOutbound.map((message) => message.text))}`"
+      detailsExpr: "`warning=${JSON.stringify(warningOutbound[0]?.text ?? null)}; group outbound=${groupOutbound.length}`"

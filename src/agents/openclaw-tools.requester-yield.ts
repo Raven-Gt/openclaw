@@ -2,7 +2,15 @@ import { isCronSessionKey, isSubagentSessionKey } from "../sessions/session-key-
 import { listFinishedSessions, listRunningSessions } from "./bash-process-registry.js";
 import { resolveProcessToolScopeKey } from "./bash-process-scope.js";
 import { bindRequesterYieldCronAuthority } from "./cron-creator-authority-context.js";
-import type { SessionsYieldClaimResult, SessionsYieldIntent } from "./tools/sessions-yield-tool.js";
+import {
+  isTerminalMediaGenerationStatus,
+  listMediaGenerationOperations,
+} from "./media-generation-activity.js";
+import type {
+  PendingAsyncToolRun,
+  SessionsYieldClaimResult,
+  SessionsYieldIntent,
+} from "./tools/sessions-yield-tool.js";
 
 const ISOLATED_AUTOMATION_YIELD_UNSUPPORTED_ERROR =
   "Isolated automation turns cannot use sessions_yield because no requester continuation is available. Finish this turn so the scheduler can handle child output under the job's delivery policy.";
@@ -30,6 +38,8 @@ export function createRequesterYieldCallback(params: {
   requesterTurnRunId?: string;
   processScopeKey?: string;
   swarmCollector?: boolean;
+  /** Session key detached media generation registers its runs under. */
+  mediaGenerationSessionKey?: string;
   claimYieldCompletion?: () => boolean | Promise<boolean>;
 }): YieldCompletionClaim | undefined {
   // Requester settlement never resumes cron. Reject before checking claims or writing yield intent.
@@ -107,6 +117,40 @@ export function createRequesterYieldCallback(params: {
         return { pendingChildren };
       }
     }
+    // Detached tool runs re-enter the session through their own completion
+    // delivery; yielding cannot wait for them, so steer the model to end the turn.
+    const pendingToolRuns = listPendingAsyncToolRuns({
+      mediaGenerationSessionKey: params.mediaGenerationSessionKey?.trim() || requesterSessionKey,
+      requesterAgentId: params.requesterAgentId,
+      processScopeKey: canWaitForMessage ? undefined : processScopeKey,
+    });
+    if (pendingToolRuns.length > 0) {
+      return { pendingToolRuns };
+    }
     return false;
   };
+}
+
+function listPendingAsyncToolRuns(params: {
+  mediaGenerationSessionKey?: string;
+  requesterAgentId: string;
+  processScopeKey?: string;
+}): PendingAsyncToolRun[] {
+  const media = params.mediaGenerationSessionKey
+    ? listMediaGenerationOperations(params.mediaGenerationSessionKey, params.requesterAgentId)
+        .filter((operation) => !isTerminalMediaGenerationStatus(operation.status))
+        .map((operation) => ({ kind: operation.taskKind, id: operation.taskId }))
+    : [];
+  // Only notifying background exec wakes a non-subagent session on exit.
+  const exec = params.processScopeKey
+    ? listRunningSessions()
+        .filter(
+          (session) =>
+            session.scopeKey === params.processScopeKey &&
+            session.backgrounded &&
+            session.notifyOnExit === true,
+        )
+        .map((session) => ({ kind: "background exec", id: session.id }))
+    : [];
+  return [...media, ...exec];
 }

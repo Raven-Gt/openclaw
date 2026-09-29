@@ -7,10 +7,14 @@ import { jsonResult, readToolStringParam } from "./common.js";
 const NO_PENDING_CHILD_COMPLETION_ERROR =
   'No pending child completion is owned by this turn. If the assigned work is complete, return its result normally. An unfinished subagent waiting for an incoming continuation must explicitly set waitFor: "message".';
 
+/** Detached tool work whose completion re-enters this session as a later turn. */
+export type PendingAsyncToolRun = { kind: string; id: string };
+
 export type SessionsYieldClaimResult =
   | boolean
   | { error: string }
-  | { pendingChildren: readonly UnsettledRequesterChild[] };
+  | { pendingChildren: readonly UnsettledRequesterChild[] }
+  | { pendingToolRuns: readonly PendingAsyncToolRun[] };
 export type SessionsYieldIntent = { waitFor?: "message" };
 
 function describePendingChild(child: UnsettledRequesterChild): string {
@@ -45,6 +49,11 @@ function formatPendingChildrenMessage(children: readonly UnsettledRequesterChild
   }
   parts.push("This turn owns no new claim, so no yield is needed: end this turn normally.");
   return parts.join(" ");
+}
+
+function formatPendingToolRunsMessage(runs: readonly PendingAsyncToolRun[]): string {
+  const described = runs.map((run) => `${run.kind} (${run.id})`).join(", ");
+  return `Detached tool work started in this session is still running: ${described}. Its result arrives in this session as a later turn automatically; sessions_yield only waits for child sessions and cannot wait for tool runs. Do not poll or re-run the tool: end this turn now.`;
 }
 
 const SessionsYieldToolSchema = Type.Object({
@@ -109,6 +118,14 @@ export function createSessionsYieldTool(opts?: {
           status: "already_pending",
           message: formatPendingChildrenMessage(claim.pendingChildren),
           pendingChildren: claim.pendingChildren,
+        });
+      }
+      if (typeof claim === "object" && "pendingToolRuns" in claim) {
+        // Not an error: detached tool completions re-enter the session on their own.
+        return jsonResult({
+          status: "already_pending",
+          message: formatPendingToolRunsMessage(claim.pendingToolRuns),
+          pendingToolRuns: claim.pendingToolRuns,
         });
       }
       if (claim !== true) {

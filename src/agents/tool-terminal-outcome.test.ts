@@ -69,6 +69,66 @@ describe("tool terminal outcome observer", () => {
     expect(payloads[0]).toMatchObject({ isError: true });
   });
 
+  // Live Telegram group (message-tool-only): image_generate started, the model called
+  // sessions_yield (rejected), acknowledged via message, and ended with empty text.
+  it.each([
+    { name: "progress acknowledgement", final: false },
+    { name: "final acknowledgement", final: true },
+  ])("does not post a yield warning after a rejected yield and a $name", ({ final }) => {
+    const observe = createToolTerminalObserver("run-yield-ack");
+    const ack = "Making the image now.";
+    observe({
+      toolName: "sessions_yield",
+      arguments: { message: "Image generation is active; send it on completion." },
+      outcome: "failure",
+      failure: { error: "No pending child completion is owned by this turn." },
+    });
+    const afterAck = observe({
+      toolName: "message",
+      arguments: { action: "send", message: ack, replyTo: "60613", final },
+      outcome: "success",
+      result: { details: { ok: true, messageId: "60615" } },
+    });
+
+    expect(afterAck.lastToolError).toBeUndefined();
+    expect(
+      buildPayloads({
+        lastToolError: afterAck.lastToolError,
+        sourceReplyDeliveryMode: "message_tool_only",
+        didSendViaMessagingTool: true,
+        messagingToolSentTargets: [
+          { tool: "message", provider: "telegram", text: ack, sourceReplyFinal: final },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("keeps warning about a real failure when a rejected yield follows it", () => {
+    const observe = createToolTerminalObserver("run-yield-control");
+    observe({
+      toolName: "image_generate",
+      arguments: { prompt: "a city" },
+      outcome: "failure",
+      failure: { error: "provider unavailable" },
+    });
+    const afterYield = observe({
+      toolName: "sessions_yield",
+      arguments: {},
+      outcome: "failure",
+      failure: { error: "No pending child completion is owned by this turn." },
+    });
+
+    expect(afterYield.lastToolError).toMatchObject({ toolName: "image_generate" });
+    const payloads = buildPayloads({
+      lastToolError: afterYield.lastToolError,
+      sourceReplyDeliveryMode: "message_tool_only",
+    });
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]).toMatchObject({ isError: true });
+    expect(payloads[0]?.text).toContain("failed");
+    expect(payloads[0]?.text).not.toContain("Yield");
+  });
+
   it("uses host execution and adjusted-argument evidence before fallback facts", () => {
     const runId = "run-2";
     const toolCallId = "call-1";

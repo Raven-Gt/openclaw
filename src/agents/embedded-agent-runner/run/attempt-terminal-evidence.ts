@@ -3,7 +3,14 @@ import {
   hasAcceptedSessionSpawn,
   hasCompletionMessageSessionSpawn,
 } from "../../accepted-session-spawn.js";
-import { hasMessagingToolDeliveryEvidence } from "../delivery-evidence.js";
+import {
+  findMediaGenerationOperation,
+  isTerminalMediaGenerationStatus,
+} from "../../media-generation-activity.js";
+import {
+  hasMessagingToolDeliveryEvidence,
+  resolveSourceReplyDelivery,
+} from "../delivery-evidence.js";
 import type { RunEmbeddedAgentParams } from "./params.js";
 import type { EmbeddedRunAttemptResult } from "./types.js";
 
@@ -127,6 +134,9 @@ type AcceptedSessionSpawnContinuationAttempt = Pick<
   | "toolAudioAsVoice"
   | "toolMediaUrls"
   | "toolTrustedLocalMedia"
+  | "toolMetas"
+  | "sourceReplyDelivered"
+  | "sourceReplyDeliveryState"
   | "yieldDetected"
 >;
 
@@ -136,17 +146,28 @@ type AcceptedSessionSpawnContinuationRun = Pick<
 >;
 
 /**
- * A visible parent that delegates its entire response must remain alive for
- * completion delivery. Existing output, explicit silence, and non-user turns
- * keep their established terminal ownership instead.
+ * A visible parent that delegates its entire response to completion children or
+ * to a still-running detached tool run must remain alive for completion delivery.
+ * Existing output, explicit silence, and non-user turns keep their established
+ * terminal ownership instead.
  */
 export function shouldContinueInteractiveAcceptedSessionSpawns(params: {
   attempt: AcceptedSessionSpawnContinuationAttempt;
   run: AcceptedSessionSpawnContinuationRun;
 }): boolean {
   const { attempt, run } = params;
+  // Only a run still in flight owes its completion to this session; one that
+  // already settled within the turn, or a delivered final reply, leaves the
+  // reply to normal handling.
+  const delegatedToToolRun =
+    resolveSourceReplyDelivery(attempt) === "missing" &&
+    attempt.toolMetas.some((entry) => {
+      const runId = entry.asyncStarted === true ? entry.asyncTaskRunId?.trim() : undefined;
+      const operation = runId ? findMediaGenerationOperation(runId) : undefined;
+      return operation !== undefined && !isTerminalMediaGenerationStatus(operation.status);
+    });
   if (
-    !hasCompletionMessageSessionSpawn(attempt.acceptedSessionSpawns) ||
+    !(hasCompletionMessageSessionSpawn(attempt.acceptedSessionSpawns) || delegatedToToolRun) ||
     attempt.terminal.kind !== "ok" ||
     attempt.yieldDetected === true ||
     run.replyOperation?.turnKind !== "visible" ||
@@ -163,8 +184,21 @@ export function shouldContinueInteractiveAcceptedSessionSpawns(params: {
   ) {
     return false;
   }
+  // The detached run delivers the result itself, so non-final message sends
+  // (progress acknowledgements) do not replace the owed reply.
   return !hasAttemptTerminalState({
     ...attempt,
     acceptedSessionSpawns: [],
+    ...(delegatedToToolRun
+      ? {
+          toolMetas: [],
+          didSendViaMessagingTool: false,
+          didDeliverSourceReplyViaMessageTool: false,
+          messagingToolSentTexts: [],
+          messagingToolSentMediaUrls: [],
+          messagingToolSentTargets: [],
+          messagingToolSourceReplyPayloads: [],
+        }
+      : {}),
   });
 }
