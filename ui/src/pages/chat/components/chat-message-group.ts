@@ -44,7 +44,11 @@ import {
   resolveMessageActionDetails,
   type MessageReplyTarget,
 } from "./chat-message-markdown.ts";
-import { renderMessageReactions, type MessageReactionAction } from "./chat-message-reactions.ts";
+import {
+  messageReactionOptions,
+  renderMessageReactions,
+  type MessageReactionAction,
+} from "./chat-message-reactions.ts";
 import { renderChatSendStatus, type ChatSendStatusActions } from "./chat-message-send-status.ts";
 import {
   emptyGroupFooter,
@@ -188,7 +192,7 @@ function renderPreparedGroupMessage(
       messageActions: actionDetails,
     },
     opts.onOpenSidebar,
-  )}${renderMessageReactions(reactionMessageId, opts)}`;
+  )}${renderMessageReactions(reactionMessageId, messageReactionOptions(group, opts))}`;
 }
 
 function isOwnSenderGroup(
@@ -553,7 +557,7 @@ export function renderMessageGroup(group: MessageGroup, opts: RenderMessageGroup
           ${opts.onRewind && !opts.rewindDisabled ? renderRewindButton(opts.onRewind) : nothing}
           ${
             footerActionDetails
-              ? renderMessageActionButtons(footerActionDetails, { onReact: opts.onReact })
+              ? renderMessageActionButtons(footerActionDetails, messageReactionOptions(group, opts))
               : nothing
           }
         </div>

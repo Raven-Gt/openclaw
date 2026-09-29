@@ -31,15 +31,22 @@ Busy sessions keep the first two people’s preview bubbles in arrival order, in
 ## Reactions
 
 Hover a saved prompt or assistant reply and select **Add reaction** beside the
-message actions. Choose **👍**, **❤️**, **🎉**, **👀**, **🚀**, or **😂** from the
-palette. Select **More…** to enter another emoji, using **⌃⌘Space** on macOS or
-**Win+.** on Windows to open the system emoji picker. Press Enter or select
-**Apply** to add it; Escape closes the picker.
+message actions, or the **+** chip at the end of an existing reaction row. The
+quick palette offers **👍**, **❤️**, **🎉**, **👀**, **🚀**, and **😂**; an emoji
+you already placed shows pressed, and selecting it again removes it. Arrow keys
+move through the palette and Escape closes it.
 
-Reaction chips appear directly below each message with a count. Hover a chip to
-see who reacted. Select a chip to add your reaction, or select a pressed chip
-again to remove yours. Viewers can read the chips; adding or toggling requires
-permission to send or suggest in that session. See
+Select **…** for any other emoji. Type or paste one, or open the system emoji
+picker with **⌃⌘Space** on macOS or **Win+.** on Windows: a complete emoji is
+applied as soon as it lands in the field, so the system picker needs no extra
+keystroke. Anything that is not a single emoji stays in the field with a hint.
+Backspace in an empty field returns to the palette.
+
+Reaction chips appear directly below each message with a count and animate when
+the count changes. Hover a chip to see who reacted, with you listed first.
+Select a chip to add your reaction, or select a pressed chip again to remove
+yours. Viewers can read the chips; adding or toggling requires permission to
+send or suggest in that session. See
 [Multi-user reactions](/concepts/multi-user#reactions) for agent and channel behavior.
 
 ## Session rail and side chat

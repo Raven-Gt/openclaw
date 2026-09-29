@@ -55,8 +55,15 @@ suite.define(() => {
         .locator('.chat-reaction-chip[aria-pressed="false"][aria-label="👍 1"]')
         .waitFor();
       await message.hover();
-      await message.getByRole("button", { name: "Add reaction", exact: true }).click();
-      await page
+      // The hover row and the chip row each carry a picker; the footer one first.
+      const footerPicker = message.locator(
+        ".chat-group-footer-actions openclaw-message-reaction-picker",
+      );
+      const rowPicker = reactions.locator("openclaw-message-reaction-picker");
+      await footerPicker.getByRole("button", { name: "Add reaction", exact: true }).click();
+      // Each picker owns its popover; an unscoped lookup can match a sibling
+      // popover that is still animating closed.
+      await footerPicker
         .locator(".chat-reaction-picker")
         .getByRole("button", { name: "🎉", exact: true })
         .click();
@@ -69,13 +76,14 @@ suite.define(() => {
         .locator('.chat-reaction-chip[aria-pressed="true"][aria-label="🎉 1"]')
         .waitFor();
 
-      await message.getByRole("button", { name: "Add reaction", exact: true }).click();
-      await page
+      await message.hover();
+      await rowPicker.getByRole("button", { name: "Add reaction", exact: true }).click();
+      await rowPicker
         .locator(".chat-reaction-picker")
         .getByRole("button", { name: "More…", exact: true })
         .click();
-      await page.getByRole("textbox", { name: "Emoji", exact: true }).fill("🦞");
-      await page.getByRole("textbox", { name: "Emoji", exact: true }).press("Enter");
+      // A complete emoji applies on input, so the OS picker needs no extra keystroke.
+      await rowPicker.getByRole("textbox", { name: "Emoji", exact: true }).fill("🦞");
       expect(
         (await gateway.waitForRequest("session.reactions.set", { after: 1 })).params,
       ).toMatchObject({
