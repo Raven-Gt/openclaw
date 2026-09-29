@@ -449,23 +449,33 @@ export async function writeConfigFileFromContext(
       tempPrefix: path.basename(configPath),
       copyFallbackOnPermissionError: true,
       fileSystem: deps.fs,
-      ...(options.assertConfigPathForWrite
-        ? { beforeDestinationMutation: options.assertConfigPathForWrite }
+      ...(options.assertConfigMutationAuthority
+        ? {
+            beforeDestinationMutation: () => {
+              options.assertConfigPathForWrite?.();
+              options.assertConfigMutationAuthority?.();
+            },
+          }
         : {}),
       beforeRename: async () => {
         options.assertConfigPathForWrite?.();
+        options.assertConfigMutationAuthority?.();
         if (options.baseSnapshot) {
           assertBaseSnapshotStillCurrent(snapshot, configPath, deps.fs);
         }
         if (deps.fs.existsSync(configPath)) {
-          await maintainConfigBackups(configPath, deps.fs.promises);
+          await maintainConfigBackups(configPath, deps.fs.promises, {
+            assertMutation: options.assertConfigMutationAuthority,
+          });
         }
+        options.assertConfigMutationAuthority?.();
         if (options.baseSnapshot) {
           assertBaseSnapshotStillCurrent(snapshot, configPath, deps.fs);
         }
         options.assertConfigPathForWrite?.();
         await cronOwnerRefusal?.recheck();
         options.assertConfigPathForWrite?.();
+        options.assertConfigMutationAuthority?.();
         // Warn only after final guards pass, with no later await before rename.
         warnIfJSON5CommentsWillBeStripped({
           raw: snapshot.raw,
@@ -477,6 +487,7 @@ export async function writeConfigFileFromContext(
     });
     try {
       options.assertConfigPathForWrite?.();
+      options.assertConfigMutationAuthority?.();
     } catch (error) {
       try {
         await rollbackConfigFileWriteIfUnchanged({

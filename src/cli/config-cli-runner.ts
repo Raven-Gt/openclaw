@@ -395,10 +395,7 @@ export async function runConfigOperations(params: {
       auditOrigin: "cli",
       ...(params.beforePersistentApply
         ? {
-            assertConfigPathForWrite: () => {
-              mutationStart.writeOptions.assertConfigPathForWrite?.();
-              params.beforePersistentApply?.();
-            },
+            assertConfigMutationAuthority: params.beforePersistentApply,
           }
         : {}),
       ...(unsetPaths.length > 0 ? { unsetPaths } : {}),
