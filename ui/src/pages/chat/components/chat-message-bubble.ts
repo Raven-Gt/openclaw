@@ -541,8 +541,7 @@ export function renderGroupedMessage(
     );
   };
   const renderMessageContent = () => (renderInOrder ? renderOrderedContent() : renderText());
-  // Collapsed tool results must not load attachments or render hidden markdown.
-  // Retained panes use opacity, so hidden transcripts must unmount video previews.
+  // Collapsed tools omit hidden content; retained panes unmount videos while hidden.
   const renderBody = () => html`
     ${
       sourceRole === "assistant"
@@ -611,7 +610,8 @@ export function renderGroupedMessage(
     }
   `;
 
-  return html`
+  const reactionActions = renderMessageReactionActions(messageKey, role, opts);
+  const bubble = html`
     <div
       class="${bubbleClasses}"
       ${opts.entryRef ? ref(opts.entryRef) : nothing}
@@ -711,8 +711,12 @@ export function renderGroupedMessage(
             </div>`
           : nothing
       }
-      ${renderMessageReactionActions(messageKey, role, opts)}
+      ${role === "user" ? nothing : reactionActions}
     </div>
-    ${renderMessageWorkContext(message)}
   `;
+  const messageContent =
+    role === "user" && reactionActions !== nothing
+      ? html`<div class="chat-message-with-reactions">${bubble}${reactionActions}</div>`
+      : bubble;
+  return html`${messageContent}${renderMessageWorkContext(message)}`;
 }

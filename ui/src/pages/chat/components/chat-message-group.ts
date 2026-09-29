@@ -34,7 +34,6 @@ import { workspaceResultConflictFromTranscript } from "../workspace-conflict.ts"
 import { renderChatAuthorAvatar } from "./chat-author-avatar.ts";
 import { renderForwardedAttribution } from "./chat-forwarded-attribution.ts";
 import { renderGroupedMessage } from "./chat-message-bubble.ts";
-import { renderRewindButton } from "./chat-message-confirmation.ts";
 import {
   FULL_MESSAGE_RETRY_REVISION_LIMIT,
   renderMessageActionButtons,
@@ -109,6 +108,8 @@ type RenderMessageGroupOptions = Omit<
     frameContent?: readonly unknown[];
     frameActionOwner?: MessageGroup["messages"][number] | null;
     latestAssistant?: boolean;
+    /** Prepared by the canonical turn projection, not inferred from this group. */
+    completedReplyMessageKeys?: ReadonlySet<string>;
     /** Rendered as a transcript search result, outside its turn. */
     searchResult?: boolean;
   };
@@ -119,12 +120,19 @@ function prepareGroupMessage(
   opts: RenderMessageGroupOptions,
 ) {
   const source = prepareChatMessageRender(item.message);
-  const details = resolveMessageActionDetails(source, {
+  let details = resolveMessageActionDetails(source, {
     ...opts,
     messageId: item.key,
     canFetchFullMessage: Boolean(opts.loadFullAssistantMessage && opts.sessionKey),
     senderLabel: resolveMessageGroupSenderLabel(group, opts),
   });
+  if (
+    group.role === "assistant" &&
+    details?.reactionMessageId &&
+    !opts.completedReplyMessageKeys?.has(item.key)
+  ) {
+    details = { ...details, reactionMessageId: undefined };
+  }
   const messageId = details?.fullMessage?.messageId;
   if (messageId) {
     // Projected rows can share a source ID; a preceding row may have started its load.
@@ -537,8 +545,7 @@ export function renderMessageGroup(group: MessageGroup, opts: RenderMessageGroup
           class="chat-group-footer-actions"
           data-message-actions-for=${footerActionMessageKey ?? nothing}
         >
-          ${opts.onRewind && !opts.rewindDisabled ? renderRewindButton(opts.onRewind) : nothing}
-          ${footerActionDetails ? renderMessageActionButtons(footerActionDetails, opts) : nothing}
+          ${renderMessageActionButtons(footerActionDetails, opts)}
         </div>
       `
     : nothing;
@@ -619,7 +626,7 @@ export function renderMessageGroup(group: MessageGroup, opts: RenderMessageGroup
                   !isTurnBlock
                     ? html`
                         <div class="chat-message-actions-row" data-message-actions-for=${item.key}>
-                          ${renderMessageActionButtons(actionDetails, opts)}
+                          ${renderMessageActionButtons(actionDetails, { onReply: opts.onReply })}
                         </div>
                       `
                     : nothing

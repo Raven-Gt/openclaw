@@ -25,6 +25,8 @@ type ChatRenderItem = ReturnType<typeof coalesceAgentRunFrames>[number];
 type TranscriptChain = {
   collapsedItems: readonly ChatRenderItem[];
   transcriptItems: readonly ChatRenderItem[];
+  /** Final visible messages whose complete turn has settled. */
+  completedReplyMessageKeys: ReadonlySet<string>;
   /** Active status parts shown inside the preceding reply, keyed by that reply's group. */
   continuations: ReadonlyMap<string, StreamGroupPart[]>;
 };
@@ -81,11 +83,9 @@ export function projectTranscriptChain(
     readLiveTerminalRevision(),
   ];
   return memoize(chains, chatItems, key, () => {
+    const completedTurns = collapseCompletedTurnWork(coalesceStreamRuns(chatItems), options);
     const collapsedItems = coalesceAgentRunFrames(
-      coalesceActivityRuns(
-        collapseCompletedTurnWork(coalesceStreamRuns(chatItems), options),
-        options,
-      ),
+      coalesceActivityRuns(completedTurns.items, options),
       options,
     );
     const continuations = new Map<string, StreamGroupPart[]>();
@@ -114,7 +114,12 @@ export function projectTranscriptChain(
       continuations.set(previous.key, activeStatusParts);
       return false;
     });
-    return { collapsedItems, transcriptItems, continuations };
+    return {
+      collapsedItems,
+      transcriptItems,
+      continuations,
+      completedReplyMessageKeys: completedTurns.completedReplyMessageKeys,
+    };
   });
 }
 

@@ -1,53 +1,164 @@
 openclaw-chat-message-reactions {
   --chat-reaction-emoji-size: 12px;
+  --chat-reaction-control-size: 30px;
 
   display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+/* The text/media bubble sets the width; reaction inventory never expands it. */
+.chat-message-with-reactions {
+  --chat-reaction-control-size: 30px;
+
+  display: grid;
+  width: fit-content;
+  max-width: 100%;
+  min-width: min(calc(4 * var(--chat-reaction-control-size) + 64px), 100%);
+}
+
+.chat-message-with-reactions > .chat-bubble {
+  justify-self: var(--chat-user-content-align, end);
+  width: fit-content;
+}
+
+.chat-message-with-reactions > .chat-message-action-line {
+  contain: inline-size;
 }
 
 .chat-message-action-line {
   --chat-message-action-opacity: 0.6;
   --chat-message-action-pointer-events: auto;
 
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.chat-message-action-line > openclaw-chat-message-reactions {
+  width: 100%;
   min-width: 0;
-}
-
-.chat-message-action-line .chat-reactions {
-  margin-top: 0;
-}
-
-.chat-message-action-line .chat-message-actions-row {
-  flex: 0 0 auto;
-  margin-top: 0;
-  margin-bottom: 0;
-  margin-left: 0;
-}
-
-.chat-reactions,
-.chat-reaction-tabs {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
+  margin-top: 8px;
 }
 
 .chat-reactions {
-  margin-top: 8px;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-reaction-strip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  contain: inline-size;
+  min-height: var(--chat-reaction-control-size);
+  overflow: clip;
+  overflow-clip-margin: 4px;
+}
+
+.chat-reaction-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  width: max-content;
+  min-height: var(--chat-reaction-control-size);
+}
+
+.chat-reaction-actions .chat-message-actions-row {
+  display: contents;
+}
+
+openclaw-chat-message-reactions[layout="user"] .chat-reactions {
+  grid-template-columns: minmax(40px, 1fr) auto;
+  column-gap: 10px;
+}
+
+openclaw-chat-message-reactions[layout="user"] .chat-reaction-strip {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+openclaw-chat-message-reactions[layout="user"] .chat-reaction-actions {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.chat-group.user.chat-group--peer openclaw-chat-message-reactions[layout="user"] {
+  .chat-reactions {
+    grid-template-columns: auto minmax(40px, 1fr);
+  }
+
+  .chat-reaction-strip {
+    grid-column: 2;
+    justify-content: flex-end;
+  }
+
+  .chat-reaction-actions {
+    grid-column: 1;
+  }
+}
+
+.chat-reaction-tabs,
+.chat-reaction-overflow-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Only eight inert samples are needed to measure the bounded inline prefix.
+   Their clip contains intrinsic width without adding another interactive tree. */
+.chat-reaction-measure-clip {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.chat-reaction-measure {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: max-content;
+}
+
+.chat-reaction-overflow {
+  grid-column: 1 / -1;
+  min-width: 0;
+  contain: inline-size;
+  max-height: 230px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.chat-reaction-overflow-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-reaction-collapse {
+  border: 0;
+  padding: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
 }
 
 .chat-reaction-chip,
-.chat-reaction-add {
+.chat-reaction-more {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
   min-height: 28px;
   padding: 3px 9px;
   border: 1px solid var(--border);
@@ -72,6 +183,8 @@ openclaw-chat-message-reactions {
 
 .chat-reaction-chip:focus-visible,
 .chat-reaction-add:focus-visible,
+.chat-reaction-more:focus-visible,
+.chat-reaction-collapse:focus-visible,
 .chat-reaction-details-link:focus-visible,
 .chat-reaction-picker button:focus-visible {
   outline: 2px solid var(--accent);
@@ -84,25 +197,86 @@ openclaw-chat-message-reactions {
   opacity: 0.6;
 }
 
-.chat-reaction-add {
-  width: 32px;
-  padding: 0;
+.chat-reaction-more {
+  min-width: 36px;
+  padding-inline: 7px;
+  white-space: nowrap;
 }
 
-.chat-reaction-add:hover:not(:disabled),
-.chat-reaction-add[aria-expanded="true"] {
+.chat-reaction-more:hover,
+.chat-reaction-more[aria-expanded="true"] {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
   color: var(--text);
+}
+
+.chat-reaction-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--chat-reaction-control-size);
+  min-width: var(--chat-reaction-control-size);
+  height: var(--chat-reaction-control-size);
+  min-height: var(--chat-reaction-control-size);
+  padding: 5px;
+  opacity: 0.6;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+
+/* These controls already own their hit area; do not inherit footer hit extensions. */
+.chat-reaction-actions
+  .chat-message-actions-row
+  :is(.chat-copy-btn, .chat-reply-btn, .chat-group-rewind) {
+  margin-inline: 0;
+}
+
+.chat-reaction-actions
+  .chat-message-actions-row
+  :is(.chat-copy-btn, .chat-reply-btn, .chat-group-rewind)::before {
+  content: none;
+}
+
+.chat-reaction-actions button:hover:not(:disabled),
+.chat-reaction-add[aria-expanded="true"] {
+  opacity: 1;
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.chat-reaction-actions .chat-copy-btn__icon {
+  width: 18px;
+  height: 18px;
 }
 
 .chat-reaction-add-icon {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.chat-reaction-add-icon svg {
+.chat-reaction-actions button svg {
+  display: block;
+  flex: none;
   width: 18px;
   height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chat-reaction-tabs .chat-reaction-chip,
+.chat-reaction-overflow-chips .chat-reaction-chip {
+  max-width: 100%;
+}
+
+.chat-reaction-count {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-reaction-tooltip {
@@ -118,7 +292,6 @@ openclaw-chat-message-reactions {
   color: inherit;
   font: inherit;
   text-align: center;
-  cursor: pointer;
 }
 
 .chat-reaction-details-link:hover {
@@ -256,13 +429,20 @@ openclaw-chat-message-reactions {
 }
 
 @media (pointer: coarse) {
+  .chat-message-with-reactions {
+    --chat-reaction-control-size: 44px;
+  }
+
+  openclaw-chat-message-reactions {
+    --chat-reaction-control-size: 44px;
+  }
+
   .chat-reaction-popover {
     --chat-reaction-picker-cell: 44px;
   }
 
   .chat-reaction-chip,
-  .chat-reaction-add,
-  .chat-reaction-toggle {
+  .chat-reaction-more {
     min-height: 40px;
     min-width: 40px;
   }

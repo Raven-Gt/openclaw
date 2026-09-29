@@ -1,5 +1,5 @@
 import { html, render } from "lit";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ChatReactionPerson,
   ChatReactionSummary,
@@ -25,6 +25,7 @@ afterEach(() => {
   render(null, container);
   container.remove();
   restoreDialog();
+  vi.useRealTimers();
 });
 
 const maya: ChatReactionPerson = {
@@ -51,10 +52,13 @@ const mixedSummary: ChatReactionSummary = {
   reactors: [maya, agentPerson],
 };
 
-async function setup(canReact = true, reaction = summary) {
+async function setup(
+  canReact = true,
+  reaction: ChatReactionSummary | ChatReactionSummary[] = summary,
+) {
   const request = createGatewayRequestMock().mockResolvedValue({
     sessionId: "s",
-    messages: [{ messageId: "saved", reactions: [reaction] }],
+    messages: [{ messageId: "saved", reactions: Array.isArray(reaction) ? reaction : [reaction] }],
   });
   const scope: ChatReactionScope = {
     client: createTestGatewayClient(request),
@@ -242,6 +246,129 @@ describe("message reaction controls", () => {
     expect(labels()).toEqual(["Maya", "Atlas updated (agent)", "Noah"]);
     expect(container.textContent).not.toContain("Load more");
     expect(request.mock.calls.some(([method]) => method === "chat.reactions.set")).toBe(false);
+  });
+
+  it("hides singleton counts in chips and details without losing the accessible count", async () => {
+    const { request, element } = await setup(false, { ...summary, count: 1, reactors: [maya] });
+    const chip = container.querySelector<HTMLButtonElement>(".chat-reaction-toggle")!;
+    expect(chip.textContent?.trim()).toBe("👍");
+    expect(chip.getAttribute("aria-label")).toBe("👍, 1 reactions");
+    request.mockResolvedValueOnce({
+      sessionId: "s",
+      messageId: "saved",
+      emoji: "👍",
+      reactors: [maya],
+    });
+    button("Who reacted with 👍").click();
+    expect(document.activeElement).toBe(chip);
+    await settle(element);
+    const tab = container.querySelector(".chat-reaction-tabs button")!;
+    expect(tab.textContent?.trim()).toBe("👍");
+    expect(tab.getAttribute("aria-label")).toBe("👍, 1 reactions");
+  });
+
+  it("waits the full hover dwell, cancels on leave, and opens immediately for keyboard focus", async () => {
+    const { element } = await setup();
+    const tooltip = element.querySelector("openclaw-tooltip")!;
+    await tooltip.updateComplete;
+    await tooltip.shadowRoot?.querySelector("wa-tooltip")?.updateComplete;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const chip = element.querySelector<HTMLButtonElement>(".chat-reaction-toggle")!;
+    chip.dispatchEvent(new MouseEvent("pointerenter"));
+    vi.advanceTimersByTime(399);
+    expect(tooltip.hasAttribute("open")).toBe(false);
+    chip.dispatchEvent(new MouseEvent("pointerleave"));
+    vi.advanceTimersByTime(1_000);
+    expect(tooltip.hasAttribute("open")).toBe(false);
+    chip.dispatchEvent(new MouseEvent("pointerenter"));
+    vi.advanceTimersByTime(399);
+    expect(tooltip.hasAttribute("open")).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(tooltip.hasAttribute("open")).toBe(true);
+    chip.dispatchEvent(new MouseEvent("pointerleave"));
+    vi.advanceTimersByTime(100);
+    expect(tooltip.hasAttribute("open")).toBe(false);
+    chip.focus();
+    expect(tooltip.hasAttribute("open")).toBe(true);
+  });
+
+  it("reveals names on the first touch and toggles only on the second tap", async () => {
+    const { request, element } = await setup();
+    const chip = element.querySelector<HTMLButtonElement>(".chat-reaction-toggle")!;
+    const tooltip = chip.closest("openclaw-tooltip")!;
+    await tooltip.updateComplete;
+    const touch = new MouseEvent("pointerdown", { bubbles: true });
+    Object.defineProperty(touch, "pointerType", { value: "touch" });
+    chip.dispatchEvent(touch);
+    chip.click();
+    expect(tooltip.hasAttribute("open")).toBe(true);
+    expect(request.mock.calls.some(([method]) => method === "chat.reactions.set")).toBe(false);
+    chip.dispatchEvent(touch);
+    chip.click();
+    await settle(element);
+    expect(request).toHaveBeenCalledWith(
+      "chat.reactions.set",
+      expect.objectContaining({ emoji: "👍", active: true }),
+    );
+  });
+
+  it("reveals every overflow group for readers and restores disclosure focus on collapse", async () => {
+    const reactions = Array.from("👍👀🎉🚀🔥👏💯✅🙌💪🤔😊").map((emoji) => ({
+      emoji,
+      count: summary.count,
+      reactedByMe: summary.reactedByMe,
+      reactors: summary.reactors,
+      hasMoreReactors: summary.hasMoreReactors,
+    }));
+    const { request, element, controller, scope } = await setup(false, reactions);
+    const more = element.querySelector<HTMLButtonElement>("button.chat-reaction-more")!;
+    expect(more.textContent?.trim()).toBe("+4");
+    more.click();
+    await element.updateComplete;
+    expect(
+      [
+        ...element.querySelectorAll<HTMLElement>(".chat-reaction-overflow .chat-reaction-toggle"),
+      ].map((chip) => chip.dataset.emoji),
+    ).toEqual(reactions.map((item) => item.emoji));
+    const overflowChip = element.querySelector<HTMLButtonElement>(
+      ".chat-reaction-overflow .chat-reaction-toggle",
+    )!;
+    expect(overflowChip.getAttribute("aria-disabled")).toBe("true");
+    overflowChip.click();
+    expect(request.mock.calls.some(([method]) => method === "chat.reactions.set")).toBe(false);
+    element.querySelector<HTMLButtonElement>(".chat-reaction-collapse")!.click();
+    await element.updateComplete;
+    expect(element.querySelector(".chat-reaction-overflow")).toBeNull();
+    expect(document.activeElement).toBe(more);
+    more.click();
+    await element.updateComplete;
+    more.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await element.updateComplete;
+    expect(element.querySelector(".chat-reaction-overflow")).toBeNull();
+    more.click();
+    await element.updateComplete;
+    controller.configure({ ...scope, sessionId: "different" });
+    await settle(element);
+    expect(element.querySelector(".chat-reaction-overflow")).toBeNull();
+  });
+
+  it("does not restart layout observation for an update queued after disconnect", async () => {
+    const { element, controller } = await setup();
+    // Another rendered occurrence keeps the pane cache alive after this row leaves.
+    const unsubscribe = controller.subscribe("saved", () => {});
+    element.remove();
+    const resizeObserver = vi.fn(function () {
+      return { observe: vi.fn(), disconnect: vi.fn() };
+    });
+    vi.stubGlobal("ResizeObserver", resizeObserver);
+    try {
+      element.requestUpdate();
+      await element.updateComplete;
+      expect(resizeObserver).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("mounts both saved authors with canonical IDs, not grouping IDs, and omits pending messages", async () => {

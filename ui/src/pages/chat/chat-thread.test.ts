@@ -82,7 +82,7 @@ describe("persistedMessageEntryId", () => {
 type CachedChatItemsProps = Parameters<typeof buildCachedChatItems>[0];
 type ChatQueueItem = NonNullable<CachedChatItemsProps["queue"]>[number];
 type WorkGroupItem = Extract<
-  ReturnType<typeof collapseCompletedTurnWork>[number],
+  ReturnType<typeof collapseCompletedTurnWork>["items"][number],
   { kind: "work-group" }
 >;
 
@@ -884,7 +884,7 @@ describe("collapseCompletedTurnWork", () => {
     collapseCompletedTurnWork(coalesceStreamRuns(buildCachedChatItems(createProps(props))), {
       sessionKey: "agent:main:dashboard:test-session",
       runWorking,
-    });
+    }).items;
 
   function requireWorkGroup(value: unknown): WorkGroupItem {
     const record = requireRecord(value);
@@ -1064,7 +1064,7 @@ describe("collapseCompletedTurnWork", () => {
       ),
     );
 
-    const rendered = collapseCompletedTurnWork(items, { sessionKey, runWorking: false });
+    const rendered = collapseCompletedTurnWork(items, { sessionKey, runWorking: false }).items;
 
     expect(rendered.map((item) => item.kind)).toEqual(["group", "group", "group", "group"]);
   });
@@ -1277,7 +1277,7 @@ describe("collapseCompletedTurnWork", () => {
         runWorking: false,
         searchActive: true,
       },
-    );
+    ).items;
 
     expect(items.some((item) => item.kind === "work-group")).toBe(false);
   });

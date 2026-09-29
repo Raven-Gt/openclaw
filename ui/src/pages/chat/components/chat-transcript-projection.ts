@@ -21,6 +21,7 @@ import {
 import { messageRecoveryKey } from "../chat-message-recovery.ts";
 import { resolveTurnRecap, type TurnRecap } from "../chat-progress.ts";
 import {
+  agentRunFrameGroups,
   assistantGroupCanOwnActiveRunStatus,
   buildCachedChatItems,
   type coalesceAgentRunFrames,
@@ -199,7 +200,7 @@ export function projectChatTranscript(
   const expandedUserMessages = getExpandedUserMessages(props.sessionKey);
   const transcriptChain = projectTranscriptChain(chatItems, {
     sessionKey: props.sessionKey,
-    runWorking: Boolean(props.runWorking),
+    runWorking: Boolean(props.runWorking || props.runActive),
     searchActive: searchFiltering,
     session: activeSession,
     stream: props.stream ?? null,
@@ -354,6 +355,7 @@ export function projectChatTranscript(
     return {
       ...sharedMessageRenderOptions,
       reactions: props.reactions,
+      completedReplyMessageKeys: transcriptChain.completedReplyMessageKeys,
       transcriptVisible: props.transcriptVisible,
       latestBrowserTabs,
       showReasoning,
@@ -423,7 +425,11 @@ export function projectChatTranscript(
       const recap = turnRecapByGroupKey.get(item.key);
       return `${hasWorkingIndicator ? workingUsageKey : ""}|${
         recap ? `${recap.runtimeMs}:${recap.outputTokens ?? ""}` : ""
-      }|${item.key === latestAssistantItemKey ? "latest-assistant" : ""}`;
+      }|${item.key === latestAssistantItemKey ? "latest-assistant" : ""}|${agentRunFrameGroups(item)
+        .flatMap((group) => group.messages)
+        .filter((entry) => transcriptChain.completedReplyMessageKeys.has(entry.key))
+        .map((entry) => entry.key)
+        .join(" ")}`;
     }
     if (item.kind === "stream-run") {
       return item.parts.some((part) => part.kind === "reading-indicator") ? workingUsageKey : "";
@@ -442,7 +448,10 @@ export function projectChatTranscript(
     const recapKey = recap ? `${recap.runtimeMs}:${recap.outputTokens ?? ""}` : "";
     return `${continuationKey}|${recapKey}|${
       item.key === latestAssistantItemKey ? "latest-assistant" : ""
-    }|${searchFiltering ? "search-result" : ""}`;
+    }|${searchFiltering ? "search-result" : ""}|${item.messages
+      .filter((entry) => transcriptChain.completedReplyMessageKeys.has(entry.key))
+      .map((entry) => entry.key)
+      .join(" ")}`;
   };
   const renderItem = guardChatRenderItems(state, liveStatusSignature, (item) => {
     if (item.kind === "divider") {

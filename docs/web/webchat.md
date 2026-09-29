@@ -80,14 +80,23 @@ Normal agent-run final answers should be durable because the embedded runtime wr
 ## Message reactions in Control UI
 
 Signed-in participants can react to saved human and assistant messages with emoji.
-Use **Add reaction** beneath a message to open a compact picker beside the button.
+Use **Add reaction**, the last control after Copy, Rewind (when available), and Reply,
+to open a compact picker beside the button.
 Choose a common emoji immediately, or use the search box beneath the choices to
 find another. You can also select an existing emoji to add your reaction. Select
 a highlighted emoji again to remove your own reaction. Each
 person or agent counts once per emoji, even if a request is retried.
 
+Reactions sit below the message text, without covering it or moving its action
+controls. On human messages they face inward: left of the controls for your
+right-aligned messages, and right of the controls for other people’s left-aligned
+messages. A single reaction shows only its emoji; counts appear from two onward.
+Crowded rows show **+N** for the remaining emoji types. Expand it to see all groups
+without changing a reaction.
+
 Each reaction chip is one button: its emoji and count toggle the same reaction,
-not separate actions. Hover or focus the chip to see names in a small bubble,
+not separate actions. Hover briefly or focus the chip to see names in a small bubble,
+with a short hover delay so moving across the row does not flash tooltips,
 then select that bubble to open the complete, paginated **Who reacted** list
 without changing your reaction. Keyboard users can Tab from the chip into the
 bubble. On touch screens, the first tap reveals the names bubble; select it for
@@ -102,7 +111,9 @@ tool call; reactions do not create ratings, analytics, or training-feedback reco
 These are native Control UI reactions, not reactions sent to an external channel.
 
 Reactions become available when a message has a saved transcript identity, not
-while a queued input or unsaved streaming segment is still provisional. They
+while a queued input or unsaved streaming segment is still provisional. Assistant
+reaction controls appear only beneath the final answer after its turn ends, not
+on intermediate updates or while it is still working. Reactions
 survive reloads and ordinary archival, follow retained messages through history
 rewind and branch changes, and are removed when their history is permanently
 deleted. A fork starts a separate reaction set. Incognito reactions use only the

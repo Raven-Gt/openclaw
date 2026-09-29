@@ -39,16 +39,20 @@ async function expectSharedActionRow(row: Locator): Promise<void> {
       reactions: box(reactions),
       copy: box(copy),
       reply: box(reply),
-      tail: [...element.querySelectorAll(".chat-reactions button")]
+      tail: [
+        ...element.querySelectorAll(
+          ".chat-copy-btn, .chat-rewind-btn, .chat-reply-btn, .chat-reaction-add",
+        ),
+      ]
         .slice(-2)
         .map((button) => button.getAttribute("aria-label")),
     };
   });
-  expect(geometry.copy.left).toBeGreaterThanOrEqual(geometry.reactions.right);
   expect(geometry.reply.left).toBeGreaterThanOrEqual(geometry.copy.right);
+  expect(geometry.reactions.left).toBeGreaterThanOrEqual(geometry.reply.right);
   expect(Math.abs(geometry.copy.centerY - geometry.reactions.centerY)).toBeLessThanOrEqual(1);
   expect(Math.abs(geometry.reply.centerY - geometry.reactions.centerY)).toBeLessThanOrEqual(1);
-  expect(geometry.tail).toEqual(["Copy as markdown", "Reply to message"]);
+  expect(geometry.tail).toEqual(["Reply to message", "Add reaction"]);
 }
 
 async function expectCompactPicker(picker: Locator) {
@@ -108,7 +112,7 @@ async function expectCompactPicker(picker: Locator) {
 }
 
 suite.define(() => {
-  it("keeps reactions, Copy, and final Reply in one row across desktop and mobile while syncing shared state", async () => {
+  it("keeps Copy, Reply, and final Add reaction in one row across desktop and mobile while syncing shared state", async () => {
     const context = await suite.newBrowserContext({
       viewport: { width: 1280, height: 820 },
       colorScheme: "dark",
