@@ -512,6 +512,65 @@ it("captures update history filters and charges retained selectors before dispat
   }
 });
 
+it("captures queued reconciliation selectors and charges their retained input", async () => {
+  const { options } = source();
+  const input = {
+    runIds: ["更新🦞".repeat(512), "修复🦞".repeat(512)],
+    explicit: true,
+    requireAllActive: false,
+    legacyOnly: true,
+    repairHistorySinceMs: 0,
+  };
+  const expected = structuredClone(input);
+  const dispatch = createDeferredCore();
+  const baselineTask = queueTask(dispatch.promise);
+  const task = queueTask(dispatch.promise);
+  const baseline = executeExistingOpenClawStateRead(options, { type: "fleet.list" });
+  const result = executeExistingOpenClawStateRead(options, {
+    type: "updateRuns.reconciliationCandidates",
+    input,
+  });
+  const returned: OpenClawStateReadReply = {
+    ok: true,
+    type: "updateRuns.reconciliationCandidates",
+    sourceAdmitted: true,
+    candidates: [],
+  };
+  try {
+    const [baselineOptions, submitted] = await Promise.all([
+      baselineTask.submitted,
+      task.submitted,
+    ]);
+    input.runIds[0] = "changed";
+    input.runIds.push("added after admission");
+    input.explicit = false;
+    input.requireAllActive = true;
+    input.legacyOnly = false;
+    input.repairHistorySinceMs = 999;
+    const additionalBytes =
+      Buffer.byteLength("updateRuns.reconciliationCandidates") -
+      Buffer.byteLength("fleet.list") +
+      expected.runIds.reduce((bytes, runId) => bytes + Buffer.byteLength(runId), 0) +
+      3 +
+      8;
+    expect(submitted.inputBytes).toBe(Number(baselineOptions.inputBytes) + additionalBytes);
+    dispatch.resolve();
+    expect((await task.captured).command).toEqual({
+      type: "updateRuns.reconciliationCandidates",
+      input: expected,
+    });
+    baselineTask.result.resolve(emptyReply);
+    task.result.resolve(returned);
+    expect(await result).toEqual(returned);
+    await baseline;
+  } finally {
+    dispatch.resolve();
+    baselineTask.result.resolve(emptyReply);
+    task.result.resolve(returned);
+    await Promise.allSettled([baseline, result]);
+  }
+});
+
 it.each(["skills.library.descriptions", "skills.library.manifests"] as const)(
   "retains library pins and their byte charge while dispatch waits (%s)",
   async (type) => {

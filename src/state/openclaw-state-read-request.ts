@@ -101,6 +101,15 @@ export function captureCommand(command: OpenClawStateReadCommand): OpenClawState
   if (command.type === "updateRuns.list") {
     return { ...command, input: { ...command.input } };
   }
+  if (command.type === "updateRuns.reconciliationCandidates") {
+    return {
+      ...command,
+      input: {
+        ...command.input,
+        ...(command.input.runIds ? { runIds: [...command.input.runIds] } : {}),
+      },
+    };
+  }
   if (
     command.type === "skills.library.descriptions" ||
     command.type === "skills.library.manifests"
@@ -308,8 +317,14 @@ function commandBytes(command: OpenClawStateReadRequest["command"]): number {
       Buffer.byteLength(command.scopeKey, "utf8")
     );
   }
-  if (command.type === "updateRuns.get") {
+  if (command.type === "updateRuns.get" || command.type === "updateRuns.reconciliationCandidate") {
     return bytes + Buffer.byteLength(command.runId, "utf8");
+  }
+  if (command.type === "updateRuns.reconciliationCandidates") {
+    return (command.input.runIds ?? []).reduce(
+      (total, runId) => total + Buffer.byteLength(runId, "utf8"),
+      bytes + 3 + (command.input.repairHistorySinceMs === undefined ? 0 : 8),
+    );
   }
   if (command.type === "updateRuns.list") {
     return (
