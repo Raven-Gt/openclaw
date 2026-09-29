@@ -597,7 +597,7 @@ export async function runGatewayLoop(params: {
       try {
         // On restart, wait for the canonical process activity inventory before
         // tearing down the server so active work can settle.
-        if (action === "restart") {
+        if (isRestart) {
           let activeWorkAtDrainStart = 0;
           let activeRunsAtDrainStart = 0;
           let drainTimedOut = false;
@@ -745,7 +745,7 @@ export async function runGatewayLoop(params: {
         if (handoffClosed) {
           server = null;
         }
-        if (isRestart) {
+        if (action === "restart") {
           try {
             if (shutdownFailed) {
               await forceExitAfterStabilityBundle("gateway.restart_close_failed");
@@ -761,7 +761,7 @@ export async function runGatewayLoop(params: {
           }
         } else {
           clearForceExitTimer();
-          if (isRestart && shutdownFailed) {
+          if (action === "external-restart" && shutdownFailed) {
             await forceExitAfterStabilityBundle("gateway.restart_close_failed");
           } else {
             params.completeBoot?.(
@@ -776,7 +776,7 @@ export async function runGatewayLoop(params: {
                   },
             );
             await releaseLockIfHeld();
-            await exitProcessAfterLogFlush(shutdownFailed ? 1 : 0);
+            await exitProcessAfterLogFlush(0);
           }
         }
       }
