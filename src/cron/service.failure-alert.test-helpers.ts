@@ -45,6 +45,7 @@ export function setupFailureAlertSuite() {
     },
     run: (context: {
       cron: CronService;
+      storePath: string;
       enqueueSystemEvent: ReturnType<typeof vi.fn>;
       requestHeartbeat: ReturnType<typeof vi.fn>;
       sendCronFailureAlert: ReturnType<typeof vi.fn<SendCronFailureAlert>>;
@@ -83,6 +84,7 @@ export function setupFailureAlertSuite() {
     try {
       await run({
         cron,
+        storePath: store.storePath,
         enqueueSystemEvent,
         requestHeartbeat,
         sendCronFailureAlert,

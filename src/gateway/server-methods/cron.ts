@@ -1021,8 +1021,10 @@ for (const [method, handler] of Object.entries(cronHandlers)) {
     }
     const grant = identity.cronManagementGrant;
     let succeeded = false;
+    let failureRepair = false;
     const run = async () => {
       assertActiveAgentRuntimeAuthority(args.client, args.context);
+      failureRepair = Boolean(getCronFailureRepairAuthority(identity));
       await handler({
         ...args,
         respond: (...response) => {
@@ -1052,12 +1054,15 @@ for (const [method, handler] of Object.entries(cronHandlers)) {
       respondInvalidCronParams(args.respond, method, error.message);
     } finally {
       if (grant) {
-        args.context.logGateway.info("cron: admin management", {
-          method,
-          runId: identity.operationalRunInstance.runId,
-          instanceId: identity.operationalRunInstance.instanceId,
-          ok: succeeded,
-        });
+        args.context.logGateway.info(
+          failureRepair ? "cron: failure repair management" : "cron: admin management",
+          {
+            method,
+            runId: identity.operationalRunInstance.runId,
+            instanceId: identity.operationalRunInstance.instanceId,
+            ok: succeeded,
+          },
+        );
       }
     }
   };

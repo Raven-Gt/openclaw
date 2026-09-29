@@ -163,8 +163,15 @@ function transportFailureRepair(
     runAtMs: job.state.lastRunAtMs,
   };
   const fallBack = (reason: string) => {
-    // A verification run can resolve the incident before a failing repair settles.
-    if (findLiveJob()?.state.failureAlertIncident?.repair?.atMs !== repairAtMs) {
+    // A verification run can resolve the incident before a failing repair settles, and a
+    // job disabled meanwhile (by the user or the auto-disable notice) needs no alert.
+    const live = findLiveJob();
+    if (
+      !live ||
+      live.state.failureAlertIncident?.repair?.atMs !== repairAtMs ||
+      !live.enabled ||
+      live.state.autoDisabled
+    ) {
       return;
     }
     state.deps.log.warn(

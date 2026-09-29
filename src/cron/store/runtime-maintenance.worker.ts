@@ -162,19 +162,26 @@ export function recordCronFailureAlertOutcomeInWorker(
         job.state.lastFailureNotificationId === input.notificationId &&
         job.state.lastFailureNotificationDeliveryStatus === "unknown";
       prepareCronRuntimeMutation("cron.recordFailureAlertOutcome", input.nonce, { ownsCycle });
-      if (job && row && ownsCycle) {
-        job.state.lastFailureNotificationDelivered = input.outcome.delivered;
-        job.state.lastFailureNotificationDeliveryStatus = input.outcome.status;
-        job.state.lastFailureNotificationDeliveryError = input.outcome.error;
-        // An alert sent for a repair's own cycle is its fallback: the user has been told.
-        const repair = job.state.failureAlertIncident?.repair;
-        if (repair && repair.atMs === input.alertAtMs && input.outcome.status !== "not-requested") {
-          repair.alerted = true;
+      // The repair marker outlives its cycle: later runs reset the delivery status, but the
+      // repair's own completion or fallback must still be recorded for restart recovery.
+      const repair = job?.state.failureAlertIncident?.repair;
+      const settlesRepair = repair !== undefined && repair.atMs === input.alertAtMs;
+      if (job && row && (ownsCycle || settlesRepair)) {
+        if (ownsCycle) {
+          job.state.lastFailureNotificationDelivered = input.outcome.delivered;
+          job.state.lastFailureNotificationDeliveryStatus = input.outcome.status;
+          job.state.lastFailureNotificationDeliveryError = input.outcome.error;
+        }
+        if (repair && settlesRepair) {
+          repair.settled = true;
+          if (input.outcome.status !== "not-requested") {
+            repair.alerted = true;
+          }
         }
         upsertCronJobRow(db, input.storeKey, job, row.sort_order);
       }
       return retainCronRuntimeMutationOutcome("cron.recordFailureAlertOutcome", db, input.nonce, {
-        job: ownsCycle ? job : undefined,
+        job: ownsCycle || settlesRepair ? job : undefined,
       });
     },
     { database, path: database.path, env: getSqliteWorkerStateContext().environment },

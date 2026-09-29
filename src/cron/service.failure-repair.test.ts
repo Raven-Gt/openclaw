@@ -6,6 +6,8 @@ import {
   expectAlertTextContaining,
   setupFailureAlertSuite,
 } from "./service.failure-alert.test-helpers.js";
+import { CronService } from "./service.js";
+import { createNoopLogger } from "./service.test-harness.js";
 
 const { withFailureAlertCron } = setupFailureAlertSuite();
 type AlertParams = Parameters<typeof withFailureAlertCron>;
@@ -124,4 +126,77 @@ describe("CronService failure repair", () => {
       config,
     );
   });
+
+  it("drops the fallback alert when the job was disabled while the repair ran", async () => {
+    const pending = Promise.withResolvers<"failed">();
+    const startRepair = vi.fn<StartRepair>(() => pending.promise);
+    await withRepair(startRepair, async ({ cron, sendCronFailureAlert, addJob }) => {
+      const job = await addJob("disabled mid-repair", owned);
+      await cron.run(job.id, "force");
+      await cron.run(job.id, "force");
+      expect(startRepair).toHaveBeenCalledOnce();
+
+      await cron.update(job.id, { enabled: false });
+      pending.resolve("failed");
+      await pending.promise;
+      await vi.waitFor(() => expect(cron.getJob(job.id)?.enabled).toBe(false));
+      await Promise.resolve();
+      expect(sendCronFailureAlert).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([
+    { outcome: "interrupted", alerts: 1 },
+    { outcome: "completed", alerts: 0 },
+  ] as const)(
+    "reconciles a $outcome repair when the Gateway restarts",
+    async ({ outcome, alerts }) => {
+      const startRepair = vi.fn<StartRepair>(() =>
+        outcome === "completed"
+          ? Promise.resolve("completed")
+          : Promise.withResolvers<"completed">().promise,
+      );
+      await withRepair(startRepair, async ({ cron, storePath, addJob }) => {
+        const job = await addJob("restart sync", owned);
+        await cron.run(job.id, "force");
+        await cron.run(job.id, "force");
+        expect(startRepair).toHaveBeenCalledOnce();
+        if (outcome === "completed") {
+          await vi.waitFor(() =>
+            expect(cron.getJob(job.id)?.state.failureAlertIncident?.repair?.settled).toBe(true),
+          );
+        }
+        // A later run resets the per-cycle status; the repair's own settlement must survive it.
+        await cron.run(job.id, "force");
+        cron.stop();
+
+        const sendCronFailureAlert = vi.fn<
+          NonNullable<ConstructorParameters<typeof CronService>[0]["sendCronFailureAlert"]>
+        >(async () => undefined);
+        const restarted = new CronService({
+          scheduler: createTestGatewayScheduler(),
+          nowMs: () => Date.now(),
+          storePath,
+          cronEnabled: true,
+          cronConfig: { failureAlert: { enabled: true } },
+          log: createNoopLogger(),
+          enqueueSystemEvent: vi.fn(),
+          requestHeartbeat: vi.fn(),
+          runIsolatedAgentJob: vi.fn(async () => ({ status: "error" as const, error: "boom" })),
+          sendCronFailureAlert,
+          startCronFailureRepair: startRepair,
+        });
+        await restarted.start();
+        try {
+          expect(sendCronFailureAlert).toHaveBeenCalledTimes(alerts);
+          if (alerts) {
+            expectAlertTextContaining(sendCronFailureAlert, "interrupted by a Gateway restart");
+          }
+          expect(startRepair).toHaveBeenCalledOnce();
+        } finally {
+          restarted.stop();
+        }
+      });
+    },
+  );
 });

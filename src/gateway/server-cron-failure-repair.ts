@@ -187,7 +187,12 @@ export async function runGatewayCronFailureRepair(params: {
         ),
       "cron:failure-repair",
     );
-    if (result.status === "ok") {
+    // The repair's outcome must reach the owner conversation (or be intentionally silent);
+    // an undelivered result leaves the user uninformed, so the alert goes out instead.
+    if (
+      result.status === "ok" &&
+      (result.delivered === true || result.deliverySuppressionReason === "silent")
+    ) {
       params.log.info(
         { jobId: job.id, repairRunSessionKey: result.sessionKey, delivered: result.delivered },
         "cron: failure repair turn completed",
@@ -195,7 +200,13 @@ export async function runGatewayCronFailureRepair(params: {
       return "completed";
     }
     params.log.warn(
-      { jobId: job.id, status: result.status, error: result.error },
+      {
+        jobId: job.id,
+        status: result.status,
+        error: result.error,
+        delivered: result.delivered,
+        deliveryError: result.deliveryError,
+      },
       "cron: failure repair turn did not complete",
     );
     return "failed";

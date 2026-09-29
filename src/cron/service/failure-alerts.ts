@@ -209,7 +209,7 @@ function buildFailureAlertPayload(params: {
   consecutiveErrors: number;
   route: ResolvedFailureAlert;
   status: "error" | "skipped";
-  repairAttempted?: boolean;
+  repairNote?: "attempted" | "interrupted";
 }) {
   const safeJobName = params.job.name || params.job.id;
   const errorReason = params.status === "error" ? params.errorReason : undefined;
@@ -226,9 +226,11 @@ function buildFailureAlertPayload(params: {
       : cronFailureDetailLines(errorReason, params.failureNotificationDetail);
   const text = [
     `Automation "${safeJobName}" ${statusVerb} ${params.consecutiveErrors} times`,
-    ...(params.repairAttempted
+    ...(params.repairNote === "attempted"
       ? ["An automatic repair was attempted in its owner conversation; it is still failing."]
-      : []),
+      : params.repairNote === "interrupted"
+        ? ["An automatic repair in its owner conversation was interrupted by a Gateway restart."]
+        : []),
     ...detailLines,
   ].join("\n");
   const oauthRefreshFailure = params.error ? classifyOAuthRefreshFailure(params.error) : null;
@@ -389,7 +391,7 @@ export function maybeEmitFailureAlert(
       consecutiveErrors: params.consecutiveCount,
       route: alertConfig,
       status: params.status,
-      repairAttempted: repairFailed,
+      ...(repairFailed ? { repairNote: "attempted" as const } : {}),
     }),
     runAtMs: params.runAtMs,
     route: alertConfig,
@@ -420,6 +422,49 @@ export function maybeEmitFailureAlert(
     return;
   }
   params.deferredNotifications.push(alert);
+}
+
+/**
+ * Startup owner for repairs whose turn and fallback died with the previous process: an
+ * enabled job's unsettled, unalerted repair becomes the normal alert, naming the interruption.
+ */
+export function reconcileInterruptedFailureRepair(
+  state: CronJobPolicyContext,
+  job: CronJob,
+  deferredNotifications: DeferredCronNotifications,
+): boolean {
+  const incident = job.state.failureAlertIncident;
+  const repair = incident?.repair;
+  if (!incident?.signature || !repair || repair.alerted || repair.settled) {
+    return false;
+  }
+  const alertConfig = resolveFailureAlert(state, job);
+  if (!alertConfig || !job.enabled || job.state.autoDisabled) {
+    repair.settled = true;
+    return true;
+  }
+  startFailureAlertCycle(
+    job,
+    { signature: incident.signature, scope: incident.scope },
+    state.deps.nowMs(),
+  );
+  const notificationJob = cronNotificationJob(job);
+  deferredNotifications.push({
+    kind: "failure-alert",
+    job: notificationJob,
+    payload: buildFailureAlertPayload({
+      job: notificationJob,
+      error: job.state.lastError,
+      errorReason: job.state.lastErrorReason,
+      consecutiveErrors: job.state.consecutiveErrors ?? 0,
+      route: alertConfig,
+      status: "error",
+      repairNote: "interrupted",
+    }),
+    runAtMs: job.state.lastRunAtMs,
+    route: alertConfig,
+  });
+  return true;
 }
 
 /** Resolves incidents after execution succeeds, notifying only when a failure was reported. */

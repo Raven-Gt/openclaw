@@ -282,12 +282,13 @@ export type CronJobState = Omit<
   /**
    * Unresolved recovery scope and last notified signature, when an alert was requested.
    * `repair` records the one owner-conversation repair attempt of this failure streak;
-   * `alerted` means the user has since received a failure alert for it.
+   * `alerted` means the user has since received a failure alert for it, and `settled`
+   * means the repair turn finished; an unsettled, unalerted repair at startup was interrupted.
    */
   failureAlertIncident?: {
     signature?: string;
     scope: "run" | "trigger";
-    repair?: { atMs: number; alerted?: true };
+    repair?: { atMs: number; alerted?: true; settled?: true };
   };
   /** Fences notification settlement when multiple cycles share a timestamp. */
   lastFailureNotificationId?: string;
