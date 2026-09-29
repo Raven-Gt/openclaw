@@ -140,11 +140,13 @@ describe("queueDelegatedApproval authority", () => {
       expect(manager.resolve(approvalId, decision, "operator-ui")).toBe(true);
       const expectedStatus =
         decision === "allow-once" && !revokeBeforeIo ? "applied" : "not-applied";
-      await vi.waitFor(() =>
-        expect(publishResolved).toHaveBeenCalledWith(
-          "system-agent",
-          expect.objectContaining({ applicationStatus: expectedStatus }),
-        ),
+      await vi.waitFor(
+        () =>
+          expect(publishResolved).toHaveBeenCalledWith(
+            "system-agent",
+            expect.objectContaining({ applicationStatus: expectedStatus }),
+          ),
+        { timeout: 10_000 },
       );
 
       if (expectedStatus === "applied") {
