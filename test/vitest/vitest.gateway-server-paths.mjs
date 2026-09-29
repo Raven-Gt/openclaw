@@ -11,10 +11,6 @@ export const gatewayPluginTestFiles = [
 
 // Native database consumers retain lifecycle cleanup within each forked process.
 export const gatewayDatabaseWorkerTestFiles = [
-  "src/gateway/server-worker-placement-startup-maintenance.test.ts",
-  "src/gateway/worker-environments/node-worker-workspace-publication.test.ts",
-  "src/gateway/worker-environments/session-repository-checkpoints.test.ts",
-  "src/gateway/worker-environments/worker-turn-media.boundary.test.ts",
   "src/gateway/approval-fixture.test.ts",
   "src/gateway/board-http.test.ts",
   "src/gateway/board-store.test.ts",
@@ -153,6 +149,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/server-methods/worktrees.authorization.test.ts",
   "src/gateway/server-methods/worktrees.test.ts",
   "src/gateway/server-worker-environment-startup.test.ts",
+  "src/gateway/server-worker-placement-startup-maintenance.test.ts",
   "src/gateway/server.sessions.create-worktree-spawn.test.ts",
   "src/gateway/server.sessions.create.projects.test.ts",
   "src/gateway/server/skill-library-read.test.ts",
@@ -243,6 +240,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/worker-environments/local-workspace-projection.test.ts",
   "src/gateway/worker-environments/node-desktop-carrier.test.ts",
   "src/gateway/worker-environments/node-enrollment.test.ts",
+  "src/gateway/worker-environments/node-worker-workspace-publication.test.ts",
   "src/gateway/worker-environments/node-workspace-transfer-credential.test.ts",
   "src/gateway/worker-environments/node-workspace-transfer-revocation.test.ts",
   "src/gateway/worker-environments/placement-abandon-lifecycle.test.ts",
@@ -314,6 +312,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/worker-environments/service-prepare.test.ts",
   "src/gateway/worker-environments/service.plugin-create.test.ts",
   "src/gateway/worker-environments/session-attachment-service.test.ts",
+  "src/gateway/worker-environments/session-repository-checkpoints.test.ts",
   "src/gateway/worker-environments/store-change-events.test.ts",
   "src/gateway/worker-environments/store-node-enrollment.test.ts",
   "src/gateway/worker-environments/store-recovery.worker.test.ts",
@@ -343,6 +342,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/worker-environments/worker-turn-launcher.claim-recovery.test.ts",
   "src/gateway/worker-environments/worker-turn-launcher.lazy.test.ts",
   "src/gateway/worker-environments/worker-turn-launcher.test.ts",
+  "src/gateway/worker-environments/worker-turn-media.boundary.test.ts",
   "src/gateway/worker-environments/worker-turn-rpc.computer.test.ts",
   "src/gateway/worker-environments/worker-turn-rpc.inference-publication.test.ts",
   "src/gateway/worker-environments/worker-turn-rpc.inference-reconnect.test.ts",
