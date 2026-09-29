@@ -192,7 +192,7 @@ export function updateSystemPresence(payload: SystemPresencePayload) {
     parsed.ip ||
     truncateUtf16Safe(parsed.text, 64) ||
     normalizeLowercaseStringOrEmpty(os.hostname());
-  const existing: Partial<SystemPresence> = entries.get(key)?.presence ?? {};
+  const existing = entries.get(key)?.presence ?? ({} as SystemPresence);
   const merged: SystemPresence = {
     ...existing,
     ...parsed,
