@@ -12,6 +12,7 @@ import { redactSecrets } from "../../logging/redact.js";
 import { canonicalizePersistedUserMessageMedia } from "../../media/media-facts.js";
 import {
   deferOpenClawAgentPostCommitPublication,
+  openOpenClawAgentDatabase,
   type OpenClawAgentDatabase,
 } from "../../state/openclaw-agent-db.js";
 import { advanceCliHistoryBoundaryInTransaction } from "./session-accessor.sqlite-cli-history-boundary.js";
@@ -27,7 +28,12 @@ import {
   readTranscriptEventMessage,
   readTranscriptIdentityByEventId,
 } from "./session-accessor.sqlite-read.js";
-import { getSessionKysely, type ResolvedTranscriptScope } from "./session-accessor.sqlite-scope.js";
+import {
+  getSessionKysely,
+  resolveSqliteTranscriptScope,
+  toDatabaseOptions,
+  type ResolvedTranscriptScope,
+} from "./session-accessor.sqlite-scope.js";
 import {
   advanceTranscriptMutationAtInTransaction,
   deleteTranscriptEventsInTransaction,
@@ -39,6 +45,8 @@ import {
   rotateTranscriptGenerationInTransaction,
   touchTranscriptMutationInTransaction,
 } from "./session-accessor.sqlite-transcript-state.js";
+import type { SessionTranscriptRuntimeScope } from "./session-accessor.types.js";
+import { readHotSessionTranscriptSnapshot } from "./session-cold-storage-read.js";
 import {
   createTranscriptIndexAppenderInTransaction,
   deleteSessionTranscriptIndexInTransaction,
@@ -640,6 +648,17 @@ export function readTranscriptMessageByScopedIdempotencyKey(
   return message
     ? { messageId: readTranscriptEventId(found.event) ?? idempotencyKey, message }
     : undefined;
+}
+
+export function readSessionTranscriptMessageByEventId(
+  scope: SessionTranscriptRuntimeScope,
+  eventId: string,
+): { messageId: string; message: unknown } | undefined {
+  const resolved = resolveSqliteTranscriptScope(scope);
+  const database = openOpenClawAgentDatabase(toDatabaseOptions(resolved));
+  return readHotSessionTranscriptSnapshot(database, resolved.sessionId, "identity", () =>
+    readTranscriptMessageByEventId(database, resolved, eventId),
+  );
 }
 
 export function readTranscriptMessageByEventId(

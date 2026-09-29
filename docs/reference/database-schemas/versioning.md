@@ -28,9 +28,8 @@ existing databases without changing `user_version`; older readers ignore the
 table. Rows bind the session key, transcript session ID, persisted message event
 ID, emoji, and reacting identity without changing transcript bytes. Deleting the
 session node cascades to its reactions, while a reset makes old-instance rows
-inert. Downgrade leaves the table intact; no transcript backfill or rewrite is
-required. This storage companion does not itself expose a Gateway or Control UI
-reaction feature.
+inert. Downgrade leaves the table intact and disables Control UI reactions until
+a supporting build returns. No transcript backfill or rewrite is required.
 
 Admitted agent and cached shared-state handles retain their schema version and
 table facts. The handle owner revokes these facts after local DDL or transaction
