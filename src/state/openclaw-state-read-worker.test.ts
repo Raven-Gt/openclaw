@@ -6,6 +6,7 @@ import path from "node:path";
 import { expect, it, vi } from "vitest";
 import { createWorkspaceStateIdentity } from "../agents/workspace-state-identity.js";
 import type { ExecutionIdentityInspectionQuery } from "../audit/execution-identity-inspection.types.js";
+import { createRetainedOperation } from "../infra/retained-operation.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import {
   closeOpenClawStateDatabaseByPathAsync,
@@ -14,7 +15,7 @@ import {
 import { executeExistingOpenClawStateRead } from "./openclaw-state-db-readonly.js";
 import { withExistingOpenClawStateSchema } from "./openclaw-state-db-schema-policy.js";
 import { closeOpenClawStateDatabaseAsync } from "./openclaw-state-db.js";
-import { createOpenClawStateReadTransport } from "./openclaw-state-read-worker.js";
+import { captureOpenClawStateReadSource } from "./openclaw-state-read-worker.js";
 import type { OpenClawStateReadReply } from "./openclaw-state-read.types.js";
 import { captureOpenClawStateWorkerContext } from "./openclaw-state-worker-context.js";
 import { encodeOpenClawStateWorkerError } from "./openclaw-state-worker-error.js";
@@ -574,8 +575,8 @@ it.each([
     const authority = { signal: new AbortController().signal, assertCurrent: () => {} };
     const expected = { ...input };
     const command = { type: "audit.run.inspect" as const, input };
-    const transport = createOpenClawStateReadTransport(command);
-    const baseline = createOpenClawStateReadTransport({ type: "fleet.list" });
+    const transport = captureOpenClawStateReadSource().createTransport(command);
+    const baseline = captureOpenClawStateReadSource().createTransport({ type: "fleet.list" });
     // The caller can mutate its input while the owner prepares a read location.
     input.now = 999;
     input.decisionCursor = "changed before read";
@@ -590,8 +591,8 @@ it.each([
     const dispatch = createDeferredCore();
     const baselineTask = queueTask(dispatch.promise);
     const task = queueTask(dispatch.promise);
-    const baselineRead = baseline.read(location, authority);
-    const read = transport.read(location, authority);
+    const baselineRead = baseline.startRead(location, authority).result;
+    const read = transport.startRead(location, authority).result;
     // A pre-admission failure must surface directly rather than leave this test waiting for dispatch.
     const submitted = Promise.race([
       task.submitted,
@@ -625,7 +626,7 @@ it.each([
       baselineTask.result.resolve(emptyReply);
       task.result.resolve(emptyReply);
       await Promise.allSettled([baselineRead, read]);
-      await Promise.all([baseline.close(), transport.close()]);
+      await Promise.all([baseline.startClose().result, transport.startClose().result]);
     }
   },
 );
@@ -637,7 +638,7 @@ it("does not retain caller context in no-input ingress health reads", async () =
     type: "channelIngress.failedHealth" as const,
     callerContext: { onClosed: () => {} },
   };
-  const transport = createOpenClawStateReadTransport(command);
+  const transport = captureOpenClawStateReadSource().createTransport(command);
   const task = queueTask();
   const reply: OpenClawStateReadReply = {
     ok: true,
@@ -645,10 +646,10 @@ it("does not retain caller context in no-input ingress health reads", async () =
     sourceAdmitted: true,
     result: [],
   };
-  const read = transport.read(
+  const read = transport.startRead(
     { context, location: pathname, checkFreshAdmission: false },
     { signal: new AbortController().signal, assertCurrent: () => {} },
-  );
+  ).result;
   try {
     const request = await Promise.race([
       task.captured,
@@ -662,7 +663,7 @@ it("does not retain caller context in no-input ingress health reads", async () =
   } finally {
     task.result.resolve(reply);
     await Promise.allSettled([read]);
-    await transport.close();
+    await transport.startClose().result;
   }
 });
 
@@ -680,16 +681,16 @@ it("captures cron recovery markers and charges their retained bytes before dispa
     ],
   };
   const expected = structuredClone(command);
-  const transport = createOpenClawStateReadTransport(command);
-  const baseline = createOpenClawStateReadTransport({ type: "fleet.list" });
+  const transport = captureOpenClawStateReadSource().createTransport(command);
+  const baseline = captureOpenClawStateReadSource().createTransport({ type: "fleet.list" });
   command.storeKey = "changed partition";
   command.proposals[0]!.jobId = "changed before preparation";
   command.proposals[0]!.queuedAtMs = 9;
   const dispatch = createDeferredCore();
   const baselineTask = queueTask(dispatch.promise);
   const task = queueTask(dispatch.promise);
-  const baselineRead = baseline.read(location, authority);
-  const read = transport.read(location, authority);
+  const baselineRead = baseline.startRead(location, authority).result;
+  const read = transport.startRead(location, authority).result;
   try {
     const [baseOptions, submittedOptions] = await Promise.all([
       baselineTask.submitted,
@@ -717,7 +718,7 @@ it("captures cron recovery markers and charges their retained bytes before dispa
     baselineTask.result.resolve(emptyReply);
     task.result.resolve(emptyReply);
     await Promise.allSettled([baselineRead, read]);
-    await Promise.all([baseline.close(), transport.close()]);
+    await Promise.all([baseline.startClose().result, transport.startClose().result]);
   }
 });
 
@@ -744,12 +745,15 @@ it("captures and charges independent snapshot and schema paths before queued dis
   const baselineTask = queueTask(dispatch.promise);
   const rootedTask = queueTask(dispatch.promise);
   const schemaTask = queueTask(dispatch.promise);
-  const baseline = createOpenClawStateReadTransport({ type: "fleet.list" });
-  const rooted = createOpenClawStateReadTransport({ type: "fleet.list" });
-  const schema = createOpenClawStateReadTransport({ type: "fleet.list" });
-  const baselineRead = baseline.read({ ...sourceLocation, snapshotRoot: undefined }, authority);
-  const rootedRead = rooted.read(sourceLocation, authority);
-  const schemaRead = schema.read(schemaLocation, authority);
+  const baseline = captureOpenClawStateReadSource().createTransport({ type: "fleet.list" });
+  const rooted = captureOpenClawStateReadSource().createTransport({ type: "fleet.list" });
+  const schema = captureOpenClawStateReadSource().createTransport({ type: "fleet.list" });
+  const baselineRead = baseline.startRead(
+    { ...sourceLocation, snapshotRoot: undefined },
+    authority,
+  ).result;
+  const rootedRead = rooted.startRead(sourceLocation, authority).result;
+  const schemaRead = schema.startRead(schemaLocation, authority).result;
   try {
     const [baselineOptions, rootedOptions, schemaOptions] = await Promise.all([
       baselineTask.submitted,
@@ -802,6 +806,50 @@ it("captures and charges independent snapshot and schema paths before queued dis
     rootedTask.result.resolve(emptyReply);
     schemaTask.result.resolve(emptyReply);
     await Promise.allSettled([baselineRead, rootedRead, schemaRead]);
-    await Promise.all([baseline.close(), rooted.close(), schema.close()]);
+    await Promise.all([
+      baseline.startClose().result,
+      rooted.startClose().result,
+      schema.startClose().result,
+    ]);
   }
+});
+
+it("services a read and its separate release before promise reactions run", () => {
+  const { options } = source();
+  const context = captureOpenClawStateWorkerContext(options);
+  const authority = {
+    signal: new AbortController().signal,
+    assertCurrent: context.admission.assertCurrent,
+  };
+  let readReady = false;
+  let releaseReady = false;
+  const pending = createRetainedOperation<OpenClawStateReadReply>(() => {
+    if (readReady) {
+      pending.resolve(emptyReply);
+    }
+  });
+  const retirement = createRetainedOperation<void>(() => {
+    if (releaseReady) {
+      retirement.resolve(undefined);
+    }
+  });
+  const release = vi.fn(() => retirement.operation);
+  mock.runTask.mockReturnValueOnce({ ...pending.operation, release });
+  const transport = captureOpenClawStateReadSource().createTransport({ type: "fleet.list" });
+  const read = transport.startRead(
+    { context, location: options.path, checkFreshAdmission: true },
+    authority,
+  );
+  expect(read.read()).toEqual({ status: "pending" });
+  readReady = true;
+  read.service();
+  expect(read.read()).toEqual({ status: "fulfilled", value: { value: emptyReply } });
+  expect(release).not.toHaveBeenCalled();
+
+  const closing = transport.startClose();
+  expect(closing.read()).toEqual({ status: "pending" });
+  expect(release).toHaveBeenCalledOnce();
+  releaseReady = true;
+  closing.service();
+  expect(closing.read()).toEqual({ status: "fulfilled", value: undefined });
 });
