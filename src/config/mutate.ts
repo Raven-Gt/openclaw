@@ -613,10 +613,12 @@ async function writeRootBoundJsonFile(params: {
   expectedRaw: string | null;
   rootSnapshot: ConfigFileSnapshot;
   assertConfigPathForWrite: () => void;
+  assertConfigMutationAuthority?: () => void;
   preCommitRuntimePreflight?: () => Promise<unknown>;
   skipOutputLogs?: boolean;
 }): Promise<void> {
   params.assertConfigPathForWrite();
+  params.assertConfigMutationAuthority?.();
   const targetBeforeBackup = await resolveExpectedRootBoundIncludeFile({
     configPath: params.configPath,
     includePath: params.includePath,
@@ -627,6 +629,7 @@ async function writeRootBoundJsonFile(params: {
     await maintainConfigBackups(
       targetBeforeBackup.absolutePath,
       createRootBoundBackupFs(targetBeforeBackup),
+      { assertMutation: params.assertConfigMutationAuthority },
     );
   }
   const targetAtCommit = await resolveExpectedRootBoundIncludeFile({
@@ -648,6 +651,7 @@ async function writeRootBoundJsonFile(params: {
   // run before the write.
   await params.preCommitRuntimePreflight?.();
   params.assertConfigPathForWrite();
+  params.assertConfigMutationAuthority?.();
   warnIfJSON5CommentsWillBeStripped({
     raw: currentRaw,
     filePath: targetAtCommit.absolutePath,
@@ -660,6 +664,7 @@ async function writeRootBoundJsonFile(params: {
   });
   try {
     params.assertConfigPathForWrite();
+    params.assertConfigMutationAuthority?.();
   } catch (error) {
     await rollbackJsonFileWriteIfUnchanged({
       target: targetAtCommit,
@@ -845,6 +850,7 @@ async function tryWriteSingleTopLevelIncludeMutation(params: {
     expectedRaw: includeRawAtCommit,
     rootSnapshot: params.snapshot,
     assertConfigPathForWrite,
+    assertConfigMutationAuthority: params.writeOptions?.assertConfigMutationAuthority,
     skipOutputLogs: params.writeOptions?.skipOutputLogs,
     preCommitRuntimePreflight:
       runtimeEnvBaseline || callerPreCommit

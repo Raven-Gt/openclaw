@@ -28,7 +28,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-function createRealConfigSession() {
+function createRealConfigSession(operation: { kind: "config-set"; path: string; value: string }) {
   const router = new ChatTurnRouter(
     { operatorApprovalOnly: true },
     {},
@@ -48,11 +48,6 @@ function createRealConfigSession() {
       verifyConfigAfterWrite: async () => null,
     },
   );
-  const operation = {
-    kind: "config-set" as const,
-    path: "tools.exec.notifyOnExit",
-    value: "false",
-  };
   router.propose(operation);
   const proposal = router.getPendingOperatorProposal();
   if (!proposal) {
@@ -76,21 +71,61 @@ function createRealConfigSession() {
 
 describe("queueDelegatedApproval authority", () => {
   it.each([
-    { name: "allowed reviewer", decision: "allow-once" as const, revokeBeforeIo: false },
-    { name: "denied reviewer", decision: "deny" as const, revokeBeforeIo: false },
-    { name: "revoked run", decision: "allow-once" as const, revokeBeforeIo: true },
+    {
+      name: "allowed reviewer on the root config",
+      decision: "allow-once" as const,
+      revokeBeforeIo: false,
+      target: "root" as const,
+    },
+    {
+      name: "denied reviewer on the root config",
+      decision: "deny" as const,
+      revokeBeforeIo: false,
+      target: "root" as const,
+    },
+    {
+      name: "revoked run on the root config",
+      decision: "allow-once" as const,
+      revokeBeforeIo: true,
+      target: "root" as const,
+    },
+    {
+      name: "allowed reviewer on an included config",
+      decision: "allow-once" as const,
+      revokeBeforeIo: false,
+      target: "include" as const,
+    },
+    {
+      name: "revoked run on an included config",
+      decision: "allow-once" as const,
+      revokeBeforeIo: true,
+      target: "include" as const,
+    },
   ])(
     "carries $name through the production config route to final file effects",
-    async ({ decision, revokeBeforeIo }) => {
+    async ({ decision, revokeBeforeIo, target }) => {
       const stateDir = tempDirs.make("openclaw-gateway-config-approval-");
       const configPath = path.join(stateDir, "openclaw.json");
-      const initialConfig = '{"tools":{"exec":{"notifyOnExit":true}}}\n';
+      const includePath = path.join(stateDir, "tools.json5");
+      const initialConfig =
+        target === "root"
+          ? '{"tools":{"exec":{"notifyOnExit":true}}}\n'
+          : '{"tools":{"$include":"./tools.json5"}}\n';
+      const initialInclude = '{"exec":{"notifyOnExit":true}}\n';
       const initialBackup = "preexisting-backup\n";
       vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
       vi.stubEnv("OPENCLAW_CONFIG_PATH", configPath);
       await fs.writeFile(configPath, initialConfig);
-      await fs.writeFile(`${configPath}.bak`, initialBackup);
-      const { proposal, session } = createRealConfigSession();
+      const mutationPath = target === "root" ? configPath : includePath;
+      if (target === "include") {
+        await fs.writeFile(includePath, initialInclude);
+      }
+      await fs.writeFile(`${mutationPath}.bak`, initialBackup);
+      const operation =
+        target === "root"
+          ? { kind: "config-set" as const, path: "tools.exec.notifyOnExit", value: "false" }
+          : { kind: "config-set" as const, path: "tools.exec.notifyOnExit", value: "false" };
+      const { proposal, session } = createRealConfigSession(operation);
       const sessions = new Map([["delegated-config-session", session]]);
       const operationalRunInstance = {
         instanceId: `config-${decision}-instance`,
@@ -150,15 +185,27 @@ describe("queueDelegatedApproval authority", () => {
       );
 
       if (expectedStatus === "applied") {
-        expect(JSON.parse(await fs.readFile(configPath, "utf8"))).toMatchObject({
-          tools: { exec: { notifyOnExit: false } },
-        });
-        expect(await fs.readFile(`${configPath}.bak`, "utf8")).toBe(initialConfig);
-        expect(await fs.readFile(`${configPath}.bak.1`, "utf8")).toBe(initialBackup);
+        if (target === "root") {
+          expect(JSON.parse(await fs.readFile(configPath, "utf8"))).toMatchObject({
+            tools: { exec: { notifyOnExit: false } },
+          });
+        } else {
+          expect(await fs.readFile(configPath, "utf8")).toBe(initialConfig);
+          expect(JSON.parse(await fs.readFile(includePath, "utf8"))).toMatchObject({
+            exec: { notifyOnExit: false },
+          });
+        }
+        expect(await fs.readFile(`${mutationPath}.bak`, "utf8")).toBe(
+          target === "root" ? initialConfig : initialInclude,
+        );
+        expect(await fs.readFile(`${mutationPath}.bak.1`, "utf8")).toBe(initialBackup);
       } else {
         expect(await fs.readFile(configPath, "utf8")).toBe(initialConfig);
-        expect(await fs.readFile(`${configPath}.bak`, "utf8")).toBe(initialBackup);
-        await expect(fs.readFile(`${configPath}.bak.1`, "utf8")).rejects.toMatchObject({
+        if (target === "include") {
+          expect(await fs.readFile(includePath, "utf8")).toBe(initialInclude);
+        }
+        expect(await fs.readFile(`${mutationPath}.bak`, "utf8")).toBe(initialBackup);
+        await expect(fs.readFile(`${mutationPath}.bak.1`, "utf8")).rejects.toMatchObject({
           code: "ENOENT",
         });
       }

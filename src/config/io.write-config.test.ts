@@ -821,6 +821,46 @@ describe("config io write", () => {
   });
 
   itWithHome(
+    "removes a rejected payload when delegated authority closes during its creation",
+    async (home) => {
+      const configPath = configPathForHome(home);
+      await fs.mkdir(path.dirname(configPath), { recursive: true });
+      const original = {
+        gateway: { mode: "local" },
+        channels: { telegram: { enabled: true, dmPolicy: "pairing" } },
+        agents: { entries: { main: { default: true, workspace: "/tmp/openclaw-main" } } },
+      } satisfies ConfigFileSnapshot["config"];
+      const originalRaw = formatConfig(original);
+      await fs.writeFile(configPath, originalRaw, "utf-8");
+      const io = createHomeConfigIO(home, {
+        env: { VITEST: "true" } as NodeJS.ProcessEnv,
+      });
+      const baseSnapshot = createExistingConfigSnapshot(configPath, original, originalRaw);
+      let authorityChecks = 0;
+
+      await expect(
+        io.writeConfigFile(
+          { update: { channel: "beta" } },
+          {
+            baseSnapshot,
+            assertConfigMutationAuthority: () => {
+              authorityChecks += 1;
+              if (authorityChecks === 2) {
+                throw new Error("delegated authority closed");
+              }
+            },
+          },
+        ),
+      ).rejects.toThrow("delegated authority closed");
+
+      expect(authorityChecks).toBe(2);
+      await expect(fs.readFile(configPath, "utf-8")).resolves.toBe(originalRaw);
+      const entries = await fs.readdir(path.dirname(configPath));
+      expect(entries.filter((entry) => entry.includes(".rejected."))).toHaveLength(0);
+    },
+  );
+
+  itWithHome(
     "does not preflight runtime secrets before rejecting blocked root writes",
     async (home) => {
       const configPath = configPathForHome(home);

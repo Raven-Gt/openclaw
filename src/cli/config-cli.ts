@@ -89,7 +89,12 @@ export async function runConfigSet(opts: {
       ...(opts.beforePersistentApply ? { beforePersistentApply: opts.beforePersistentApply } : {}),
     });
   } catch (err) {
-    handleConfigMutationError({ err, runtime, options: opts.cliOptions });
+    handleConfigMutationError({
+      err,
+      runtime,
+      options: opts.cliOptions,
+      delegatedAuthorityGuarded: Boolean(opts.beforePersistentApply),
+    });
   }
 }
 

@@ -409,9 +409,23 @@ export async function writeConfigFileFromContext(
   const blockingReasons = resolveConfigWriteBlockingReasons(suspiciousReasons, options);
   if (blockingReasons.length > 0 && options.allowDestructiveWrite !== true) {
     const rejectedPath = `${configPath}.rejected.${formatConfigArtifactTimestamp(new Date().toISOString())}`;
-    await deps.fs.promises
+    options.assertConfigPathForWrite?.();
+    options.assertConfigMutationAuthority?.();
+    const rejectedPayloadWritten = await deps.fs.promises
       .writeFile(rejectedPath, json, { encoding: "utf-8", mode: 0o600, flag: "wx" })
-      .catch(() => {});
+      .then(
+        () => true,
+        () => false,
+      );
+    if (rejectedPayloadWritten) {
+      try {
+        options.assertConfigPathForWrite?.();
+        options.assertConfigMutationAuthority?.();
+      } catch (error) {
+        await deps.fs.promises.unlink(rejectedPath).catch(() => {});
+        throw error;
+      }
+    }
     const message = `Config write rejected: ${configPath} (${blockingReasons.join(", ")}). Rejected payload saved to ${rejectedPath}.`;
     const error = Object.assign(new Error(message), {
       code: "CONFIG_WRITE_REJECTED",
