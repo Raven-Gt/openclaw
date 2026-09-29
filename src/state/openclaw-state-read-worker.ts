@@ -4,7 +4,10 @@ import { createRetainedOperation, type RetainedOperation } from "../infra/retain
 import { resolveRuntimeProcessEntrypointUrl } from "../infra/runtime-process-url.js";
 import { captureRuntimeWorkerSource } from "../infra/runtime-worker-generation.js";
 import { SQLITE_IDLE_HANDLE_TTL_MS } from "../infra/sqlite-handle-lifecycle.js";
-import { createSqliteLifecycleAggregateError } from "../infra/sqlite-lifecycle-errors.js";
+import {
+  createSqliteLifecycleAggregateError,
+  throwSqliteLifecycleErrors,
+} from "../infra/sqlite-lifecycle-errors.js";
 import {
   captureRetainedNativeWorkerSource,
   type RetainedNativeWorkerSource,
@@ -49,13 +52,8 @@ type ReadRuntime = {
   stopping?: Promise<void>;
 };
 
-function throwCleanupErrors(errors: unknown[]) {
-  if (errors.length === 1) {
-    throw errors[0];
-  }
-  if (errors.length > 1) {
-    throw new AggregateError(errors, "Shared-state reader source cleanup failed");
-  }
+function closeReadResources(pool: ReadPool | undefined, key?: string) {
+  return process.versions.bun ? pool?.rotate() : pool?.closeResources(key);
 }
 
 async function closeReadPool(state: ReadRuntime): Promise<void> {
@@ -67,7 +65,7 @@ async function closeReadPool(state: ReadRuntime): Promise<void> {
     return;
   }
   const closing = Promise.resolve()
-    .then(() => pool.closeResources())
+    .then(() => closeReadResources(pool))
     .then(() => pool.close())
     .then(() => {
       state.pool = undefined;
@@ -89,21 +87,22 @@ function readRuntimes() {
         const results = await Promise.allSettled(
           [...sources.values()].map(async (state) => {
             if (identity) {
-              await state.pool?.closeResources(identity.key);
+              await closeReadResources(state.pool, identity.key);
             } else {
               await closeReadPool(state);
             }
           }),
         );
-        throwCleanupErrors(
+        throwSqliteLifecycleErrors(
           results.flatMap((result) => (result.status === "rejected" ? [result.reason] : [])),
+          "Shared-state reader source cleanup failed",
         );
       },
     });
     registerOpenClawStateDatabaseLifecycleListener((event) => {
       if (event.kind !== "opened" && event.identity) {
         for (const state of sources.values()) {
-          void state.pool?.closeResources(event.identity.key).catch((error: unknown) => {
+          void closeReadResources(state.pool, event.identity.key)?.catch((error: unknown) => {
             // The worker retains failed cleanup; canonical path close retries it.
             process.emitWarning(`Shared-state reader invalidation failed: ${String(error)}`);
           });
@@ -163,8 +162,9 @@ export function captureOpenClawStateReadSource() {
                 Promise.resolve().then(() => operation.close()),
               ),
             );
-            throwCleanupErrors(
+            throwSqliteLifecycleErrors(
               results.flatMap((result) => (result.status === "rejected" ? [result.reason] : [])),
+              "Shared-state reader source cleanup failed",
             );
             await closeReadPool(created);
             sources.delete(nativeSource);
@@ -221,7 +221,7 @@ export function captureOpenClawStateReadSource() {
       } finally {
         state.servicing = false;
       }
-      throwCleanupErrors(errors);
+      throwSqliteLifecycleErrors(errors, "Shared-state reader source cleanup failed");
     },
   };
 }
@@ -326,7 +326,7 @@ function createReadTransport(
         }
         const reply = read.value;
         if (reply.nativeCleanupFailure) {
-          const error = new Error("Quarantine reader native cleanup was not confirmed");
+          const error = new Error("Shared-state reader native cleanup was not confirmed");
           retainOpenClawStateWorkerErrorPayload(error, reply.nativeCleanupFailure.error);
           cleanup.error = hydrateOpenClawStateWorkerError(error, { includeOrdinary: true });
         }
@@ -334,9 +334,8 @@ function createReadTransport(
       } catch (error) {
         outcome = { error };
       }
-      // Bun and failed native cleanup retain custody through physical worker retirement.
-      cleanup.retire =
-        Boolean(process.versions.bun) || "error" in outcome || cleanup.error !== undefined;
+      // Native closes and quarantine cleanup can require exit even when the domain read succeeds.
+      cleanup.retire = "error" in outcome || cleanup.error !== undefined;
       completion.resolve(outcome);
     }
     try {
@@ -471,12 +470,11 @@ function createReadTransport(
         return;
       }
       closing = undefined;
-      if (errors.length === 1) {
-        completion.reject(errors[0]);
-      } else if (errors.length > 1) {
-        completion.reject(new AggregateError(errors, "Shared-state reader task cleanup failed"));
-      } else {
+      try {
+        throwSqliteLifecycleErrors(errors, "Shared-state reader task cleanup failed");
         completion.resolve(undefined);
+      } catch (error) {
+        completion.reject(error);
       }
     }
     for (const release of releases) {
