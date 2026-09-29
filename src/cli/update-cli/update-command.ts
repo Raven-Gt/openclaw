@@ -170,53 +170,57 @@ async function runAdmittedUpdate(
     }
     const presentation = createUpdateProgress(!opts.json, run);
     disposePresentation = presentation.dispose;
-    const executeWith = async (executor: UpdateCommandExecutor) => {
-      await admitUpdateRequesterContinuation(
-        run,
-        executor,
-        resolveUpdateCommandAdmissionRoot(prepared),
-        initialization?.target.managedServiceRoot ?? prepared.servicePlan?.serviceRoot,
-      );
-      const execute = () => {
-        executionStarted = true;
-        return withUpdateCommandRecoveryUnwind(opts, recoveryState, () =>
-          updateCommandInternal(
-            opts,
-            recoveryState,
-            invocationCwd,
-            prepared,
-            presentation,
-            executor,
-            retainRuntime,
-            initialization,
-          ),
+    const executeWith = (executor: UpdateCommandExecutor) =>
+      withUpdatePreviewSignals(opts, async () => {
+        await admitUpdateRequesterContinuation(
+          run,
+          executor,
+          resolveUpdateCommandAdmissionRoot(prepared),
+          initialization?.target.managedServiceRoot ?? prepared.servicePlan?.serviceRoot,
         );
-      };
-      if (inputOpts.dryRun || !prepared.controlPlaneUpdateSentinelMeta?.handoffId) {
-        return execute();
-      }
-      // The admitted helper owns native stop and recovery for this invocation.
-      // A handoff tuple alone never grants authority to an ordinary service caller.
-      const fence =
-        run.executorFence ??
-        (await executor.enter(prepared.servicePlan?.rootRedirect?.root ?? prepared.discoveredRoot, {
-          preflight: true,
-          serviceRoot: prepared.servicePlan?.serviceRoot,
-        }));
-      run.executorFence = fence;
-      const runId = run.runId;
-      const assertCurrent = () => {
-        if (opts.run !== run || run.runId !== runId || run.executorFence !== fence) {
-          throw new UpdateCommandRecoveryPendingError(
-            "Managed updater lost its admitted executor.",
+        const execute = () => {
+          executionStarted = true;
+          return withUpdateCommandRecoveryUnwind(opts, recoveryState, () =>
+            updateCommandInternal(
+              opts,
+              recoveryState,
+              invocationCwd,
+              prepared,
+              presentation,
+              executor,
+              retainRuntime,
+              initialization,
+            ),
           );
+        };
+        if (inputOpts.dryRun || !prepared.controlPlaneUpdateSentinelMeta?.handoffId) {
+          return execute();
         }
-        captureUpdateCommandExecutorAuthority(fence, runId);
-      };
-      return withGatewayServiceUpdateAuthority(assertCurrent, execute, {
-        originalRoot: captureUpdateCommandExecutorAuthority(fence, runId).installKey,
+        // The admitted helper owns native stop and recovery for this invocation.
+        // A handoff tuple alone never grants authority to an ordinary service caller.
+        const fence =
+          run.executorFence ??
+          (await executor.enter(
+            prepared.servicePlan?.rootRedirect?.root ?? prepared.discoveredRoot,
+            {
+              preflight: true,
+              serviceRoot: prepared.servicePlan?.serviceRoot,
+            },
+          ));
+        run.executorFence = fence;
+        const runId = run.runId;
+        const assertCurrent = () => {
+          if (opts.run !== run || run.runId !== runId || run.executorFence !== fence) {
+            throw new UpdateCommandRecoveryPendingError(
+              "Managed updater lost its admitted executor.",
+            );
+          }
+          captureUpdateCommandExecutorAuthority(fence, runId);
+        };
+        return withGatewayServiceUpdateAuthority(assertCurrent, execute, {
+          originalRoot: captureUpdateCommandExecutorAuthority(fence, runId).installKey,
+        });
       });
-    };
     const execute = initialization
       ? () => executeWith(initialization.executor)
       : () =>
@@ -228,7 +232,7 @@ async function runAdmittedUpdate(
               }, opts),
             ),
           );
-    await withUpdatePreviewSignals(opts, execute);
+    await execute();
   } catch (error) {
     // Execution owns recovery; only failures before execution starts are terminalized here.
     if (!executionStarted) {
