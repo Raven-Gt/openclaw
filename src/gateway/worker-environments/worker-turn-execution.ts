@@ -233,21 +233,20 @@ export async function executeWorkerTurn(
     operatorAuthority,
     assertActive,
     takeFinishingOutcome,
-  } =
-    await prepareWorkerAgentRuntimeIdentity({
-      agentId: placement.agentId,
-      runtimeInstanceId: placement.environmentId,
-      placements: params.placements,
-      sessionKey: placement.sessionKey,
-      sessionTarget: transcriptTarget,
-      promptCacheContext: {
-        boundaryCount: manager.getBoundaryCount(),
-        promptCacheKey: turn.promptCacheKey,
-      },
-      assertSourceCurrent,
-      turn,
-      turnClaim: params.turnClaim,
-    });
+  } = await prepareWorkerAgentRuntimeIdentity({
+    agentId: placement.agentId,
+    runtimeInstanceId: placement.environmentId,
+    placements: params.placements,
+    sessionKey: placement.sessionKey,
+    sessionTarget: transcriptTarget,
+    promptCacheContext: {
+      boundaryCount: manager.getBoundaryCount(),
+      promptCacheKey: turn.promptCacheKey,
+    },
+    assertSourceCurrent,
+    turn,
+    turnClaim: params.turnClaim,
+  });
   preparedComputer?.bind(operationalRunInstance, {
     authority: runtimeIdentity.approvalAuthority,
     assertCurrent: assertActive,
