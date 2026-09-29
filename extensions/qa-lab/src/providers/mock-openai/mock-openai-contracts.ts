@@ -289,22 +289,13 @@ export const QA_WHATSAPP_REPLY_TO_BOT_TRIGGER_MARKER_RE =
 export const QA_WHATSAPP_BATCHED_FINAL_MARKER_RE = /\bWHATSAPP_QA_BATCHED_FINAL_([A-Z0-9]+)\b/u;
 export const QA_SUBAGENT_DIRECT_FALLBACK_PROMPT_RE = /subagent direct fallback qa check/i;
 export const QA_SUBAGENT_DIRECT_FALLBACK_WORKER_RE = /subagent direct fallback worker/i;
-// Message-tool-only group turns that start detached image generation and end
-// empty. The yield variants call sessions_yield (which cannot wait for detached
-// media) and send a progress ack first; the image-failure variant's provider
-// rejects the request. Delayed images keep the media run pending meanwhile.
+// A message-tool-only group turn that starts detached image generation, calls
+// sessions_yield (which cannot wait for detached media), sends a progress ack,
+// and ends empty. The delayed image keeps the media run pending meanwhile.
 export const QA_YIELD_REJECTION_PROMPT_RE = /yield rejection qa check/i;
-export const QA_YIELD_REJECTION_IMAGE_FAILURE_PROMPT_RE = /yield rejection image failure qa check/i;
-export const QA_DETACHED_IMAGE_NO_ACK_PROMPT_RE = /detached image no ack qa check/i;
 export const QA_YIELD_REJECTION_ACK_MARKER = "QA-YIELD-REJECTION-ACK";
-export const QA_YIELD_IMAGE_FAILED_MARKER = "QA-YIELD-IMAGE-FAILED";
 export const QA_YIELD_REJECTION_IMAGE_PROMPT = "QA yield rejection pending lighthouse image.";
-export const QA_YIELD_REJECTION_FAILING_IMAGE_PROMPT =
-  "QA yield rejection failing lighthouse image.";
-export const QA_DETACHED_IMAGE_NO_ACK_IMAGE_PROMPT = "QA detached no-ack lighthouse image.";
-export const QA_DELAYED_IMAGE_MS = 4_000;
-export const QA_TOOL_FAILURE_WARNING_PROMPT_RE = /tool failure warning qa check/i;
-export const QA_TOOL_FAILURE_WARNING_MISSING_PATH = "qa-tool-failure-warning-missing.txt";
+export const QA_YIELD_REJECTION_IMAGE_DELAY_MS = 4_000;
 // A subagent that yields on its own behalf, then finishes on a later follow-up
 // dispatched to the same paused child session. The worker regex must not match
 // the follow-up text, so the two turns carry deliberately disjoint wording: the

@@ -147,7 +147,7 @@ type AcceptedSessionSpawnContinuationRun = Pick<
 
 /**
  * A visible parent that delegates its entire response to completion children or
- * to a still-running detached tool run must remain alive for completion delivery.
+ * to a still-running detached media run must remain alive for completion delivery.
  * Existing output, explicit silence, and non-user turns keep their established
  * terminal ownership instead.
  */
@@ -156,10 +156,8 @@ export function shouldContinueInteractiveAcceptedSessionSpawns(params: {
   run: AcceptedSessionSpawnContinuationRun;
 }): boolean {
   const { attempt, run } = params;
-  // Only a run still in flight owes its completion to this session; one that
-  // already settled within the turn, or a delivered final reply, leaves the
-  // reply to normal handling.
-  const delegatedToToolRun =
+  // Only an in-flight media run still owes this turn its result.
+  const delegatedToMediaRun =
     resolveSourceReplyDelivery(attempt) === "missing" &&
     attempt.toolMetas.some((entry) => {
       const runId = entry.asyncStarted === true ? entry.asyncTaskRunId?.trim() : undefined;
@@ -167,7 +165,7 @@ export function shouldContinueInteractiveAcceptedSessionSpawns(params: {
       return operation !== undefined && !isTerminalMediaGenerationStatus(operation.status);
     });
   if (
-    !(hasCompletionMessageSessionSpawn(attempt.acceptedSessionSpawns) || delegatedToToolRun) ||
+    !(hasCompletionMessageSessionSpawn(attempt.acceptedSessionSpawns) || delegatedToMediaRun) ||
     attempt.terminal.kind !== "ok" ||
     attempt.yieldDetected === true ||
     run.replyOperation?.turnKind !== "visible" ||
@@ -184,12 +182,11 @@ export function shouldContinueInteractiveAcceptedSessionSpawns(params: {
   ) {
     return false;
   }
-  // The detached run delivers the result itself, so non-final message sends
-  // (progress acknowledgements) do not replace the owed reply.
+  // The media run delivers the result, so progress sends do not replace the owed reply.
   return !hasAttemptTerminalState({
     ...attempt,
     acceptedSessionSpawns: [],
-    ...(delegatedToToolRun
+    ...(delegatedToMediaRun
       ? {
           toolMetas: [],
           didSendViaMessagingTool: false,

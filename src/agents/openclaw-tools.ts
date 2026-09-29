@@ -622,7 +622,6 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
         requesterAgentId: sessionAgentId,
         requesterTurnRunId: options?.runId,
         swarmCollector: options?.swarmCollector,
-        mediaGenerationSessionKey: mediaGenerationAgentSessionKey,
         claimYieldCompletion: options?.claimYieldCompletion,
         processScopeKey: options?.processScopeKey,
       }),

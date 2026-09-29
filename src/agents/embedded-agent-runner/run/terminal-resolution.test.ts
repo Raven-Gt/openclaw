@@ -429,7 +429,7 @@ describe("terminal resolution", () => {
   // Live Telegram group: image_generate started, the model acknowledged with a
   // progress message (or said nothing), and the image arrives in a later turn.
   const detachedImageAttempt = (
-    status: "running" | "succeeded" | "failed",
+    status: "running" | "succeeded",
     overrides: Parameters<typeof makeEmbeddedRunnerAttempt>[0] = {},
   ) => {
     createMediaGenerationOperation({
@@ -495,7 +495,6 @@ describe("terminal resolution", () => {
 
   it.each([
     { name: "the media run already succeeded", status: "succeeded" as const, overrides: {} },
-    { name: "the media run already failed", status: "failed" as const, overrides: {} },
     {
       name: "a real tool failed",
       status: "running" as const,

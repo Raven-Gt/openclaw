@@ -409,8 +409,7 @@ export function registerToolChannelProgressTests({
         expect(completed.every((event) => event.data?.hideFromChannelProgress === true)).toBe(
           explicitHide,
         );
-        // Rejections stay visible to the model, but never become a user-facing tool failure.
-        expect(ctx.state.lastToolError).toBeUndefined();
+        expect(ctx.state.lastToolError).toMatchObject({ toolName: tool.name });
         expect(onYield).not.toHaveBeenCalled();
       },
     );

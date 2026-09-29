@@ -4,17 +4,13 @@ import type { UnsettledRequesterChild } from "../subagents/registry/subagent-reg
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readToolStringParam } from "./common.js";
 
-const NO_PENDING_CHILD_COMPLETION_ERROR =
-  'No pending child completion is owned by this turn. If the assigned work is complete, return its result normally. An unfinished subagent waiting for an incoming continuation must explicitly set waitFor: "message".';
-
-/** Detached tool work whose completion re-enters this session as a later turn. */
-export type PendingAsyncToolRun = { kind: string; id: string };
+const NO_PENDING_CHILD_COMPLETION_MESSAGE =
+  'No pending child completion is owned by this turn, so there is nothing to yield for. Background tool runs (image/video/music generation) are not child sessions: their results arrive as a later turn on their own. If the assigned work is complete, return its result normally, or end this turn. An unfinished subagent waiting for an incoming continuation must explicitly set waitFor: "message".';
 
 export type SessionsYieldClaimResult =
   | boolean
   | { error: string }
-  | { pendingChildren: readonly UnsettledRequesterChild[] }
-  | { pendingToolRuns: readonly PendingAsyncToolRun[] };
+  | { pendingChildren: readonly UnsettledRequesterChild[] };
 export type SessionsYieldIntent = { waitFor?: "message" };
 
 function describePendingChild(child: UnsettledRequesterChild): string {
@@ -49,11 +45,6 @@ function formatPendingChildrenMessage(children: readonly UnsettledRequesterChild
   }
   parts.push("This turn owns no new claim, so no yield is needed: end this turn normally.");
   return parts.join(" ");
-}
-
-function formatPendingToolRunsMessage(runs: readonly PendingAsyncToolRun[]): string {
-  const described = runs.map((run) => `${run.kind} (${run.id})`).join(", ");
-  return `Detached tool work started in this session is still running: ${described}. Its result arrives in this session as a later turn automatically; sessions_yield only waits for child sessions and cannot wait for tool runs. Do not poll or re-run the tool: end this turn now.`;
 }
 
 const SessionsYieldToolSchema = Type.Object({
@@ -120,18 +111,14 @@ export function createSessionsYieldTool(opts?: {
           pendingChildren: claim.pendingChildren,
         });
       }
-      if (typeof claim === "object" && "pendingToolRuns" in claim) {
-        // Not an error: detached tool completions re-enter the session on their own.
-        return jsonResult({
-          status: "already_pending",
-          message: formatPendingToolRunsMessage(claim.pendingToolRuns),
-          pendingToolRuns: claim.pendingToolRuns,
-        });
+      if (typeof claim === "object") {
+        return jsonResult({ status: "error", error: claim.error });
       }
       if (claim !== true) {
+        // Advisory, not a failure: the model keeps the turn and nothing the user asked for failed.
         return jsonResult({
-          status: "error",
-          error: typeof claim === "object" ? claim.error : NO_PENDING_CHILD_COMPLETION_ERROR,
+          status: "nothing_pending",
+          message: NO_PENDING_CHILD_COMPLETION_MESSAGE,
         });
       }
       // The runtime owns the actual pause/end-turn behavior; this tool records intent.

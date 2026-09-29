@@ -321,17 +321,12 @@ or poll to wake them. A `paused` child yielded with `waitFor: "message"` and
 will not complete until it receives a continuation; send one with
 `sessions_send` if this session owns that follow-up.
 
-`sessions_yield` only waits for child sessions, not for detached tool runs. When
-the session still has a running `image_generate`, `video_generate`, or
-`music_generate` task, or (outside sub-agents) a backgrounded `exec` that
-notifies on exit, the tool returns `status: "already_pending"` with
-`pendingToolRuns` instead of an error: end the turn, and the tool result
-arrives in the session as a later turn. A turn that ends with a media
-generation run still in flight, with no reply or only a progress message
-(`message` with `final: false`), stays pending until that result arrives instead
-of reporting a missing reply. A rejected yield is guidance for the model, never
-a failed user action, so it does not post a tool-failure warning to the
-conversation.
+`sessions_yield` only waits for child sessions. With nothing to wait for, it
+returns `status: "nothing_pending"`: guidance for the model, not a tool failure,
+so the conversation gets no failure warning. Detached `image_generate`,
+`video_generate`, and `music_generate` runs deliver their result as a later
+turn; a turn that ends with such a run in flight and no final reply stays
+pending instead of reporting a missing reply.
 
 The controlling parent resumes a paused native child with an ordinary
 `sessions_send` continuation. The runtime preserves the original task and its

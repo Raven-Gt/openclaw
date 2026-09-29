@@ -24,9 +24,8 @@ scenario:
     - docs/channels/qa-channel.md
     - docs/tools/image-generation.md
   codeRefs:
-    - src/agents/tool-terminal-outcome.ts
     - src/agents/tools/sessions-yield-tool.ts
-    - src/agents/embedded-agent-runner/run/payloads.ts
+    - src/agents/embedded-agent-runner/run/attempt-terminal-evidence.ts
     - extensions/qa-lab/src/providers/mock-openai/server.ts
   execution:
     kind: flow
@@ -37,7 +36,7 @@ scenario:
       promptSnippet: yield rejection qa check
       prompt: "@openclaw yield rejection qa check: generate a QA lighthouse image and let me know when it is ready."
       ackMarker: QA-YIELD-REJECTION-ACK
-      settleMs: 15000
+      settleMs: 10000
 
 flow:
   steps:
