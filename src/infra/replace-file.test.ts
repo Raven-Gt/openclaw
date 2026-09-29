@@ -3,7 +3,34 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { withTestDir } from "../test-helpers/temp-dir.js";
-import { movePathWithCopyFallback } from "./replace-file.js";
+import { movePathWithCopyFallback, replaceFileAtomic } from "./replace-file.js";
+
+describe("replaceFileAtomic", () => {
+  it("rechecks authority at the final rename and leaves the destination unchanged", async () => {
+    await withTestDir({ prefix: "openclaw-guarded-replace-" }, async (root) => {
+      const filePath = path.join(root, "config.json");
+      await fs.writeFile(filePath, "before\n", "utf8");
+      let authorityOpen = true;
+
+      await expect(
+        replaceFileAtomic({
+          filePath,
+          content: "after\n",
+          beforeRename: async () => {
+            authorityOpen = false;
+          },
+          beforeDestinationMutation: () => {
+            if (!authorityOpen) {
+              throw new Error("delegated authority closed");
+            }
+          },
+        }),
+      ).rejects.toThrow("delegated authority closed");
+
+      await expect(fs.readFile(filePath, "utf8")).resolves.toBe("before\n");
+    });
+  });
+});
 
 describe("movePathWithCopyFallback", () => {
   it.runIf(process.platform !== "win32")(

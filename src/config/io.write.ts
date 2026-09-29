@@ -449,6 +449,9 @@ export async function writeConfigFileFromContext(
       tempPrefix: path.basename(configPath),
       copyFallbackOnPermissionError: true,
       fileSystem: deps.fs,
+      ...(options.assertConfigPathForWrite
+        ? { beforeDestinationMutation: options.assertConfigPathForWrite }
+        : {}),
       beforeRename: async () => {
         options.assertConfigPathForWrite?.();
         if (options.baseSnapshot) {
