@@ -56,7 +56,6 @@ export type SessionWorkspaceState = {
   dock: ChatWorkspaceDock;
   diffContent?: SidebarContent;
   error: string | null;
-  errorOwner?: object;
   list: SessionWorkspaceListResult | null;
   loading: boolean;
   pendingReload: boolean;
