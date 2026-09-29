@@ -28,15 +28,10 @@
 
   .chat-controls__model {
     grid-area: model;
-  }
-
-  .chat-controls__session,
-  .chat-controls__model {
     min-width: 0;
     max-width: none;
   }
 
-  .chat-controls__session select,
   .chat-controls__inline-select-trigger {
     width: 100%;
     max-width: none;
