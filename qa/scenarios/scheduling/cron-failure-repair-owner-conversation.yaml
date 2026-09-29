@@ -252,9 +252,17 @@ flow:
             expr: "repairedJob.payload?.kind === 'agentTurn' && repairedJob.payload.message === config.fixedMessage && repairedJob.delivery?.mode === 'announce' && repairedJob.schedule?.kind === 'at'"
             message:
               expr: "`repair did not rewrite only payload.message: ${JSON.stringify(repairedJob)}`"
-        - call: sleep
+        # Settle before the outbound snapshot: the repair turn ends by committing its reply
+        # to the owner transcript, and its alert fallback runs only after the turn returns,
+        # fenced on the incident the verification run already resolved. The threshold alert
+        # itself was replaced by the repair when run 2 committed.
+        - call: waitForCondition
+          saveAs: ownerTranscript
           args:
-            - 3000
+            - lambda:
+                expr: "(async () => { const summary = await readSessionTranscriptSummary(env, ownerSessionKey, { probeText: config.repairMarker }); return (summary.probeTextEndLine ?? 0) > 0 ? summary : undefined; })()"
+            - expr: "liveTurnTimeoutMs(env, 60000)"
+            - 250
         - set: outboundMessages
           value:
             expr: "state.getSnapshot().messages.filter((message) => message.direction === 'outbound' && !message.deleted)"
@@ -269,17 +277,6 @@ flow:
             expr: "repairReplies.length === 1 && conversationMessages.filter((message) => message.text.includes(config.jobMarker)).length === 1"
             message:
               expr: "`expected one repair reply and one verification delivery, got ${JSON.stringify(conversationMessages.map((message) => message.text))}`"
-        - call: readSessionTranscriptSummary
-          saveAs: ownerTranscript
-          args:
-            - ref: env
-            - ref: ownerSessionKey
-            - probeText:
-                ref: config.repairMarker
-        - assert:
-            expr: "(ownerTranscript.probeTextEndLine ?? 0) > 0"
-            message:
-              expr: "`repair reply did not land in the owner transcript: ${JSON.stringify(ownerTranscript)}`"
       detailsExpr: "`job=${jobId} failed=${JSON.stringify(failedRuns.map((run) => [run.status, run.error]))} plans=${repairPlans.join(',')} repairTools=${repairToolNames.join(',')} verified=${verifiedRun.status} payload=${JSON.stringify(repairedJob.payload.message)} transcriptLine=${ownerTranscript.probeTextEndLine} outbound=${JSON.stringify(outboundMessages.map((message) => [message.conversation.id, message.text]))}`"
 
     - name: an unowned job with the same failures still alerts
@@ -350,6 +347,12 @@ flow:
                 expr: '(() => { const matches = state.getSnapshot().messages.filter((message) => message.direction === ''outbound'' && !message.deleted && message.conversation.id === config.controlConversationId && message.text.startsWith(`Automation "${control.name}" failed 2 times`)); return matches.length > 0 ? matches : undefined; })()'
             - 30000
             - 250
+        # This alert went through the same notification owner after the repair settled; the
+        # repaired job must still have none.
+        - assert:
+            expr: '!state.getSnapshot().messages.some((message) => message.direction === ''outbound'' && message.text.includes(`Automation "${added.name}"`))'
+            message:
+              expr: "`the repaired job alerted after its repair settled: ${JSON.stringify(state.getSnapshot().messages.filter((message) => message.text.includes(added.name)).map((message) => message.text))}`"
       detailsExpr: "`control alert=${JSON.stringify(controlAlerts.map((message) => message.text))}`"
 
     - name: an owned main-session event job alerts instead of repairing
