@@ -334,6 +334,23 @@ function failureIncident(params: {
 }
 
 /**
+ * Repair runs as an agent turn with the job's own tool cap. Only jobs that already run as an
+ * agent turn (a capless agentTurn runs with the agent's full policy today) or as a script with
+ * an explicit cap qualify; main-session events and command jobs never ran with agent tools, so
+ * a repair would widen them. On-exit and stream schedules are operator-only: the repair grant
+ * rejects them, so a silent turn could swallow the alert. They alert as before.
+ */
+export function isCronFailureRepairEligible(job: Pick<CronJob, "payload" | "schedule">): boolean {
+  const { payload } = job;
+  return (
+    job.schedule.kind !== "on-exit" &&
+    job.schedule.kind !== "stream" &&
+    (payload.kind === "agentTurn" ||
+      (payload.kind === "script" && payload.toolsAllow !== undefined))
+  );
+}
+
+/**
  * Emits one alert per incident when threshold, best-effort, and cooldown policy allow it.
  * The first chat alert of a failure streak becomes an owner-conversation repair when the
  * job has an owner session; a later failure of that streak alerts, naming the repair.
@@ -404,18 +421,7 @@ export function maybeEmitFailureAlert(
   const ownerSessionKey = params.job.owner?.sessionKey?.trim();
   const repairIncident = params.job.state.failureAlertIncident;
   const repairAtMs = params.job.state.lastFailureAlertAtMs;
-  // Repair runs as an agent turn with the job's own tool cap. Only jobs that already run
-  // as an agent turn (a capless agentTurn runs with the agent's full policy today) or as a
-  // script with an explicit cap qualify; main-session events and command jobs never ran with
-  // agent tools, so a repair would widen them. On-exit and stream schedules are operator-only:
-  // the repair grant rejects them, so a silent turn could swallow the alert. They alert as before.
-  const payload = params.job.payload;
-  const scheduleKind = params.job.schedule.kind;
-  const repairable =
-    scheduleKind !== "on-exit" &&
-    scheduleKind !== "stream" &&
-    (payload.kind === "agentTurn" ||
-      (payload.kind === "script" && payload.toolsAllow !== undefined));
+  const repairable = isCronFailureRepairEligible(params.job);
   if (
     !repair &&
     repairable &&

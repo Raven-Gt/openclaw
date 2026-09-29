@@ -10,7 +10,10 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
 import { projectCronRunHistoryPage } from "../cron/run-history.js";
 import type { CronRunLogEntry } from "../cron/run-log-types.js";
-import { CRON_FAILURE_REPAIR_TIMEOUT_MS } from "../cron/service/failure-alerts.js";
+import {
+  CRON_FAILURE_REPAIR_TIMEOUT_MS,
+  isCronFailureRepairEligible,
+} from "../cron/service/failure-alerts.js";
 import type { CronFailureRepairRequest } from "../cron/service/notification-intents.js";
 import type { Logger } from "../cron/service/state.js";
 import { cronStoreKey } from "../cron/store/key.js";
@@ -19,7 +22,6 @@ import type { CronJob, CronStoredJob } from "../cron/types.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { runWithGatewayDetachedWorkContinuation } from "../process/gateway-work-admission.js";
 import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
-import { isOperatorCommandCronJob } from "./server-methods/cron-caller-scope.js";
 
 const REPAIR_RECENT_RUNS = 5;
 const REPAIR_PAYLOAD_MAX_CHARS = 4_000;
@@ -119,11 +121,12 @@ export function buildCronFailureRepairBrief(params: {
 
 /**
  * Starts the repair turn in the job's owner conversation with a host-minted grant that
- * can get, update, and run only this job. Missing owner conversations are `unavailable`.
+ * can get, update, and run only this job. Missing owner conversations, and a job that is no
+ * longer enabled, owned, eligible, or on the exact incident by admission, are `unavailable`.
  */
 export async function runGatewayCronFailureRepair(params: {
   request: CronFailureRepairRequest & { job: CronStoredJob };
-  getJob: (jobId: string) => CronJob | undefined;
+  getJob: (jobId: string) => CronStoredJob | undefined;
   storePath: string;
   deps: CliDeps;
   resolveCronAgent: (requested?: string | null) => { agentId: string; cfg: OpenClawConfig };
@@ -131,20 +134,21 @@ export async function runGatewayCronFailureRepair(params: {
   log: Logger;
 }): Promise<CronFailureRepairOutcome> {
   const { request } = params;
-  const { job, ownerSessionKey } = request;
-  const ownsJob = (candidate: CronJob | undefined) =>
+  const { ownerSessionKey } = request;
+  const ownsJob = (candidate: CronJob | undefined): candidate is CronJob =>
     candidate !== undefined &&
     candidate.enabled !== false &&
+    !candidate.state.autoDisabled &&
     candidate.owner?.sessionKey?.trim() === ownerSessionKey &&
-    !isOperatorCommandCronJob(candidate);
+    isCronFailureRepairEligible(candidate);
   // The dispatch-time snapshot can predate the committed incident; the request carries it.
   const { incidentSignature, repairAtMs } = request;
-  if (!ownsJob(job)) {
+  if (!ownsJob(request.job)) {
     return "unavailable";
   }
-  // The grant lives only while the exact incident that started this repair is still open,
+  // The repair lives only while the exact incident that started it is still open,
   // unescalated, and owned: a success that clears it, a new incident, or an alert ends it.
-  const repairsIncident = (candidate: CronJob | undefined) => {
+  const repairsIncident = (candidate: CronStoredJob | undefined): candidate is CronStoredJob => {
     const live = candidate?.state.failureAlertIncident;
     return (
       ownsJob(candidate) &&
@@ -157,11 +161,11 @@ export async function runGatewayCronFailureRepair(params: {
   let agent: { agentId: string; cfg: OpenClawConfig };
   try {
     agent = params.resolveCronAgent(
-      job.owner?.agentId?.trim() || resolveAgentIdFromSessionKey(ownerSessionKey),
+      request.job.owner?.agentId?.trim() || resolveAgentIdFromSessionKey(ownerSessionKey),
     );
   } catch (err) {
     params.log.warn(
-      { jobId: job.id, err: formatErrorMessage(err) },
+      { jobId: request.job.id, err: formatErrorMessage(err) },
       "cron: repair owner agent unavailable",
     );
     return "unavailable";
@@ -174,55 +178,66 @@ export async function runGatewayCronFailureRepair(params: {
     return "unavailable";
   }
   const storeKey = cronStoreKey(params.storePath);
-  const runs = projectCronRunHistoryPage(await readCronRunRecords(storeKey, job.id), {
+  const runs = projectCronRunHistoryPage(await readCronRunRecords(storeKey, request.job.id), {
     storeKey,
-    jobId: job.id,
+    jobId: request.job.id,
     limit: REPAIR_RECENT_RUNS,
   }).entries;
-  const message = buildCronFailureRepairBrief({
-    job,
-    runs,
-    consecutiveErrors: request.consecutiveErrors,
-  });
-  const nowMs = Date.now();
-  const deadlineMs = nowMs + CRON_FAILURE_REPAIR_TIMEOUT_MS;
-  // A detached `current` turn in the owner conversation: its final visible reply is
-  // committed there, NO_REPLY stays silent. It inherits the failing job's owner and
-  // execution envelope: its tool cap plus the job-scoped automations grant.
-  const repairToolsAllow = resolveRepairTurnToolsAllow(job);
-  const repairJob: CronStoredJob = {
-    id: randomUUID(),
-    agentId: agent.agentId,
-    name: `Repair: ${job.name || job.id}`,
-    enabled: true,
-    createdAtMs: nowMs,
-    updatedAtMs: nowMs,
-    schedule: { kind: "at", at: new Date(nowMs).toISOString() },
-    sessionTarget: "current",
-    sessionKey: ownerSessionKey,
-    wakeMode: "now",
-    payload: {
-      kind: "agentTurn",
-      message,
-      timeoutSeconds: Math.floor(CRON_FAILURE_REPAIR_TIMEOUT_MS / 1000),
-      ...(repairToolsAllow ? { toolsAllow: repairToolsAllow } : {}),
-    },
-    ...(job.owner ? { owner: job.owner } : {}),
-    ...(job.scheduledToolPolicy ? { scheduledToolPolicy: job.scheduledToolPolicy } : {}),
-    ...(job.toolsAllowProvenance ? { toolsAllowProvenance: job.toolsAllowProvenance } : {}),
-    ...(job.toolsAllowExecTarget ? { toolsAllowExecTarget: job.toolsAllowExecTarget } : {}),
-    ...(job.toolsAllowExecTargetRequirement
-      ? { toolsAllowExecTargetRequirement: job.toolsAllowExecTargetRequirement }
-      : {}),
-    ...(job.runtimeAuthority ? { runtimeAuthority: job.runtimeAuthority } : {}),
-    ...(job.runtimeAuthorityRecoveryRequired ? { runtimeAuthorityRecoveryRequired: true } : {}),
-    state: { nextRunAtMs: nowMs },
-  };
+  const jobId = request.job.id;
   try {
     const result = await runWithGatewayDetachedWorkContinuation(
       () =>
-        params.runSchedulerOwned(() =>
-          runCronIsolatedAgentTurn({
+        params.runSchedulerOwned(async () => {
+          // Admission: the job may have been disabled, re-owned, re-capped, or resolved while
+          // the reads above or scheduler admission awaited. The turn's whole envelope (tool
+          // cap, policy, authority) comes from the live job now, never the dispatch-time clone.
+          const liveJob = params.getJob(jobId);
+          if (!repairsIncident(liveJob)) {
+            return undefined;
+          }
+          const job = structuredClone(liveJob);
+          const message = buildCronFailureRepairBrief({
+            job,
+            runs,
+            consecutiveErrors: request.consecutiveErrors,
+          });
+          const nowMs = Date.now();
+          const deadlineMs = nowMs + CRON_FAILURE_REPAIR_TIMEOUT_MS;
+          // A detached `current` turn in the owner conversation: its final visible reply is
+          // committed there, NO_REPLY stays silent. It inherits the failing job's owner and
+          // execution envelope: its tool cap plus the job-scoped automations grant.
+          const repairToolsAllow = resolveRepairTurnToolsAllow(job);
+          const repairJob: CronStoredJob = {
+            id: randomUUID(),
+            agentId: agent.agentId,
+            name: `Repair: ${job.name || job.id}`,
+            enabled: true,
+            createdAtMs: nowMs,
+            updatedAtMs: nowMs,
+            schedule: { kind: "at", at: new Date(nowMs).toISOString() },
+            sessionTarget: "current",
+            sessionKey: ownerSessionKey,
+            wakeMode: "now",
+            payload: {
+              kind: "agentTurn",
+              message,
+              timeoutSeconds: Math.floor(CRON_FAILURE_REPAIR_TIMEOUT_MS / 1000),
+              ...(repairToolsAllow ? { toolsAllow: repairToolsAllow } : {}),
+            },
+            ...(job.owner ? { owner: job.owner } : {}),
+            ...(job.scheduledToolPolicy ? { scheduledToolPolicy: job.scheduledToolPolicy } : {}),
+            ...(job.toolsAllowProvenance ? { toolsAllowProvenance: job.toolsAllowProvenance } : {}),
+            ...(job.toolsAllowExecTarget ? { toolsAllowExecTarget: job.toolsAllowExecTarget } : {}),
+            ...(job.toolsAllowExecTargetRequirement
+              ? { toolsAllowExecTargetRequirement: job.toolsAllowExecTargetRequirement }
+              : {}),
+            ...(job.runtimeAuthority ? { runtimeAuthority: job.runtimeAuthority } : {}),
+            ...(job.runtimeAuthorityRecoveryRequired
+              ? { runtimeAuthorityRecoveryRequired: true }
+              : {}),
+            state: { nextRunAtMs: nowMs },
+          };
+          return await runCronIsolatedAgentTurn({
             cfg: agent.cfg,
             deps: params.deps,
             job: repairJob,
@@ -234,15 +249,19 @@ export async function runGatewayCronFailureRepair(params: {
             cronManagement: {
               entitlement: {
                 source: "failure-repair",
-                jobId: job.id,
-                isCurrent: () => repairsIncident(params.getJob(job.id)),
+                jobId,
+                isCurrent: () => repairsIncident(params.getJob(jobId)),
               },
               isCurrent: () => Date.now() < deadlineMs,
             },
-          }),
-        ),
+          });
+        }),
       "cron:failure-repair",
     );
+    if (!result) {
+      params.log.info({ jobId }, "cron: failure repair no longer applies at admission");
+      return "unavailable";
+    }
     // The repair's outcome must reach the owner conversation (or be intentionally silent);
     // an undelivered result leaves the user uninformed, so the alert goes out instead.
     if (
@@ -250,14 +269,14 @@ export async function runGatewayCronFailureRepair(params: {
       (result.delivered === true || result.deliverySuppressionReason === "silent")
     ) {
       params.log.info(
-        { jobId: job.id, repairRunSessionKey: result.sessionKey, delivered: result.delivered },
+        { jobId, repairRunSessionKey: result.sessionKey, delivered: result.delivered },
         "cron: failure repair turn completed",
       );
       return "completed";
     }
     params.log.warn(
       {
-        jobId: job.id,
+        jobId,
         status: result.status,
         error: result.error,
         delivered: result.delivered,
@@ -267,10 +286,7 @@ export async function runGatewayCronFailureRepair(params: {
     );
     return "failed";
   } catch (err) {
-    params.log.warn(
-      { jobId: job.id, err: formatErrorMessage(err) },
-      "cron: failure repair turn failed",
-    );
+    params.log.warn({ jobId, err: formatErrorMessage(err) }, "cron: failure repair turn failed");
     return "failed";
   }
 }
