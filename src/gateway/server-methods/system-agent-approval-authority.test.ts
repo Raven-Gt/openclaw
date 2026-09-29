@@ -74,36 +74,42 @@ describe("queueDelegatedApproval authority", () => {
     {
       name: "allowed reviewer on the root config",
       decision: "allow-once" as const,
-      revokeBeforeIo: false,
+      revokeAtAuthorityCheck: undefined,
       target: "root" as const,
     },
     {
       name: "denied reviewer on the root config",
       decision: "deny" as const,
-      revokeBeforeIo: false,
+      revokeAtAuthorityCheck: undefined,
       target: "root" as const,
     },
     {
       name: "revoked run on the root config",
       decision: "allow-once" as const,
-      revokeBeforeIo: true,
+      revokeAtAuthorityCheck: 3,
       target: "root" as const,
     },
     {
       name: "allowed reviewer on an included config",
       decision: "allow-once" as const,
-      revokeBeforeIo: false,
+      revokeAtAuthorityCheck: undefined,
       target: "include" as const,
     },
     {
       name: "revoked run on an included config",
       decision: "allow-once" as const,
-      revokeBeforeIo: true,
+      revokeAtAuthorityCheck: 3,
+      target: "include" as const,
+    },
+    {
+      name: "run revoked after included-backup path preparation",
+      decision: "allow-once" as const,
+      revokeAtAuthorityCheck: 5,
       target: "include" as const,
     },
   ])(
     "carries $name through the production config route to final file effects",
-    async ({ decision, revokeBeforeIo, target }) => {
+    async ({ decision, revokeAtAuthorityCheck, target }) => {
       const stateDir = tempDirs.make("openclaw-gateway-config-approval-");
       const configPath = path.join(stateDir, "openclaw.json");
       const includePath = path.join(stateDir, "tools.json5");
@@ -154,7 +160,7 @@ describe("queueDelegatedApproval authority", () => {
           operationalRunInstance,
           receiptAuthority: () => {
             authorityChecks += 1;
-            if (revokeBeforeIo && authorityChecks === 3) {
+            if (authorityChecks === revokeAtAuthorityCheck) {
               releaseAgentRunDelegatedAuthority(authority);
               return false;
             }
@@ -174,7 +180,9 @@ describe("queueDelegatedApproval authority", () => {
 
       expect(manager.resolve(approvalId, decision, "operator-ui")).toBe(true);
       const expectedStatus =
-        decision === "allow-once" && !revokeBeforeIo ? "applied" : "not-applied";
+        decision === "allow-once" && revokeAtAuthorityCheck === undefined
+          ? "applied"
+          : "not-applied";
       await vi.waitFor(
         () =>
           expect(publishResolved).toHaveBeenCalledWith(

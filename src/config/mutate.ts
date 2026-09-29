@@ -7,6 +7,7 @@ import { expectDefined } from "@openclaw/normalization-core";
 import { formatErrorMessage, isErrno, isMissingPathError } from "../infra/errors.js";
 import { withFileLock } from "../infra/file-lock.js";
 import { root as createFsRoot, type Root as FsSafeRoot } from "../infra/fs-safe.js";
+import { replaceFileAtomic } from "../infra/replace-file.js";
 import { KeyedAsyncQueue } from "../plugin-sdk/keyed-async-queue.js";
 import { isPathInside } from "../security/scan-paths.js";
 import { isRecord } from "../utils.js";
@@ -573,11 +574,12 @@ async function rollbackJsonFileWriteIfUnchanged(params: {
   return true;
 }
 
-function createRootBoundBackupFs(target: RootBoundIncludeFile) {
+function createRootBoundBackupFs(target: RootBoundIncludeFile, assertMutation?: () => void) {
   return {
     chmod: async (filePath: string, mode: number) => {
       const opened = await target.root.open(resolveRootBoundRelativePath(target, filePath));
       try {
+        assertMutation?.();
         await opened.handle.chmod(mode);
       } finally {
         await opened[Symbol.asyncDispose]();
@@ -585,21 +587,28 @@ function createRootBoundBackupFs(target: RootBoundIncludeFile) {
     },
     copyFile: async (from: string, to: string) => {
       const content = await target.root.readBytes(resolveRootBoundRelativePath(target, from));
-      await target.root.write(resolveRootBoundRelativePath(target, to), content, {
-        mkdir: true,
+      const destination = await target.root.resolve(resolveRootBoundRelativePath(target, to));
+      await replaceFileAtomic({
+        filePath: destination,
+        content,
+        tempPrefix: path.basename(destination),
         mode: 0o600,
-        overwrite: true,
+        ...(assertMutation ? { beforeDestinationMutation: assertMutation } : {}),
       });
     },
     rename: async (from: string, to: string) => {
-      await target.root.move(
-        resolveRootBoundRelativePath(target, from),
-        resolveRootBoundRelativePath(target, to),
-        { overwrite: true },
-      );
+      const source = await target.root.resolve(resolveRootBoundRelativePath(target, from));
+      const destination = await target.root.resolve(resolveRootBoundRelativePath(target, to));
+      // Root-bound preparation completes before the live check; no await may
+      // separate this assertion from scheduling the filesystem effect.
+      assertMutation?.();
+      await fs.rename(source, destination);
     },
     unlink: async (filePath: string) => {
-      await target.root.remove(resolveRootBoundRelativePath(target, filePath));
+      const resolved = await target.root.resolve(resolveRootBoundRelativePath(target, filePath));
+      // Keep the authority boundary adjacent to the prepared path mutation.
+      assertMutation?.();
+      await fs.unlink(resolved);
     },
   };
 }
@@ -628,7 +637,7 @@ async function writeRootBoundJsonFile(params: {
   if (await targetBeforeBackup.root.exists(targetBeforeBackup.relativePath)) {
     await maintainConfigBackups(
       targetBeforeBackup.absolutePath,
-      createRootBoundBackupFs(targetBeforeBackup),
+      createRootBoundBackupFs(targetBeforeBackup, params.assertConfigMutationAuthority),
       { assertMutation: params.assertConfigMutationAuthority },
     );
   }
