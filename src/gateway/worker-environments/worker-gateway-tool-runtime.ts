@@ -3,8 +3,6 @@ import { Value } from "typebox/value";
 import {
   isWorkerGatewayToolFrameWithinBudget,
   WorkerToolSurfaceSchema,
-  type WorkerGatewayToolCancelParams,
-  type WorkerGatewayToolInvokeParams,
   type WorkerGatewayToolResult,
   type WorkerGatewayToolUpdateFrame,
   type WorkerToolSurface,
@@ -13,13 +11,14 @@ import { getAgentToolExecutionLocation } from "../../agents/agent-tool-metadata.
 import { projectAgentToolDefinition } from "../../agents/prepared-tool-surface.js";
 import type { AnyAgentTool } from "../../agents/tools/common.js";
 import type { WorkerConnectionIdentity } from "./connection-identity.js";
+import type {
+  WorkerGatewayToolRuntime,
+  WorkerGatewayToolSink,
+} from "./worker-gateway-tool-contract.js";
 import {
   boundWorkerToolResult as bounded,
   workerSessionToolErrorResult,
 } from "./worker-session-tool-result.js";
-
-export type WorkerGatewayToolSink = { send(frame: WorkerGatewayToolUpdateFrame): void };
-export type WorkerGatewayToolRuntime = ReturnType<typeof createWorkerGatewayToolRuntime>;
 
 /** Retained by the admitted turn owner; neither IDs nor a prepared catalog grant authority. */
 export function createWorkerGatewayToolRuntime(params: {
@@ -29,49 +28,17 @@ export function createWorkerGatewayToolRuntime(params: {
     tools: AnyAgentTool[];
     policy: WorkerToolSurface["policy"];
   }>;
-}) {
+}): WorkerGatewayToolRuntime {
   const generation = randomUUID();
   const lifetime = new AbortController();
   const signal = AbortSignal.any([params.signal, lifetime.signal]);
-  const assertCurrent = () => {
+  const assertCurrent = (callSignal?: AbortSignal) => {
     signal.throwIfAborted();
     params.assertCurrent();
+    callSignal?.throwIfAborted();
   };
   let prepared: Promise<WorkerToolSurface> | undefined;
   let issuedTools: Map<string, AnyAgentTool> | undefined;
-  const prepare = (identity: WorkerConnectionIdentity) => {
-    assertCurrent();
-    return (prepared ??= params.prepare(identity).then(({ tools, policy }) => {
-      assertCurrent();
-      const handles = new Map<string, AnyAgentTool>();
-      const surface = {
-        generation,
-        policy,
-        tools: tools.map((tool, index) => {
-          const location = getAgentToolExecutionLocation(tool);
-          if (!location) {
-            throw new Error("Worker tool has no execution owner");
-          }
-          const id = String(index);
-          handles.set(id, tool);
-          return {
-            id,
-            execution: location.kind,
-            ...(location.kind === "gateway" && location.replay ? { replay: true as const } : {}),
-            ...(location.kind === "gateway" && location.timeout
-              ? { timeout: location.timeout }
-              : {}),
-            definition: projectAgentToolDefinition(tool),
-          };
-        }),
-      };
-      if (!Value.Check(WorkerToolSurfaceSchema, surface)) {
-        throw new Error("Worker tool surface is invalid");
-      }
-      issuedTools = handles;
-      return surface;
-    }));
-  };
   const calls = new Map<
     string,
     {
@@ -84,17 +51,42 @@ export function createWorkerGatewayToolRuntime(params: {
   >();
   let sequential: Promise<unknown> = Promise.resolve();
   return {
-    async getSurface(identity: WorkerConnectionIdentity) {
-      const surface = await prepare(identity);
+    async getSurface(identity) {
+      assertCurrent();
+      const surface = await (prepared ??= params.prepare(identity).then(({ tools, policy }) => {
+        assertCurrent();
+        const handles = new Map<string, AnyAgentTool>();
+        const surface = {
+          generation,
+          policy,
+          tools: tools.map((tool, index) => {
+            const location = getAgentToolExecutionLocation(tool);
+            if (!location) {
+              throw new Error("Worker tool has no execution owner");
+            }
+            const id = String(index);
+            handles.set(id, tool);
+            return {
+              id,
+              execution: location.kind,
+              ...(location.kind === "gateway" && location.replay ? { replay: true as const } : {}),
+              ...(location.kind === "gateway" && location.timeout
+                ? { timeout: location.timeout }
+                : {}),
+              definition: projectAgentToolDefinition(tool),
+            };
+          }),
+        };
+        if (!Value.Check(WorkerToolSurfaceSchema, surface)) {
+          throw new Error("Worker tool surface is invalid");
+        }
+        issuedTools = handles;
+        return surface;
+      }));
       assertCurrent();
       return surface;
     },
-    async invoke(
-      _identity: WorkerConnectionIdentity,
-      request: WorkerGatewayToolInvokeParams,
-      sink: WorkerGatewayToolSink,
-      connectionSignal?: AbortSignal,
-    ) {
+    async invoke(_identity, request, sink, connectionSignal) {
       // Admission issues handles; cancellation must see the call before its first yield.
       assertCurrent();
       const tool = issuedTools?.get(request.toolId);
@@ -113,8 +105,7 @@ export function createWorkerGatewayToolRuntime(params: {
       if (prior) {
         prior.sinks.add(sink);
         const result = await prior.result;
-        assertCurrent();
-        prior.signal.throwIfAborted();
+        assertCurrent(prior.signal);
         return result;
       }
       if (calls.size >= 4) {
@@ -129,13 +120,11 @@ export function createWorkerGatewayToolRuntime(params: {
       const sinks = new Set([sink]);
       let seq = 0;
       const execute = async () => {
-        assertCurrent();
-        callSignal.throwIfAborted();
+        assertCurrent(callSignal);
         try {
           return bounded(
             await tool.execute(request.toolCallId, request.arguments, callSignal, (update) => {
-              assertCurrent();
-              callSignal.throwIfAborted();
+              assertCurrent(callSignal);
               const frame: WorkerGatewayToolUpdateFrame = {
                 type: "event",
                 event: "worker.gatewayTool.update",
@@ -175,8 +164,7 @@ export function createWorkerGatewayToolRuntime(params: {
       calls.set(request.toolCallId, call);
       try {
         const value = await result;
-        assertCurrent();
-        callSignal.throwIfAborted();
+        assertCurrent(callSignal);
         return value;
       } finally {
         if (calls.get(request.toolCallId) === call) {
@@ -184,7 +172,7 @@ export function createWorkerGatewayToolRuntime(params: {
         }
       }
     },
-    cancel(request: WorkerGatewayToolCancelParams) {
+    cancel(request) {
       assertCurrent();
       if (request.generation !== generation) {
         throw new Error("Worker tool generation is unavailable");

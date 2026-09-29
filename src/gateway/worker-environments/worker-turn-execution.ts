@@ -41,7 +41,7 @@ import {
   getWorkerTurnToolSurface,
 } from "./placement-turn-claim-events.js";
 import { prepareWorkerDesktopLaunchPlan } from "./worker-desktop-launch-plan.js";
-import type { WorkerGatewayToolRuntime } from "./worker-gateway-tool-runtime.js";
+import type { WorkerGatewayToolRuntime } from "./worker-gateway-tool-contract.js";
 import { createWorkerGatewayToolRuntime } from "./worker-gateway-tool-runtime.js";
 import { prepareWorkerGitHubBinding } from "./worker-github-binding.js";
 import { waitForTurnOperation } from "./worker-turn-admission.js";

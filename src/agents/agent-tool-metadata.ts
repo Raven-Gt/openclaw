@@ -1,3 +1,4 @@
+import type { WorkerToolSurface } from "../../packages/gateway-protocol/src/schema/worker-gateway-tool.js";
 import { PluginHostObject } from "../plugins/plugin-instance-owned-values.js";
 import { copyPluginToolMeta, getPluginToolMeta } from "../plugins/tool-metadata.js";
 import { copyAgentToolAvailability } from "./agent-tool-availability.js";
@@ -23,12 +24,7 @@ export type AgentToolExecutionLocation =
       kind: "gateway";
       replay?: boolean;
       connectionScoped?: true;
-      timeout?: {
-        minimumMs?: number;
-        argument?: string;
-        defaultSeconds?: number;
-        paddingMs?: number;
-      };
+      timeout?: WorkerToolSurface["tools"][number]["timeout"];
     };
 
 type ToolActionState = {

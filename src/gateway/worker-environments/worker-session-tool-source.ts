@@ -111,14 +111,9 @@ export function createWorkerSessionToolSourceRunner(params: {
         capability.run((owner) =>
           withGatewayToolCallerIdentity(
             {
-              agentId: owner.agentId,
-              sessionKey: owner.sessionKey,
+              ...owner,
               gatewayContextResolver: params.resolveGatewayContext,
-              operationalRunInstance: owner.operationalRunInstance,
               approvalAuthority: owner.delegatedAuthority,
-              ...(owner.operatorAuthority ? { operatorAuthority: owner.operatorAuthority } : {}),
-              executionIdentityToken: owner.executionIdentityToken,
-              receiptAuthority: owner.receiptAuthority,
               workerTurnClaim: owner.turnClaim,
               workerTurnExecutionIdentityCapability: capability,
               ...(operation.request.signal ? { approvalSignals: [operation.request.signal] } : {}),
