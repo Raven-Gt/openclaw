@@ -1,6 +1,10 @@
 // Covers the delegated run fence between reviewer resolution and the final effect.
+import fs from "node:fs/promises";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller-context.js";
+import { clearConfigCache, clearRuntimeConfigSnapshot } from "../../config/config.js";
 import {
   claimAgentRunDelegatedAuthority,
   releaseAgentRunDelegatedAuthority,
@@ -8,16 +12,158 @@ import {
   validateAgentRunDelegatedAuthority,
 } from "../../infra/agent-run-registry.js";
 import type { SystemAgentApprovalRequestPayload } from "../../infra/system-agent-approvals.js";
+import { ChatTurnRouter } from "../../system-agent/chat-turn-router.js";
+import { ChatWizardHost } from "../../system-agent/chat-wizard-host.js";
 import { ExecApprovalManager } from "../exec-approval-manager.js";
 import { queueDelegatedApproval } from "./system-agent-approval.js";
 import type { SystemAgentChatSession } from "./system-agent.js";
 import type { GatewayRequestContext } from "./types.js";
 
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+
 afterEach(() => {
+  clearConfigCache();
+  clearRuntimeConfigSnapshot();
   resetAgentRunRegistryForTest();
+  vi.unstubAllEnvs();
 });
 
+function createRealConfigSession() {
+  const router = new ChatTurnRouter(
+    { operatorApprovalOnly: true },
+    {},
+    {
+      sessionId: "delegated-config-session",
+      verifiedInference: {},
+      proposalRef: {},
+    } as never,
+    new ChatWizardHost({ beforePersistentApply: async () => {} }),
+    {
+      requireVerifiedInference: async () => undefined,
+      requirePersistentApplyInference: async () => undefined,
+      rebindVerifiedInference: () => {},
+      getVerifiedInference: () => ({}) as never,
+      loadOverview: async () => ({}) as never,
+      getHistory: () => [],
+      verifyConfigAfterWrite: async () => null,
+    },
+  );
+  const operation = {
+    kind: "config-set" as const,
+    path: "tools.exec.notifyOnExit",
+    value: "false",
+  };
+  router.propose(operation);
+  const proposal = router.getPendingOperatorProposal();
+  if (!proposal) {
+    throw new Error("expected delegated config proposal");
+  }
+  const session = {
+    engine: {
+      getPendingOperatorProposal: () => router.getPendingOperatorProposal(),
+      resolveOperatorApproval: (
+        decision: "allow-once" | "allow-always" | "deny" | null,
+        proposalHash: string,
+        beforePersistentApply?: () => void,
+      ) => router.resolveOperatorApproval(decision, proposalHash, beforePersistentApply),
+    },
+    welcome: "",
+    lastUsedAt: 1,
+    ownerKey: "agent:main:main",
+  } as unknown as SystemAgentChatSession;
+  return { proposal, session };
+}
+
 describe("queueDelegatedApproval authority", () => {
+  it.each([
+    { name: "allowed reviewer", decision: "allow-once" as const, revokeBeforeIo: false },
+    { name: "denied reviewer", decision: "deny" as const, revokeBeforeIo: false },
+    { name: "revoked run", decision: "allow-once" as const, revokeBeforeIo: true },
+  ])(
+    "carries $name through the production config route to final file effects",
+    async ({ decision, revokeBeforeIo }) => {
+      const stateDir = tempDirs.make("openclaw-gateway-config-approval-");
+      const configPath = path.join(stateDir, "openclaw.json");
+      const initialConfig = '{"tools":{"exec":{"notifyOnExit":true}}}\n';
+      const initialBackup = "preexisting-backup\n";
+      vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+      vi.stubEnv("OPENCLAW_CONFIG_PATH", configPath);
+      await fs.writeFile(configPath, initialConfig);
+      await fs.writeFile(`${configPath}.bak`, initialBackup);
+      const { proposal, session } = createRealConfigSession();
+      const sessions = new Map([["delegated-config-session", session]]);
+      const operationalRunInstance = {
+        instanceId: `config-${decision}-instance`,
+        runId: `config-${decision}-run`,
+      };
+      const authority = claimAgentRunDelegatedAuthority(operationalRunInstance);
+      let authorityChecks = 0;
+      const manager = new ExecApprovalManager<SystemAgentApprovalRequestPayload>({
+        approvalKind: "system-agent",
+        resolveAllowedDecisions: (request) => request.allowedDecisions,
+        validateAgentRuntimeDelegatedAuthority: validateAgentRunDelegatedAuthority,
+      });
+      const publishResolved = vi.fn();
+      const context = {
+        systemAgentApprovalManager: manager,
+        approvalEvents: { publishRequested: vi.fn(() => 1), publishResolved },
+        broadcast: vi.fn(),
+        broadcastToConnIds: vi.fn(),
+        hasExecApprovalClients: () => true,
+      } as unknown as GatewayRequestContext;
+
+      const approvalId = await withGatewayToolCallerIdentity(
+        {
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          operationalRunInstance,
+          receiptAuthority: () => {
+            authorityChecks += 1;
+            if (revokeBeforeIo && authorityChecks === 3) {
+              releaseAgentRunDelegatedAuthority(authority);
+              return false;
+            }
+            return true;
+          },
+        },
+        () =>
+          queueDelegatedApproval({
+            context,
+            sessions,
+            session,
+            sessionId: "delegated-config-session",
+            delegation: { agentId: "main", sessionKey: "agent:main:main" },
+            proposal,
+          }),
+      );
+
+      expect(manager.resolve(approvalId, decision, "operator-ui")).toBe(true);
+      const expectedStatus =
+        decision === "allow-once" && !revokeBeforeIo ? "applied" : "not-applied";
+      await vi.waitFor(() =>
+        expect(publishResolved).toHaveBeenCalledWith(
+          "system-agent",
+          expect.objectContaining({ applicationStatus: expectedStatus }),
+        ),
+      );
+
+      if (expectedStatus === "applied") {
+        expect(JSON.parse(await fs.readFile(configPath, "utf8"))).toMatchObject({
+          tools: { exec: { notifyOnExit: false } },
+        });
+        expect(await fs.readFile(`${configPath}.bak`, "utf8")).toBe(initialConfig);
+        expect(await fs.readFile(`${configPath}.bak.1`, "utf8")).toBe(initialBackup);
+      } else {
+        expect(await fs.readFile(configPath, "utf8")).toBe(initialConfig);
+        expect(await fs.readFile(`${configPath}.bak`, "utf8")).toBe(initialBackup);
+        await expect(fs.readFile(`${configPath}.bak.1`, "utf8")).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      }
+      releaseAgentRunDelegatedAuthority(authority);
+    },
+  );
+
   it("blocks the persistent effect when its delegated run closes after review", async () => {
     const proposal = {
       operation: { kind: "gateway-restart" as const },
