@@ -97,6 +97,7 @@ const EXCLUDED_SCHEMA_EXPORTS = [
   "SessionPlacementRunnerSchema",
   "SessionPlacementSchema",
   "SessionPlacementStateSchema",
+  "SessionPlacementWorkerRuntimeInstallSchema",
   "SessionToolOverridesSchema",
   "SessionsCatalogHostEventSchema",
   "SessionsDispatchParamsSchema",

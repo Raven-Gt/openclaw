@@ -817,7 +817,7 @@ describe("worker spawn startup composition", () => {
             resolveGatewayContext,
             desktopSessionRegistry: createDesktopSessionRegistry({ lingerMs: 1 }),
             startup: { ...startup, placementStore: placements },
-            log: { child: () => ({ warn: () => {} }) },
+            log: { child: () => ({ info: () => {}, warn: () => {} }) },
           });
           const service = runtime.workerEnvironmentService;
           const createTools = factory.mock.calls.at(-1)?.[0].createGatewayTools;
