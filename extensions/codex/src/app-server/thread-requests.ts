@@ -81,7 +81,7 @@ const CODEX_TOOL_SEARCH_UNSUPPORTED_THREAD_CONFIG: JsonObject = {
   "features.multi_agent": false,
 };
 
-export const CODEX_DELEGATION_DISABLED_THREAD_CONFIG: JsonObject = {
+const CODEX_DELEGATION_DISABLED_THREAD_CONFIG: JsonObject = {
   "agents.enabled": false,
   "features.multi_agent": false,
   "features.multi_agent_v2": false,
