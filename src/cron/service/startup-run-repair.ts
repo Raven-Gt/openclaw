@@ -217,7 +217,8 @@ export function restoreFinalizedStartupRun(params: {
     job.state.lastFailureNotificationDeliveryStatus = entry.failureNotificationDelivery.status;
     job.state.lastFailureNotificationDeliveryError = entry.failureNotificationDelivery.error;
     const lastAlert = job.state.lastFailureAlertAtMs;
-    // Failure alert intent owns its cooldown; a recorded recovery notice does not reopen it.
+    // Failure alert intent owns its cooldown; a successful run (including a historical
+    // recovery-notice record) does not reopen it.
     if (
       entry.failureNotificationDelivery.status !== "not-requested" &&
       completionStatus !== "succeeded" &&
