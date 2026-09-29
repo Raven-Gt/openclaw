@@ -56,7 +56,7 @@ extensions/browser/src/browser/bridge-server.ts	3
 extensions/browser/src/browser/cdp-page-session.ts	3
 extensions/browser/src/browser/cdp-proxy-bypass.ts	1
 extensions/browser/src/browser/cdp-websocket.ts	2
-extensions/browser/src/browser/cdp.helpers.ts	4
+extensions/browser/src/browser/cdp.helpers.ts	3
 extensions/browser/src/browser/cdp.ts	16
 extensions/browser/src/browser/chrome-mcp-routing.ts	1
 extensions/browser/src/browser/chrome-mcp-session.ts	1
@@ -274,7 +274,6 @@ extensions/copilot/src/hooks-bridge.ts	7
 extensions/copilot/src/isolated-completion.ts	1
 extensions/copilot/src/provider-bridge.ts	1
 extensions/copilot/src/replay-shim.ts	3
-extensions/copilot/src/runtime.ts	1
 extensions/copilot/src/sdk-loader.ts	2
 extensions/copilot/src/tool-bridge.ts	6
 extensions/copilot/src/workspace-bootstrap.ts	1
@@ -2807,7 +2806,7 @@ src/gateway/chat-display-projection.sanitize.ts	15
 src/gateway/chat-sanitize.ts	3
 src/gateway/chat-tool-titles.ts	2
 src/gateway/cli-session-history.claude-activity.ts	1
-src/gateway/cli-session-history.claude.ts	15
+src/gateway/cli-session-history.claude.ts	14
 src/gateway/cli-session-history.merge.ts	6
 src/gateway/config-reload-plan.ts	5
 src/gateway/control-ui-plugin-auth-cookie.ts	1
