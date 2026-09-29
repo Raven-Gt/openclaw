@@ -23,6 +23,7 @@ export type DoctorMaintenance = {
   run<T>(operation: () => T): T;
   signal: AbortSignal;
   releaseState(): Promise<void>;
+  repairSqliteNoCow(paths: readonly string[]): Promise<void>;
   release(): Promise<void>;
   finish(
     cfg: OpenClawConfig | undefined,

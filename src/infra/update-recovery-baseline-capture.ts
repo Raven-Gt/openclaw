@@ -41,6 +41,8 @@ import {
 import { createUpdateDatabaseBackup } from "./update-database-backup.js";
 import { readUpdateRunDriver, type UpdateRunDriver } from "./update-run-driver.js";
 
+declare const SEALED_RUNTIME_BUILD: boolean;
+
 type Entry = UpdateRecoveryBackupManifest["entries"][number];
 type ResourceKind = "file" | "directory" | "sqlite";
 type CapturedPath = { stat?: BigIntStats; names?: string[]; target?: string };
@@ -111,6 +113,10 @@ export function captureUpdateRecoveryBaseline(params: {
   nodeRunner?: string;
   timeoutMs?: number;
 }) {
+  // Sealed helpers consume retained evidence; the installed CLI owns fresh capture.
+  if (typeof SEALED_RUNTIME_BUILD === "boolean" && SEALED_RUNTIME_BUILD) {
+    throw new Error("Fresh original-state capture requires the installed CLI.");
+  }
   return withArtifactPreservingStateReads(async () => {
     const runId = params.runId;
     if (!/^[a-zA-Z0-9_-]{1,128}$/u.test(runId)) {
