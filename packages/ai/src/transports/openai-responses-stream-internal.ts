@@ -690,7 +690,6 @@ export async function processResponsesStream<TApi extends Api>(
         if (rejectedToolCall) {
           throw output.errorMessage ? new Error(output.errorMessage) : rejectedToolCall.error;
         }
-        terminal.assertToolCallsResolved(event.type);
         if (event.type === "response.completed" || output.stopReason === "length") {
           const items = event.response.output ?? [];
           const completeToolCall =

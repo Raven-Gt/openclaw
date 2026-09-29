@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import type {
-  ResponseCreateParamsStreaming,
   ResponseOutputItem,
   ResponseOutputMessage,
   ResponseReasoningItem,
@@ -37,6 +36,7 @@ import {
 } from "./openai-responses-contracts.js";
 import { encodeTextSignatureV1 } from "./openai-responses-replay-internal.js";
 import type { ResponsesOutputTracker } from "./openai-responses-stream-slots-internal.js";
+import type { ResponsesStreamOptions } from "./openai-responses-stream-types-internal.js";
 import {
   IncompleteToolCallError,
   parseTerminalToolCallArguments,
@@ -55,20 +55,6 @@ export type ResponsesThinkingBlock = ThinkingContent & {
 type TerminalOutput = AssistantMessage & {
   usage: Usage & { reasoningTokens?: number };
 };
-type TerminalOptions = {
-  serviceTier?: ResponseCreateParamsStreaming["service_tier"];
-  resolveServiceTier?: (
-    responseTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
-    requestTier: ResponseCreateParamsStreaming["service_tier"] | undefined,
-  ) => ResponseCreateParamsStreaming["service_tier"] | undefined;
-  applyServiceTierPricing?: (
-    usage: Usage,
-    tier: ResponseCreateParamsStreaming["service_tier"] | undefined,
-  ) => void;
-  reasoningReplayMetadata?: OpenAIResponsesReasoningReplayMetadata;
-  resolveResponseModel?: () => string | undefined;
-};
-
 function splitToolCallId(id: string): [string, string | undefined] {
   const separator = id.indexOf("|");
   return separator === -1 ? [id, undefined] : [id.slice(0, separator), id.slice(separator + 1)];
@@ -121,7 +107,7 @@ export function createResponsesTerminalController(params: {
   output: TerminalOutput;
   stream: ResponsesEventSink;
   model: Model;
-  options?: TerminalOptions;
+  options?: ResponsesStreamOptions;
   outputs: ResponsesOutputTracker;
   toolCalls: Pick<
     ReturnType<typeof createResponsesToolCallTracker<ResponsesToolCallState & { block: ToolCall }>>,
@@ -140,15 +126,6 @@ export function createResponsesTerminalController(params: {
     const streamed = params.toolCalls.resolve(event, readResponsesToolCallItemIdentity(item));
     rejectedToolCallId =
       streamed?.block.id ?? (item.call_id ? resolveResponsesToolCallId(item) : undefined);
-  };
-  const assertToolCallsResolved = (
-    terminalEventType: "response.completed" | "response.incomplete",
-  ) => {
-    if (terminalEventType === "response.incomplete" && params.toolCalls.hasActive()) {
-      throw output.errorMessage
-        ? new Error(output.errorMessage)
-        : new IncompleteToolCallError("Responses stream completed with unresolved tool calls");
-    }
   };
   const backfillReasoning = (items: ResponseOutputItem[]) => {
     for (const [outputIndex, item] of items.entries()) {
@@ -419,12 +396,20 @@ export function createResponsesTerminalController(params: {
               : "invalid",
       },
     });
+    if (
+      !hasRejectedToolCall &&
+      terminalEventType === "response.incomplete" &&
+      params.toolCalls.hasActive()
+    ) {
+      throw output.errorMessage
+        ? new Error(output.errorMessage)
+        : new IncompleteToolCallError("Responses stream completed with unresolved tool calls");
+    }
   };
   return {
     finalizeResponse,
     finalizeFailedResponse: finalizeTerminalFacts,
     recordIncompleteToolCall,
-    assertToolCallsResolved,
     recoverTerminalOutput,
     emitToolCallCompletion,
   };

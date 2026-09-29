@@ -1,4 +1,5 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { readResponsesOutputIndex } from "../transports/openai-responses-stream-slots-internal.js";
 
 export type ResponsesToolCallIdentity = { itemId?: string; callId?: string };
 
@@ -12,14 +13,6 @@ type ResponsesToolCallEvent = {
   output_index?: unknown;
   item_id?: unknown;
 };
-
-function readOutputIndex(event: ResponsesToolCallEvent): number | undefined {
-  return typeof event.output_index === "number" &&
-    Number.isInteger(event.output_index) &&
-    event.output_index >= 0
-    ? event.output_index
-    : undefined;
-}
 
 function readEventIdentity(event: ResponsesToolCallEvent): ResponsesToolCallIdentity {
   return { itemId: normalizeOptionalString(event.item_id) };
@@ -89,7 +82,7 @@ export function createResponsesToolCallTracker<TState extends ResponsesToolCallS
 
   return {
     register(event: ResponsesToolCallEvent, state: TState): void {
-      const outputIndex = readOutputIndex(event);
+      const outputIndex = readResponsesOutputIndex(event);
       if (outputIndex === undefined) {
         unindexedCalls.add(state);
         return;
@@ -106,7 +99,7 @@ export function createResponsesToolCallTracker<TState extends ResponsesToolCallS
       identity: ResponsesToolCallIdentity = readEventIdentity(event),
       allowUnmatchedIdentity = true,
     ): TState | undefined {
-      const outputIndex = readOutputIndex(event);
+      const outputIndex = readResponsesOutputIndex(event);
       if (outputIndex !== undefined) {
         const indexed = indexedCalls.get(outputIndex);
         if (indexed) {
