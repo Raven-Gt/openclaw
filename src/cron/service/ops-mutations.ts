@@ -13,7 +13,7 @@ import {
   requestActiveCronJobCancellation,
 } from "../active-jobs.js";
 import { describeUnavailableCronAgent } from "../agent-availability.js";
-import { tryResolveCronJobEffectiveAgentId } from "../agent-id.js";
+import { resolveCronJobEffectiveAgentId, tryResolveCronJobEffectiveAgentId } from "../agent-id.js";
 import { resolveCronJobConfigRevision } from "../config-revision.js";
 import { withCronMutationCommitHook } from "../mutation-completion.js";
 import { normalizeCronRunJobId } from "../run-history.js";
@@ -56,7 +56,7 @@ import {
   registerPendingCronSessionCleanup,
 } from "./locked.js";
 import { normalizeOptionalAgentId } from "./normalize.js";
-import { resolveCurrentDefaultAgentId, resolveEffectiveJobAgentId } from "./ops-shared.js";
+import { resolveCurrentDefaultAgentId } from "./ops-shared.js";
 import {
   cronRunReceiptMutationHooks,
   prepareCronRunReceiptOwnerMutationHooks,
@@ -119,8 +119,8 @@ async function persistUpdatedJob(params: {
   const { state, snapshot, previousJob, nextJob, persistStore } = params;
   const defaultAgentId = resolveCurrentDefaultAgentId(state);
   // Declaration convergence also refuses unresolved legacy ownership before publishing.
-  resolveEffectiveJobAgentId(previousJob, defaultAgentId, state.deps.legacyDefaultAgentId);
-  resolveEffectiveJobAgentId(nextJob, defaultAgentId, state.deps.legacyDefaultAgentId);
+  resolveCronJobEffectiveAgentId(previousJob, defaultAgentId, state.deps.legacyDefaultAgentId);
+  resolveCronJobEffectiveAgentId(nextJob, defaultAgentId, state.deps.legacyDefaultAgentId);
   const reservation = state.queuedRunReservationsByJobId.get(nextJob.id);
   const preservesOnExitRearm =
     reservation?.onExit === true &&
@@ -217,7 +217,7 @@ export async function add(
       );
     }
     await ensureLoadedForOperation(state);
-    const agentId = resolveEffectiveJobAgentId(input, resolveCurrentDefaultAgentId(state));
+    const agentId = resolveCronJobEffectiveAgentId(input, resolveCurrentDefaultAgentId(state));
     if (state.deps.isAgentAvailable?.(agentId) === false) {
       throw new Error(describeUnavailableCronAgent(agentId));
     }
@@ -428,7 +428,7 @@ async function updateLoadedJob(params: {
     configuredChannels,
   });
   if (patch.agentId !== undefined) {
-    const agentId = resolveEffectiveJobAgentId(nextJob, resolveCurrentDefaultAgentId(state));
+    const agentId = resolveCronJobEffectiveAgentId(nextJob, resolveCurrentDefaultAgentId(state));
     if (state.deps.isAgentAvailable?.(agentId) === false) {
       throw new Error(describeUnavailableCronAgent(agentId));
     }
@@ -545,7 +545,7 @@ export async function remove(
     if (isSystemMonitorDeclaration(removedJob.declarationKey) && opts?.systemOwned !== true) {
       throw new Error("system-owned monitor jobs cannot be removed by cron clients");
     }
-    const agentId = resolveEffectiveJobAgentId(
+    const agentId = resolveCronJobEffectiveAgentId(
       removedJob,
       resolveCurrentDefaultAgentId(state),
       state.deps.legacyDefaultAgentId,
