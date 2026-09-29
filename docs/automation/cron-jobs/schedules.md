@@ -115,6 +115,27 @@ watcher keeps its usual `once` behavior; renaming it does not reset its conditio
 
 `fire: false` persists evaluation state and counters, then reschedules without creating run history. These quiet evaluations count as completed occurrences during restart catch-up. If a fired payload run fails, the returned `state` is **not** persisted — the next evaluation sees the previous state and can fire again, so write scripts as read-only checks and keep actions in the payload. Trigger schedules have a built-in minimum interval of 30 seconds, preserved through maintenance and Gateway restarts. Each evaluation has a 30-second wall-clock budget and up to 5 tool calls.
 
+Scripts call configured MCP server tools through the same `MCP.<server>.<tool>({ ...input })` namespace that interactive Code Mode uses, for example `await MCP.wisprFlow.searchMeetings({ since: trigger.state?.cursor })`. A job's `toolsAllow` exposes only the MCP tools it names, by exact `server__tool` name or glob such as `wispr-flow__search_meetings` or `wispr-flow__*`; without `toolsAllow`, the owning agent's tool policy decides, as in an interactive run. MCP calls go through the same before-tool-call hooks and approvals and return the same untrusted-content results. Each evaluation starts its own MCP runtime and closes it before the result is recorded. Connecting and listing tools count toward the 30-second budget, and each MCP call counts toward the 5-call limit.
+
+A server that fails to start does not fail the evaluation. Tools named exactly in `toolsAllow` for that server reject with `MCP server "<name>" is unavailable: <reason>`, so the script can catch the error and return `fire: true` with a failure message. Tools the job reaches only through globs or agent policy are absent from `MCP` when their server fails to start, so guard those calls with `try`/`catch` too. Returning `fire: false` from an MCP-backed check skips the payload, and its model call, on quiet ticks:
+
+```js
+try {
+  const { structuredContent } = await MCP.wisprFlow.searchMeetings({
+    since: trigger.state?.cursor,
+  });
+  const meetings = structuredContent?.meetings ?? [];
+  if (meetings.length === 0) return { fire: false };
+  return {
+    fire: true,
+    message: `${meetings.length} new meetings`,
+    state: { cursor: meetings.at(-1).id },
+  };
+} catch (error) {
+  return { fire: true, message: `Meeting source check failed: ${error.message}` };
+}
+```
+
 Removing or disabling a job during condition evaluation cancels that evaluation before its payload can start. After a main-session payload hands work to heartbeat, that shared heartbeat retains its own lifecycle.
 
 Author watchers around **actionable state**, not only success: a watcher that goes quiet when its check fails or times out looks healthy while broken. Compare the observation with `trigger.state` and return fresh state to deduplicate; do not rely on model or process memory. When firing, make `message` self-contained because it becomes the fired run's complete event context.

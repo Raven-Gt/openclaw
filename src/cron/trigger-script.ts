@@ -35,6 +35,10 @@ import {
   type CodeModeHeadlessResult,
 } from "../agents/code-mode.js";
 import {
+  resolveConversationCapabilityProfile,
+  type ResolvedConversationCapabilityProfile,
+} from "../agents/conversation-capability-profile.js";
+import {
   applyEmbeddedAttemptToolsAllow,
   resolveEmbeddedAttemptToolConstructionPlan,
 } from "../agents/embedded-agent-runner/run/attempt-tool-construction-plan.js";
@@ -60,6 +64,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { GatewayContextResolver } from "../gateway/server-methods/types.js";
 import { formatErrorMessageWithCode } from "../infra/errors.js";
 import { pruneMapToMaxSize } from "../infra/map-size.js";
+import { logWarn } from "../logger.js";
 import { PluginInstanceUnavailableError } from "../plugins/plugin-instance-error.js";
 import { capturePluginLifecycleAuthority } from "../plugins/registry-lifecycle.js";
 import type { PluginRegistry } from "../plugins/registry-types.js";
@@ -82,6 +87,7 @@ import {
   MAX_CRON_SCRIPT_TOOL_BUDGET,
 } from "./script-payload.js";
 import type { CronServiceDeps } from "./service/state.js";
+import { acquireCronScriptMcpTools, type CronScriptMcpTools } from "./trigger-script-mcp.js";
 import {
   parseScriptPayloadResult,
   parseTriggerResult,
@@ -113,6 +119,11 @@ void assertTriggerCodesCoverHeadless;
 
 type PreparedTriggerRuntime = {
   createTools: (admitted: AdmittedRunContext, signal: AbortSignal) => AnyAgentTool[];
+  /** Starts this evaluation's own MCP runtime when the job's policy can reach MCP tools. */
+  acquireMcpTools?: (
+    admitted: AdmittedRunContext,
+    reservedToolNames: readonly string[],
+  ) => CronScriptMcpTools | undefined;
   context: HookContext & { config: OpenClawConfig; agentId: string; sessionKey: string };
   pluginRegistry?: PluginRegistry;
 };
@@ -214,7 +225,37 @@ async function prepareTriggerRuntime(
       toolsEnabled: true,
       toolsAllow: params.toolsAllow,
     });
-    // Bundle MCP tools are source:"mcp", which the headless bridge excludes.
+    const scheduledToolPolicy = resolveScheduledToolPolicyContext({
+      toolsAllow: params.toolsAllow,
+      scheduledToolPolicy: params.scheduledToolPolicy,
+      execTarget: params.execTarget,
+    });
+    // Core and MCP tools of one evaluation share one policy owner, like embedded runs.
+    const capabilityProfiles = new WeakMap<
+      AdmittedRunContext,
+      ResolvedConversationCapabilityProfile
+    >();
+    const resolveCapabilityProfile = (admitted: AdmittedRunContext) => {
+      let profile = capabilityProfiles.get(admitted);
+      if (!profile) {
+        profile = resolveConversationCapabilityProfile({
+          config,
+          sessionKey,
+          runId: admitted.operationalRunInstance.runId,
+          agentId,
+          agentDir,
+          workspaceDir: effectiveWorkspace,
+          cwd: effectiveWorkspace,
+          spawnWorkspaceDir: workspaceDir,
+          sandboxToolPolicy: sandbox?.enabled ? sandbox.tools : undefined,
+          runtimeToolAllowlist: toolPlan.runtimeToolAllowlist,
+          inheritRuntimeToolAllowlist: Boolean(toolPlan.runtimeToolAllowlist),
+          scheduledToolPolicy,
+        });
+        capabilityProfiles.set(admitted, profile);
+      }
+      return profile;
+    };
     // LSP runtimes are session-scoped and intentionally outside trigger v1.
     const createTools: PreparedTriggerRuntime["createTools"] = (admitted, signal) => {
       const allTools = toolPlan.constructTools
@@ -237,11 +278,8 @@ async function prepareTriggerRuntime(
             includeCoreTools: toolPlan.includeCoreTools,
             runtimeToolAllowlist: toolPlan.runtimeToolAllowlist,
             inheritRuntimeToolAllowlist: Boolean(toolPlan.runtimeToolAllowlist),
-            scheduledToolPolicy: resolveScheduledToolPolicyContext({
-              toolsAllow: params.toolsAllow,
-              scheduledToolPolicy: params.scheduledToolPolicy,
-              execTarget: params.execTarget,
-            }),
+            scheduledToolPolicy,
+            conversationCapabilityProfile: resolveCapabilityProfile(admitted),
             toolConstructionPlan: toolPlan.codingToolConstructionPlan,
           })
         : [];
@@ -257,8 +295,27 @@ async function prepareTriggerRuntime(
       sessionKey,
       loopDetection: resolveToolLoopDetectionConfig({ cfg: config, agentId }),
     };
+    const acquireMcpTools: PreparedTriggerRuntime["acquireMcpTools"] = (
+      admitted,
+      reservedToolNames,
+    ) => {
+      const runId = admitted.operationalRunInstance.runId;
+      return acquireCronScriptMcpTools({
+        sessionId: runId,
+        sessionKey,
+        agentId,
+        config,
+        workspaceDir: effectiveWorkspace,
+        agentDir,
+        toolsAllow: params.toolsAllow,
+        capabilityProfile: resolveCapabilityProfile(admitted),
+        reservedToolNames,
+        hookContext: { ...context, runId, trigger: "cron" },
+      });
+    };
     return {
       createTools,
+      acquireMcpTools,
       context,
       ...(pluginRegistry ? { pluginRegistry } : {}),
     };
@@ -376,6 +433,7 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
     );
     const catalogRef = createToolSearchCatalogRef();
     let admission: PreparedAgentRunAdmission | undefined;
+    let mcp: CronScriptMcpTools | undefined;
     try {
       const request = {
         runtimeConfig: resolveCronActiveRuntimeConfig(deps.config),
@@ -452,6 +510,10 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
           if (!runtime.isCurrent()) {
             throw new PluginInstanceUnavailableError();
           }
+          const reservedToolNames = tools.map((tool) => tool.name);
+          mcp = withPluginRuntimeRegistryScope(selected.pluginRegistry, () =>
+            selected.acquireMcpTools?.(authority, reservedToolNames),
+          );
           break;
         } catch (error) {
           if (
@@ -474,6 +536,10 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
           runtime?.invalidate();
           // Retry setup once with the same admission and deadline, never script execution.
         }
+      }
+      if (mcp) {
+        // Server connection and tool listing spend the evaluation's own deadline.
+        tools = [...tools, ...(await evaluationScope.wait(mcp.tools))];
       }
       const ctx: ToolSearchToolContext = {
         ...runtime.context,
@@ -544,6 +610,12 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
       admission?.close();
       clearToolSearchCatalog({ catalogRef });
       evaluationScope.cleanup();
+      // The run owns its MCP runtime: retire it before the result reaches the scheduler.
+      await mcp
+        ?.dispose()
+        .catch((error: unknown) =>
+          logWarn(`cron: script MCP cleanup failed: ${formatErrorMessageWithCode(error)}`),
+        );
     }
   };
 }

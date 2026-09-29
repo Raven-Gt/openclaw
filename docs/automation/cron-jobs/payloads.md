@@ -208,6 +208,8 @@ openclaw automations create "0 * * * *" \
 
 Use `--script <file|->` to read JavaScript from a file or stdin. The CLI preserves leading and trailing spaces in file paths; quote the path as one shell argument. The timeout defaults to 300 seconds and is capped at 900; the tool budget defaults to 50 calls and is capped at 200. These payload budgets are separate from the smaller trigger-gate evaluation budgets.
 
+Script payloads can call configured MCP server tools as `MCP.<server>.<tool>({ ...input })`, like interactive Code Mode. The job's `toolsAllow` exposes only the MCP tools it names, by exact `server__tool` name or glob; without `toolsAllow`, the owning agent's tool policy applies. Each run starts its own MCP runtime, counts connection time against the script timeout and each call against the tool budget, and closes the runtime before recording the result. When a server fails to start, tools named exactly in `toolsAllow` reject with `MCP server "<name>" is unavailable: <reason>`, which the script can catch. See [Event triggers](/automation/cron-jobs/schedules#event-triggers-condition-watchers) for the shared details.
+
 The script may return an object with these optional fields:
 
 - `notify`: Text delivered through the job's `announce`, `webhook`, or `none` delivery mode. If omitted, nothing is delivered. For a `main` job, the text becomes a system event.
