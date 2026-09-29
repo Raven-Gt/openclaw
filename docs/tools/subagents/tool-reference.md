@@ -57,7 +57,9 @@ session to confirm the effective tool list.
 
 Native sub-agent continuations after a Gateway restart, descendant completion,
 or a `sessions_send` follow-up preserve the recorded run timeout, including `0`
-for no timeout. Steering an active turn keeps that turn's existing budget.
+for no timeout, while the recorded session identity still matches. A replaced
+session or a registration without a captured identity uses the ordinary agent
+timeout instead. Steering an active turn keeps that turn's existing budget.
 Completion, give-up, and pause wakes use the requester's own timeout: its recorded
 sub-agent budget if registered, otherwise `agents.defaults.timeoutSeconds`
 (default: 48 hours). A child's timeout never becomes its requester's wake budget.

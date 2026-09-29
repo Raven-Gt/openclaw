@@ -125,15 +125,14 @@ export async function prepareAgentRunDispatch(
         params.resolvedSessionKey
           ? getLatestLiveSubagentRunByChildSessionKey(params.resolvedSessionKey)
           : undefined;
-      const registeredTarget = registeredRun?.execution.transcriptTarget;
+      const registeredSession = registeredRun?.childSessionIdentity;
       // Admission may adopt a replacement; retained rows must match its final identity.
       const inheritsRegisteredTimeout =
         registeredRun &&
         !registeredRun.execution.suppressSessionEffects &&
-        (registeredTarget?.sessionId === undefined ||
-          registeredTarget.sessionId === params.getAdmittedSessionId()) &&
-        (registeredTarget?.expectedLifecycleRevision === undefined ||
-          registeredTarget.expectedLifecycleRevision === admittedSessionEntry?.lifecycleRevision);
+        registeredSession?.sessionId === params.getAdmittedSessionId() &&
+        registeredSession.sessionId === admittedSessionEntry?.sessionId &&
+        registeredSession.lifecycleRevision === admittedSessionEntry.lifecycleRevision;
       timeoutSeconds =
         params.request.timeout ??
         (inheritsRegisteredTimeout ? (registeredRun.runTimeoutSeconds ?? 0) : undefined);
@@ -382,9 +381,10 @@ export async function prepareAgentRunDispatch(
       ...params,
       assertResumeAdmissionCurrent: () => {
         params.assertAdmissionCurrent?.();
-        params.assertGatewayWorkAdmissionAllowed();
+        const sessionEntry = params.assertGatewayWorkAdmissionAllowed();
         activeRunAbort.controller.signal.throwIfAborted();
         assertAgentRunLifecycleGenerationCurrent(params.lifecycleGeneration);
+        return sessionEntry;
       },
     });
     followupCompletion = subagentAdmission.followupCompletion;

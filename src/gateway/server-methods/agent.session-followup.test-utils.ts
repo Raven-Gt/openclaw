@@ -4,6 +4,10 @@ import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coerci
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import {
+  registerSubagentRun,
+  replaceSubagentRunAfterSteerCore,
+} from "../../agents/subagents/registry/subagent-registry.js";
+import {
   addSubagentRunForTests,
   getSubagentRunByChildSessionKey,
   resetSubagentRegistryForTests,
@@ -69,6 +73,21 @@ describe("gateway agent follow-up activity", () => {
     { label: "reset child uses the agent default", budget: 90, priorRevision: "retired-revision" },
     { label: "session id rotated during admission wait", budget: 0, rotation: "sessionId" },
     { label: "lifecycle revision rotated during admission wait", budget: 90, rotation: "revision" },
+    { label: "unbound unlimited registration", budget: 0, missingIdentity: true },
+    { label: "initial unlimited registration", budget: 0, register: true },
+    { label: "initial finite registration", budget: 90, register: true },
+    { label: "recreated unlimited registration", budget: 0, register: true, recreate: true },
+    { label: "recreated finite registration", budget: 90, register: true, recreate: true },
+    { label: "successor finite registration", budget: 90, register: true, replace: true },
+    { label: "redirected transcript", budget: 0, hiddenTranscript: true },
+    { label: "unversioned initial registration", budget: 0, register: true, unversioned: true },
+    {
+      label: "unversioned reset registration",
+      budget: 90,
+      register: true,
+      unversioned: true,
+      revise: true,
+    },
   ])(
     "preserves timeout policy and prior completion for $label",
     async ({
@@ -83,6 +102,13 @@ describe("gateway agent follow-up activity", () => {
       priorSessionId,
       priorRevision,
       rotation,
+      missingIdentity,
+      register,
+      recreate,
+      unversioned,
+      revise,
+      replace,
+      hiddenTranscript,
     }) => {
       await withPluginSubagentTestState("openclaw-parent-followup-", async ({ stateDir: root }) => {
         resetSubagentRegistryForTests({ persist: false });
@@ -99,7 +125,7 @@ describe("gateway agent follow-up activity", () => {
         mocks.loadConfigReturn = cfg;
         const previousRunId = "previous-review";
         const runId = "continued-review";
-        if (!unregistered) {
+        if (!unregistered && !register) {
           addSubagentRunForTests({
             runId: previousRunId,
             runTimeoutSeconds: budget,
@@ -107,15 +133,18 @@ describe("gateway agent follow-up activity", () => {
             requesterSessionKey,
             requesterDisplayKey: requesterSessionKey,
             task: "Review the candidate",
+            childSessionIdentity: missingIdentity
+              ? undefined
+              : {
+                  sessionId: priorSessionId ?? "spawned-child-session",
+                  lifecycleRevision: priorRevision ?? "current-revision",
+                },
             execution: {
               status: "terminal",
               startedAt: 1,
               endedAt: 2,
               ...(retired ? { suppressSessionEffects: true } : {}),
-              transcriptTarget: {
-                sessionId: priorSessionId ?? "spawned-child-session",
-                expectedLifecycleRevision: priorRevision ?? "current-revision",
-              },
+              transcriptTarget: hiddenTranscript ? { sessionId: "hidden-transcript" } : undefined,
             },
             ...(previousState === "yielded" ? { pauseReason: "sessions_yield" as const } : {}),
             expectsCompletionMessage: true,
@@ -133,13 +162,12 @@ describe("gateway agent follow-up activity", () => {
             runTimeoutSeconds: 1,
           });
         }
-        const previousRun = structuredClone(getSubagentRunByChildSessionKey(childSessionKey));
         mocks.updateSessionStore.mockResolvedValue(undefined);
         const storePath = path.join(root, "agents", "main", "sessions", "sessions.json");
         mocks.userTurnStorePath = storePath;
         let currentEntry = {
           sessionId: "spawned-child-session",
-          lifecycleRevision: "current-revision",
+          lifecycleRevision: unversioned ? undefined : "current-revision",
           updatedAt: Date.now(),
           spawnedBy: requesterSessionKey,
           label: "Candidate review",
@@ -150,6 +178,36 @@ describe("gateway agent follow-up activity", () => {
           entry: currentEntry,
           canonicalKey: childSessionKey,
         }));
+        if (register) {
+          await registerSubagentRun({
+            runId: previousRunId,
+            childSessionKey,
+            requesterSessionKey,
+            requesterDisplayKey: requesterSessionKey,
+            task: "Review the candidate",
+            cleanup: "keep",
+            runTimeoutSeconds: budget,
+            sessionEntry: currentEntry,
+          });
+          if (replace) {
+            expect(
+              replaceSubagentRunAfterSteerCore({
+                previousRunId,
+                nextRunId: "successor-review",
+              }),
+            ).toBe(true);
+          }
+          if (recreate) {
+            currentEntry = {
+              ...currentEntry,
+              sessionId: "recreated-child-session",
+              lifecycleRevision: "recreated-revision",
+            };
+          } else if (revise) {
+            currentEntry = { ...currentEntry, lifecycleRevision: "new-revision" };
+          }
+        }
+        const previousRun = structuredClone(getSubagentRunByChildSessionKey(childSessionKey));
         const admissionStarted = createDeferred();
         const releaseAdmission = createDeferred();
         const createController = admissionController.createAgentAdmissionController;
@@ -212,7 +270,14 @@ describe("gateway agent follow-up activity", () => {
           await pending;
           const expectedSeconds =
             timeout ??
-            (unregistered || retired || priorSessionId || priorRevision || rotation
+            (unregistered ||
+            retired ||
+            priorSessionId ||
+            priorRevision ||
+            rotation ||
+            missingIdentity ||
+            recreate ||
+            revise
               ? undefined
               : (budget ?? 0));
           expect(mocks.agentCommand.mock.calls.at(-1)?.[0].timeout).toBe(
