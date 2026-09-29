@@ -105,6 +105,65 @@ extension DashboardWindowOwnershipTests {
         try await self.waitForDashboard(controller, path: path)
     }
 
+    @Test func `cancelled successor hands queued commands to the document it would have replaced`() async throws {
+        let server = try await DashboardHTTPFixture.start()
+        defer { server.stop() }
+        let auth = DashboardWindowAuth(gatewayUrl: nil, token: nil, password: nil)
+        let controller = DashboardWindowController(
+            url: server.url(), auth: auth, websiteDataStore: .nonPersistent(),
+            windowAutosaveName: "", requestBrowserProfileImportOffer: { _ in false })
+        defer { controller.closeDashboard() }
+        controller.show(url: server.url(), auth: auth)
+        try await self.waitForDashboard(controller, path: "/")
+
+        // The displayed document commits, then a successor request starts before its finish arrives.
+        controller.webView(controller.webView, didCommit: nil)
+        controller.dispatchNativeCommand(.newSession)
+        try #require(controller._testPendingNativeCommands == [.newSession])
+        controller.webView.load(URLRequest(url: server.url("/successor")))
+        try #require(controller.webView.isLoading)
+        controller.webView(controller.webView, didFinish: nil)
+        #expect(controller._testPendingNativeCommands == [.newSession])
+
+        // The successor never commits, so the finished document survives and takes the queue.
+        controller.webView.stopLoading()
+        try await DashboardTestWait.state("successor cancellation") { !controller.webView.isLoading }
+        controller.webView(
+            controller.webView, didFailProvisionalNavigation: nil, withError: URLError(.cancelled))
+        #expect(controller._testPendingNativeCommands.isEmpty)
+        #expect(controller.canDeliverNativeCommands)
+    }
+
+    @Test func `cancelled restore leaves a surviving failure page waiting for a reload`() async throws {
+        let server = try await DashboardHTTPFixture.start()
+        defer { server.stop() }
+        let auth = DashboardWindowAuth(gatewayUrl: nil, token: nil, password: nil)
+        let controller = DashboardWindowController(
+            url: server.url(), auth: auth, websiteDataStore: .nonPersistent(),
+            windowAutosaveName: "", requestBrowserProfileImportOffer: { _ in false })
+        defer { controller.closeDashboard() }
+        controller.show(url: server.url(), auth: auth)
+        try await self.waitForDashboard(controller, path: "/")
+        controller.webView(controller.webView, didFail: nil, withError: URLError(.networkConnectionLost))
+        try await DashboardTestWait.state("failure page") {
+            !controller.webView.isLoading && controller.webView.url?.absoluteString == "about:blank"
+        }
+
+        // The restore starts, the failure page's finish arrives late, then the restore is cancelled.
+        controller.show(url: server.url(), auth: auth)
+        try #require(controller.webView.isLoading)
+        controller.dispatchNativeCommand(.newSession)
+        controller.webView(controller.webView, didFinish: nil)
+        controller.webView.stopLoading()
+        try await DashboardTestWait.state("restore cancellation") { !controller.webView.isLoading }
+        controller.webView(
+            controller.webView, didFailProvisionalNavigation: nil, withError: URLError(.cancelled))
+        #expect(controller._testPendingNativeCommands == [.newSession])
+        #expect(!controller.canDeliverNativeCommands)
+        controller.show(url: server.url(), auth: auth)
+        #expect(controller.webView.isLoading)
+    }
+
     @Test(arguments: ["new-session", "window-close", "manager-close"])
     func `pending notification click cannot supersede newer window intent`(_ action: String) async throws {
         let gate = DashboardWindowOwnershipPresentationGate(released: true)
