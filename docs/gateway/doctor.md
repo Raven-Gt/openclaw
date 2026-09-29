@@ -382,18 +382,18 @@ That stages grounded durable candidates into the short-term dreaming store while
     On the machine hosting Chrome, run `openclaw browser extension status --json`
     to inspect registration explicitly; this may request browser-profile access.
     If an upgrade leaves stale native-host targets, run
-    `openclaw browser extension install --no-store` to repair through the explicit
-    installer without requesting Store installation. The installer refuses to
+    `openclaw browser extension install` to repair through the explicit
+    installer. The installer refuses to
     overwrite a foreign same-name manifest or launcher. Status distinguishes a
     requested installation, Chrome approval, and native-host registration health;
     it does not prove a live relay connection.
 
-    For initial setup, run `openclaw browser extension install`. On macOS, this
-    also requests the official Store installation in Google Chrome; reopen Chrome
-    and approve or enable OpenClaw when prompted. Other browsers and platforms
-    need a manual Store install. The unpacked stable path remains a development
-    fallback with `openclaw browser extension install --no-store`. Explicit cookie
-    import still requires its separate consent.
+    For initial setup, run `openclaw browser extension install`, then add the
+    official Chrome Web Store extension. The installer pre-registers the native
+    host for both the Store extension and approved development copies; it does
+    not install the Store extension itself. The unpacked stable path remains a
+    development fallback. Explicit cookie import still requires its separate
+    consent.
 
     Doctor also audits the host-local Chrome MCP path when you use `defaultProfile: "user"` or a configured `existing-session` profile:
 
