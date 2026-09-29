@@ -11,8 +11,6 @@ import type { AgentRouteBinding } from "../../config/types.agents.js";
 import { shouldResumeParentSubagent } from "../../gateway/session-subagent-resume.js";
 import { resolveGatewaySessionStoreTargetWithStore } from "../../gateway/session-utils-store-lookup.js";
 import { formatErrorMessage } from "../../infra/errors.js";
-import { withSystemEventOwner } from "../../infra/system-event-ownership.js";
-import { enqueueSystemEventEntry } from "../../infra/system-events.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
   logSessionOwnershipLookupFailure,
@@ -53,6 +51,7 @@ import {
 import { ToolInputError } from "../tool-input-error.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readNonNegativeIntegerParam, readToolStringParam } from "./common.js";
+import { wrapGatewayPersonalToolExecution } from "./gateway-caller-context.js";
 import { callAgentToolGatewayRequest } from "./in-process-gateway.js";
 import { runWithScopedSessionAccess } from "./scoped-session-access.js";
 import {
@@ -82,6 +81,7 @@ import {
   createConfiguredAgentMainSession,
   isConfiguredAgentMainSessionKey,
   resolveConfiguredAgentMainSessionKey,
+  notifySessionsSendSession,
   trySessionsSendActiveRunDelivery,
 } from "./sessions-send-tool.delivery.js";
 import { SessionsSendToolSchema, SessionsSendOutputSchema } from "./sessions-send-tool.schema.js";
@@ -113,9 +113,9 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
     parameters: opts?.workerPlacement ? PlacedSessionsSendSchema : SessionsSendToolSchema,
     outputSchema: SessionsSendOutputSchema,
     prepareArguments: normalizeSessionsSendArguments,
-    execute: async (_toolCallId, args) => {
-      const promptedAt = Date.now();
+    execute: wrapGatewayPersonalToolExecution(async (_toolCallId, args) => {
       const params = normalizeSessionsSendArguments(args);
+      const promptedAt = Date.now();
       const gatewayCall = opts?.callGateway ?? callAgentToolGatewayRequest;
       const message = readToolStringParam(params, "message", { required: true, trim: false });
       if (!message.trim()) {
@@ -669,27 +669,14 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
             ...(requesterIsSubagent ? { sourceRole: "subagent" as const } : {}),
           };
           if (mode === "notify") {
-            const event = enqueueSystemEventEntry(
-              annotateInterSessionPromptText(message, inputProvenance),
-              withSystemEventOwner(
-                { sessionKey: resolvedKey, contextKey: `session-notify:${idempotencyKey}` },
-                targetAgentId,
-              ),
-            );
-            if (!event?.id) {
-              return jsonResult({
-                runId,
-                status: "error",
-                sessionKey: displayKey,
-                error: "Notification was not queued.",
-              });
-            }
-            return jsonResult({
-              status: "queued",
-              sessionKey: displayKey,
-              notificationId: event.id,
-              durability: "process",
-              runStarted: false,
+            return await notifySessionsSendSession({
+              message,
+              inputProvenance,
+              sessionKey: resolvedKey,
+              targetAgentId,
+              idempotencyKey,
+              runId,
+              displayKey,
             });
           }
           const sendParams = {
@@ -935,7 +922,7 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
           return jsonResult({ runId, sessionKey: displayKey, ...response, ...watchField });
         },
       });
-    },
+    }),
   };
 }
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

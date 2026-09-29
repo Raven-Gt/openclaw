@@ -1,16 +1,22 @@
-/** Executes new turns and active-run steering for sessions_send. */
+/** Delivers notifications, new turns, and active-run steering for sessions_send. */
 import crypto from "node:crypto";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { runWithInProcessGatewaySessionMutation } from "../../gateway/server-plugin-in-process-dispatch.js";
 import type { GatewaySessionStoreTarget } from "../../gateway/session-utils-store.types.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { withSystemEventOwner } from "../../infra/system-event-ownership.js";
+import { enqueueSystemEventEntry } from "../../infra/system-events.js";
 import { stringifyRouteThreadId } from "../../plugin-sdk/channel-route.js";
 import {
   buildAgentMainSessionKey,
   isUnscopedSessionKeySentinel,
   normalizeAgentId,
 } from "../../routing/session-key.js";
-import type { InputProvenance } from "../../sessions/input-provenance.js";
+import {
+  annotateInterSessionPromptText,
+  type InputProvenance,
+} from "../../sessions/input-provenance.js";
 import { isCronRunSessionKey, parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import {
   buildRunUserTurnIdempotencyKey,
@@ -27,12 +33,65 @@ import {
   queueGuardedEmbeddedAgentMessageWithOutcomeAsync,
 } from "../embedded-agent-runner/runs.js";
 import { jsonResult } from "./common.js";
-import { captureGatewayToolCallerAssertion } from "./gateway-caller-context.js";
+import {
+  captureGatewayToolCallerAssertion,
+  resolveGatewayToolOperatorSelection,
+} from "./gateway-caller-context.js";
 import {
   callInProcessGatewayToolWithCreation,
   hasInProcessGatewayToolContext,
   type AgentToolGatewayRequestCaller,
 } from "./in-process-gateway.js";
+import { queueSessionsSendSteeringWithCustody } from "./sessions-send-tool.steering.js";
+
+export async function notifySessionsSendSession(params: {
+  message: string;
+  inputProvenance: InputProvenance;
+  sessionKey: string;
+  targetAgentId: string;
+  idempotencyKey: string;
+  runId: string;
+  displayKey: string;
+}): Promise<ReturnType<typeof jsonResult>> {
+  const selection = resolveGatewayToolOperatorSelection();
+  const enqueue = () => {
+    selection.assertCurrent();
+    return enqueueSystemEventEntry(
+      annotateInterSessionPromptText(params.message, params.inputProvenance),
+      withSystemEventOwner(
+        {
+          sessionKey: params.sessionKey,
+          contextKey: `session-notify:${params.idempotencyKey}`,
+        },
+        params.targetAgentId,
+      ),
+    );
+  };
+  const event = selection.operatorAuthority
+    ? await runWithInProcessGatewaySessionMutation(
+        { sessionKey: params.sessionKey, agentId: params.targetAgentId },
+        (assertCurrent) => {
+          assertCurrent();
+          return enqueue();
+        },
+      )
+    : enqueue();
+  if (!event?.id) {
+    return jsonResult({
+      runId: params.runId,
+      status: "error",
+      sessionKey: params.displayKey,
+      error: "Notification was not queued.",
+    });
+  }
+  return jsonResult({
+    status: "queued",
+    sessionKey: params.displayKey,
+    notificationId: event.id,
+    durability: "process",
+    runStarted: false,
+  });
+}
 
 function isRunScopedAgentSessionKey(sessionKey: string): boolean {
   const parsed = parseAgentSessionKey(normalizeOptionalString(sessionKey));
@@ -95,6 +154,8 @@ export async function trySessionsSendActiveRunDelivery(
 ): Promise<SessionsSendStart | { fallbackSessionKey?: string }> {
   const assertCaller = captureGatewayToolCallerAssertion();
   try {
+    const selection = resolveGatewayToolOperatorSelection();
+    selection.assertCurrent();
     let fallbackSessionKey: string | undefined;
     const activeRunSessionId =
       params.mode === "steer" ||
@@ -117,52 +178,73 @@ export async function trySessionsSendActiveRunDelivery(
     }
     const { inputProvenance, message: messageText, sourceReplyDeliveryMode } = params.sendParams;
     if (activeRunSessionId && messageText) {
-      const queueOptions: EmbeddedAgentQueueMessageOptions = {
-        steeringMode: "all",
-        debounceMs: 0,
-        deliveryTimeoutMs: params.deliveryTimeoutMs,
-        // Waiting for a busy run's transcript would withdraw accepted guidance at the deadline.
-        ...(params.mode === "steer" || ownChild
-          ? { waitForTranscriptCommit: false }
-          : { waitForTranscriptCommit: true, sourceReplyDeliveryMode }),
-        // The receiving runtime owns transcript writes to this exact incarnation.
-        userTurnTranscriptRecorder: createUserTurnTranscriptRecorder({
-          input: {
-            text: messageText,
-            provenance: inputProvenance,
-            ...(inputProvenance.sourceRole === "subagent" ? { display: false as const } : {}),
-            idempotencyKey: buildRunUserTurnIdempotencyKey(params.runId),
-          },
-          target: {
-            sessionId: activeRunSessionId,
-            expectedSessionId: activeRunSessionId,
-            sessionKey: params.sessionStoreTarget.canonicalKey,
-            sessionEntry: undefined,
-            agentId: params.sessionStoreTarget.agentId,
-            storePath: params.sessionStoreTarget.storePath,
-            config: params.cfg,
-          },
-        }),
+      const queue = async (
+        assertCurrent: () => void,
+        lifecycle: Pick<
+          EmbeddedAgentQueueMessageOptions,
+          "onQueueAccepted" | "onQueueSettled"
+        > = {},
+      ) => {
+        const queueOptions: EmbeddedAgentQueueMessageOptions = {
+          steeringMode: "all",
+          debounceMs: 0,
+          deliveryTimeoutMs: params.deliveryTimeoutMs,
+          ...lifecycle,
+          // Waiting for a busy run's transcript would withdraw accepted guidance at the deadline.
+          ...(params.mode === "steer" || ownChild
+            ? { waitForTranscriptCommit: false }
+            : { waitForTranscriptCommit: true, sourceReplyDeliveryMode }),
+          // The receiving runtime owns transcript writes to this exact incarnation.
+          userTurnTranscriptRecorder: createUserTurnTranscriptRecorder({
+            assertOriginalInputCommit: assertCurrent,
+            input: {
+              text: messageText,
+              provenance: inputProvenance,
+              ...(inputProvenance.sourceRole === "subagent" ? { display: false as const } : {}),
+              idempotencyKey: buildRunUserTurnIdempotencyKey(params.runId),
+            },
+            target: {
+              sessionId: activeRunSessionId,
+              expectedSessionId: activeRunSessionId,
+              sessionKey: params.sessionStoreTarget.canonicalKey,
+              sessionEntry: undefined,
+              agentId: params.sessionStoreTarget.agentId,
+              storePath: params.sessionStoreTarget.storePath,
+              config: params.cfg,
+            },
+          }),
+        };
+        const dispatchQueue = (options: EmbeddedAgentQueueMessageOptions) =>
+          selection.operatorAuthority || assertCaller
+            ? queueGuardedEmbeddedAgentMessageWithOutcomeAsync(
+                activeRunSessionId,
+                messageText,
+                options,
+                () => {
+                  assertCurrent();
+                  if (!selection.operatorAuthority) {
+                    assertCaller?.("agent");
+                  }
+                  return true;
+                },
+              )
+            : queueEmbeddedAgentMessageWithOutcomeAsync(activeRunSessionId, messageText, options);
+        assertCurrent();
+        let outcome = await dispatchQueue(queueOptions);
+        if (!outcome.queued && outcome.reason === "transcript_commit_wait_unsupported") {
+          const bestEffortQueueOptions = { ...queueOptions };
+          delete bestEffortQueueOptions.waitForTranscriptCommit;
+          outcome = await dispatchQueue(bestEffortQueueOptions);
+        }
+        return outcome;
       };
-      // Direct steering bypasses Gateway RPC, so carry its source owner to the final enqueue.
-      const queue = (options: EmbeddedAgentQueueMessageOptions) =>
-        assertCaller
-          ? queueGuardedEmbeddedAgentMessageWithOutcomeAsync(
-              activeRunSessionId,
-              messageText,
-              options,
-              () => {
-                assertCaller();
-                return true;
-              },
-            )
-          : queueEmbeddedAgentMessageWithOutcomeAsync(activeRunSessionId, messageText, options);
-      let queueOutcome = await queue(queueOptions);
-      if (!queueOutcome.queued && queueOutcome.reason === "transcript_commit_wait_unsupported") {
-        const bestEffortQueueOptions = { ...queueOptions };
-        delete bestEffortQueueOptions.waitForTranscriptCommit;
-        queueOutcome = await queue(bestEffortQueueOptions);
-      }
+      const queueOutcome = selection.operatorAuthority
+        ? await queueSessionsSendSteeringWithCustody(
+            { sessionKey: params.sessionKey, agentId: params.sendParams.agentId },
+            selection.assertCurrent,
+            queue,
+          )
+        : await queue(selection.assertCurrent);
       if (queueOutcome.queued) {
         return { ok: true, runId: params.runId, targetDisposition: "steered" };
       }
