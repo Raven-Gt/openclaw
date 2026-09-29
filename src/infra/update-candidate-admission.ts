@@ -184,11 +184,16 @@ export async function runUpdateCandidateAdmission(params: {
           owner: "candidate",
           verdict: {
             ...verdict,
-            reasons: verdict.reasons.map((reason) => ({
-              code: reason.code,
-              message: safe(reason.message),
-              ...(reason.nextAction ? { nextAction: safe(reason.nextAction) } : {}),
-            })),
+            reasons: verdict.reasons.map((reason) => {
+              const redacted: UpdateAdmissionVerdict["reasons"][number] = {
+                code: reason.code,
+                message: safe(reason.message),
+              };
+              if (reason.nextAction) {
+                redacted.nextAction = safe(reason.nextAction);
+              }
+              return redacted;
+            }),
             warnings: verdict.warnings.map((warning) => ({
               code: warning.code,
               message: safe(warning.message),
@@ -198,11 +203,16 @@ export async function runUpdateCandidateAdmission(params: {
               ...(verdict.facts.nodeEngines !== undefined
                 ? { nodeEngines: safe(verdict.facts.nodeEngines) }
                 : {}),
-              checks: verdict.facts.checks.map((check) => ({
-                name: check.name,
-                status: check.status,
-                ...(check.detail ? { detail: safe(check.detail) } : {}),
-              })),
+              checks: verdict.facts.checks.map((check) => {
+                const redacted: UpdateAdmissionVerdict["facts"]["checks"][number] = {
+                  name: check.name,
+                  status: check.status,
+                };
+                if (check.detail) {
+                  redacted.detail = safe(check.detail);
+                }
+                return redacted;
+              }),
             },
           },
         };

@@ -87,7 +87,7 @@ export async function archiveWorkspaceSetupSource(
 export function createLegacySourceClaim(
   sourceRoot: Root,
   source: LegacyWorkspaceStateSource,
-): LegacyMigrationSourceClaim<SourceSnapshot> {
+): LegacyMigrationSourceClaim {
   return new LegacyMigrationSourceClaim({
     stateRoot: sourceRoot,
     stateDir: source.rootDir,

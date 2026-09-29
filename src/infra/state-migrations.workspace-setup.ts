@@ -21,7 +21,6 @@ import { pathMayExistSync } from "./path-existence.js";
 import { withLegacyMigrationStateLock } from "./state-migrations.lock.js";
 import {
   type LegacyMigrationSourceClaim,
-  type LegacyMigrationSourceSnapshot as SourceSnapshot,
   legacyMigrationSourceOrClaimMayExist as sourceOrClaimMayExist,
   legacyMigrationSourceSnapshotsMatch as snapshotsMatch,
 } from "./state-migrations.source-snapshot.js";
@@ -285,7 +284,7 @@ function assertConfiguredWorkspaceIdentity(source: LegacyWorkspaceStateSource): 
 
 async function cleanupReceiptSource(params: {
   sourceRoot: Root;
-  sourceClaim: LegacyMigrationSourceClaim<SourceSnapshot>;
+  sourceClaim: LegacyMigrationSourceClaim;
   source: LegacyWorkspaceStateSource;
   receipt: MigrationReceipt;
   env: NodeJS.ProcessEnv;
@@ -395,7 +394,7 @@ async function migrateOneSource(params: {
   beforeClaim?: (source: LegacyWorkspaceStateSource) => void;
   removeSource?: (sourcePath: string) => Promise<void> | void;
 }): Promise<MigrationMessages> {
-  let sourceClaim: LegacyMigrationSourceClaim<SourceSnapshot>;
+  let sourceClaim: LegacyMigrationSourceClaim;
   let sourceRoot: Root;
   const unreadable = (error: unknown): MigrationMessages => ({
     changes: [],

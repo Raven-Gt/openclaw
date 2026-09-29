@@ -146,14 +146,13 @@ function buildApprovalViewBase<TPhase extends ApprovalPhase>(
 ): (ExecApprovalViewBase | PluginApprovalViewBase | SystemAgentApprovalViewBase) & {
   phase: TPhase;
 } {
-  switch (request.approvalKind) {
-    case "system-agent":
-      return buildSystemAgentViewBase(request, phase);
-    case "plugin":
-      return buildPluginViewBase(request, phase);
-    case "exec":
-      return buildExecViewBase(request, phase);
+  if (request.approvalKind === "system-agent") {
+    return buildSystemAgentViewBase(request, phase);
   }
+  if (request.approvalKind === "plugin") {
+    return buildPluginViewBase(request, phase);
+  }
+  return buildExecViewBase(request, phase);
 }
 
 /** Builds the presentation model for an unresolved approval. */
