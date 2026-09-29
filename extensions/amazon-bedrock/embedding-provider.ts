@@ -311,9 +311,21 @@ export async function createBedrockEmbeddingProvider(
     family,
   });
 
+  const credentialProvider = bedrockCredentialDefaultProvider({});
+  let refreshStaticCredentials = false;
+  const credentials = async () => {
+    const resolved = await credentialProvider(
+      refreshStaticCredentials ? { forceRefresh: true } : undefined,
+    );
+    // Role credentials use SDK expiry handling; profile files without expiry
+    // must still be reread after external rotation, as with per-request clients.
+    refreshStaticCredentials = resolved.expiration === undefined;
+    return resolved;
+  };
+
   const invoke = async (body: string, signal?: AbortSignal): Promise<Uint8Array | undefined> => {
     const sdk = new BedrockRuntimeClient({
-      credentialDefaultProvider: bedrockCredentialDefaultProvider,
+      credentials,
       region: client.region,
       endpoint: client.endpoint,
       useFipsEndpoint: client.useFipsEndpoint,

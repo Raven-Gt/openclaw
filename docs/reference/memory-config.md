@@ -289,6 +289,8 @@ Use `provider: "openai-compatible"` for a generic OpenAI-compatible
     }
     ```
 
+    Embedding requests share the AWS credential chain so a batch does not resolve instance-role credentials separately for every chunk. The SDK refreshes expiring role credentials; rotated profile files are still picked up without restarting the Gateway.
+
     | Key                    | Type     | Default                        | Description                     |
     | ---------------------- | -------- | ------------------------------- | -------------------------------- |
     | `model`                | `string` | `amazon.titan-embed-text-v2:0` | Any Bedrock embedding model ID  |

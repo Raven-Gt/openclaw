@@ -1,4 +1,5 @@
 import { writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import path from "node:path";
 import { BedrockClient } from "@aws-sdk/client-bedrock";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
@@ -10,6 +11,72 @@ import { createBedrockEmbeddingProvider } from "./embedding-provider.js";
 import { streamSimpleBedrock } from "./stream.runtime.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+
+it("shares role credentials across embedding batches and refreshes after expiry", async () => {
+  const dir = tempDirs.make("bedrock-embedding-role-");
+  const credentialsFile = path.join(dir, "credentials");
+  const configFile = path.join(dir, "config");
+  await writeFile(credentialsFile, "");
+  await writeFile(configFile, "");
+  for (const name of Object.keys(process.env).filter((name) => name.startsWith("AWS_"))) {
+    vi.stubEnv(name, undefined);
+  }
+  vi.stubEnv("AWS_CONFIG_FILE", configFile);
+  vi.stubEnv("AWS_SHARED_CREDENTIALS_FILE", credentialsFile);
+  vi.stubEnv("AWS_REGION", "us-east-1");
+  const now = Date.now();
+  let generation = "A";
+  let credentialRequests = 0;
+  const server = createServer((req, res) => {
+    if (req.url === "/latest/api/token") {
+      res.end("synthetic-token");
+    } else if (req.url === "/latest/meta-data/iam/security-credentials/") {
+      res.end("synthetic-role");
+    } else {
+      credentialRequests++;
+      res.end(
+        JSON.stringify({
+          Code: "Success",
+          AccessKeyId: `TEST_${generation}`,
+          SecretAccessKey: "synthetic-secret",
+          Token: "synthetic-session",
+          Expiration: new Date(now + (generation === "A" ? 3600000 : 14400000)).toISOString(),
+        }),
+      );
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected loopback listener");
+    }
+    vi.stubEnv("AWS_EC2_METADATA_SERVICE_ENDPOINT", `http://127.0.0.1:${address.port}`);
+    const resolved: string[] = [];
+    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockImplementation(async function (
+      this: BedrockRuntimeClient,
+    ) {
+      resolved.push((await this.config.credentials()).accessKeyId);
+      return { $metadata: {}, body: new TextEncoder().encode('{"embedding":[1,0]}') };
+    });
+    const { provider } = await createBedrockEmbeddingProvider({ config: {}, model: "" });
+    const inputs = Array.from({ length: 20 }, (_, i) => `memory ${i}`);
+    expect(await provider.embedBatch(inputs)).toEqual(inputs.map(() => [1, 0]));
+    expect(credentialRequests).toBe(1);
+    expect(resolved).toEqual(inputs.map(() => "TEST_A"));
+    generation = "B";
+    vi.spyOn(Date, "now").mockReturnValue(now + 7200000);
+    resolved.length = 0;
+    expect(await provider.embedBatch(inputs)).toEqual(inputs.map(() => [1, 0]));
+    expect(resolved).toEqual(inputs.map(() => "TEST_B"));
+    expect(credentialRequests).toBe(2);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -81,15 +148,18 @@ describe("Bedrock shared credential rotation", () => {
         pendingCredentials.push(capture(this));
         return { $metadata: {}, modelSummaries: [] };
       });
+      const embedding =
+        route === "embeddings"
+          ? await createBedrockEmbeddingProvider({ config: {}, model: "" })
+          : undefined;
       const invoke = async () => {
         if (route === "stream") {
           const result = await streamSimpleBedrock(model, {
             messages: [{ role: "user", content: "Hello", timestamp: 0 }],
           }).result();
           expect(result.stopReason).toBe("stop");
-        } else if (route === "embeddings") {
-          const { provider } = await createBedrockEmbeddingProvider({ config: {}, model: "" });
-          await provider.embed("Hello");
+        } else if (embedding) {
+          await embedding.provider.embed("Hello");
         } else {
           const sdk = await loadBedrockControlPlaneSdk();
           const client = sdk.createClient("us-east-1");
