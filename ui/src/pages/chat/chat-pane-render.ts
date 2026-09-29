@@ -557,9 +557,7 @@ export class ChatPane extends ChatPaneLayoutRender {
       },
       composerControls: composerControls?.composerControls ?? nothing,
       permissionPicker: composerControls?.permissionPicker,
-      ...this.suggestionChatProps(state.connected, selectedSessionArchived, multiIdentity),
-      messageReactions: this.messageReactions,
-      onReact: this.canReactToCurrentSession() ? this.handleMessageReaction : undefined,
+      ...this.collaborationChatProps(state.connected, selectedSessionArchived, multiIdentity),
       pullRequests: this.visibleSessionPullRequests,
       // Until catalog success, a lowercase name may be a hidden/ambiguous alias.
       // Do not mint a checkout link that can prefetch the wrong repository.

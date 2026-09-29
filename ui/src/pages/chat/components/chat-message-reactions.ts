@@ -78,10 +78,20 @@ export function messageReactionOptions(
   };
 }
 
-export function renderMessageReactions(
-  messageId: string | undefined,
-  options: MessageReactionOptions,
+/** The reaction row under one message of a group: persisted messages only, never while streaming. */
+export function renderGroupMessageReactions(
+  group: Parameters<typeof messageReactionOptions>[0],
+  actionDetails: { reactionMessageId?: string } | null | undefined,
+  isStreaming: boolean,
+  opts: MessageReactionOptions,
 ) {
+  return renderMessageReactions(
+    isStreaming ? undefined : actionDetails?.reactionMessageId,
+    messageReactionOptions(group, opts),
+  );
+}
+
+function renderMessageReactions(messageId: string | undefined, options: MessageReactionOptions) {
   const reactions = messageId ? options.messageReactions?.get(messageId) : undefined;
   if (!messageId || !reactions?.length) {
     return nothing;

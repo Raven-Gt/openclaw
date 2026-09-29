@@ -134,6 +134,19 @@ export function resolveMessageActionDetails(
   };
 }
 
+/** Whether `renderMessageActionButtons` renders at least one control for these options. */
+export function hasMessageActionButtons(
+  details: MessageActionDetails | null | undefined,
+  opts: { onReply?: (target: MessageReplyTarget) => void; onReact?: MessageReactionAction },
+): details is MessageActionDetails {
+  return Boolean(
+    details &&
+    (details.markdown ||
+      (details.replyTarget && opts.onReply) ||
+      (details.reactionMessageId && opts.onReact)),
+  );
+}
+
 export function renderMessageActionButtons(
   details: MessageActionDetails,
   opts: {

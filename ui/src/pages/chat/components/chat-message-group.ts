@@ -1,7 +1,6 @@
 import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { html, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
-import type { MessageReactionSummary } from "../../../../../packages/gateway-protocol/src/index.js";
 import { groupToolCalls, type ToolCallGroup } from "../../../../../src/chat/tool-call-grouping.js";
 import { resolveLocalUserName } from "../../../app/user-identity.ts";
 import type { BrowserTabSelection } from "../../../components/browser/browser-target.ts";
@@ -44,6 +43,7 @@ import { renderGroupedMessage } from "./chat-message-bubble.ts";
 import { renderRewindButton } from "./chat-message-confirmation.ts";
 import {
   FULL_MESSAGE_RETRY_REVISION_LIMIT,
+  hasMessageActionButtons,
   renderMessageActionButtons,
   renderReplyButton,
   prepareChatMessageRender,
@@ -52,8 +52,8 @@ import {
 } from "./chat-message-markdown.ts";
 import {
   messageReactionOptions,
-  renderMessageReactions,
-  type MessageReactionAction,
+  renderGroupMessageReactions,
+  type MessageReactionOptions,
 } from "./chat-message-reactions.ts";
 import { renderChatSendStatus, type ChatSendStatusActions } from "./chat-message-send-status.ts";
 import {
@@ -115,8 +115,6 @@ type RenderMessageGroupOptions = Omit<
     showAssistantAvatar?: boolean;
     contextWindow?: number | null;
     onReply?: (target: MessageReplyTarget) => void;
-    onReact?: MessageReactionAction;
-    messageReactions?: ReadonlyMap<string, MessageReactionSummary[]>;
     resolveReplyPreview?: (replyToId: string) => ReplyPreview | undefined;
     onRewind?: () => void;
     rewindDisabled?: boolean;
@@ -131,7 +129,7 @@ type RenderMessageGroupOptions = Omit<
     latestAssistant?: boolean;
     /** Rendered as a transcript search result, outside its turn. */
     searchResult?: boolean;
-  };
+  } & MessageReactionOptions;
 
 function prepareGroupMessage(
   group: MessageGroup,
@@ -184,7 +182,6 @@ function renderPreparedGroupMessage(
     };
   }
   const isStreaming = group.isStreaming && index === group.messages.length - 1;
-  const reactionMessageId = !isStreaming ? actionDetails?.reactionMessageId : undefined;
   return html`${renderGroupedMessage(
     source,
     item.key,
@@ -200,7 +197,7 @@ function renderPreparedGroupMessage(
       messageActions: actionDetails,
     },
     opts.onOpenSidebar,
-  )}${renderMessageReactions(reactionMessageId, messageReactionOptions(group, opts))}`;
+  )}${renderGroupMessageReactions(group, actionDetails, isStreaming, opts)}`;
 }
 
 function isOwnSenderGroup(
@@ -547,12 +544,7 @@ export function renderMessageGroup(group: MessageGroup, opts: RenderMessageGroup
     : group.messages[lastMessageIndex]?.key;
   const hasUserFooterActions =
     normalizedRole === "user" &&
-    Boolean(
-      (footerActionDetails?.replyTarget && opts.onReply) ||
-      (opts.onRewind && !opts.rewindDisabled) ||
-      footerActionDetails?.markdown ||
-      (footerActionDetails?.reactionMessageId && opts.onReact),
-    );
+    ((opts.onRewind && !opts.rewindDisabled) || hasMessageActionButtons(footerActionDetails, opts));
   const userFooterActions = hasUserFooterActions
     ? html`
         <div
@@ -646,10 +638,7 @@ export function renderMessageGroup(group: MessageGroup, opts: RenderMessageGroup
                   prepared,
                 )}
                 ${
-                  actionDetails &&
-                  (actionDetails.markdown ||
-                    (actionDetails.replyTarget && opts.onReply) ||
-                    (actionDetails.reactionMessageId && opts.onReact)) &&
+                  hasMessageActionButtons(actionDetails, opts) &&
                   index < lastMessageIndex &&
                   !isTurnBlock
                     ? html`
