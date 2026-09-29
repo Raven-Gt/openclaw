@@ -3151,7 +3151,7 @@ ui/src/lib/chat/outbox-store-codec.ts	1
 ui/src/lib/chat/outbox-store.ts	1
 ui/src/lib/chat/tool-call-patch.ts	1
 ui/src/lib/chat/tool-cards.ts	2
-ui/src/lib/config-form-utils.ts	7
+ui/src/lib/config-form-utils.ts	3
 ui/src/lib/config/config-draft-model.ts	3
 ui/src/lib/cron/index.ts	2
 ui/src/lib/gateway-errors.ts	1

@@ -278,7 +278,7 @@ class SidebarAttention extends OpenClawLightDomElement {
     if (!this.context) {
       return nothing;
     }
-    const entries = [...(this.context.sidebarAttention.entries ?? [])];
+    const entries = this.context.sidebarAttention.entries;
     if (this.context.gateway.snapshot.phase !== "connected" && entries.length === 0) {
       return nothing;
     }
