@@ -596,6 +596,10 @@ export function scanSource(source: string, filePath: string): SkillScanFinding[]
           }
         }
 
+        if (rule.ruleId === "dangerous-exec") {
+          literalDangerousExecIndexes.add(match.index ?? -1);
+        }
+
         if (acceptedMatches >= MAX_LINE_RULE_FINDINGS_PER_RULE) {
           omittedMatches += 1;
           lastOmittedLine = i + 1;
@@ -613,9 +617,6 @@ export function scanSource(source: string, filePath: string): SkillScanFinding[]
           evidence: formatScanEvidence(line),
         });
         acceptedMatches += 1;
-        if (rule.ruleId === "dangerous-exec") {
-          literalDangerousExecIndexes.add(match.index ?? -1);
-        }
       }
 
       // Attribute aliased child_process calls (`launch(...)`, `run(...)`) that
