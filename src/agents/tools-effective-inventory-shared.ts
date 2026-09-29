@@ -74,10 +74,11 @@ export function buildEffectiveToolInventory(
   const compatible = filterRuntimeCompatibleTools(normalizedTools);
   diagnostics.push(...compatible.diagnostics);
   const projectTool = projection.createToolProjection();
-  const entries: EffectiveToolInventoryEntry[] = compatible.tools.map((tool) => {
+  const entries: EffectiveToolInventoryEntry[] = [];
+  for (const tool of compatible.tools) {
     const projected = projectTool(tool);
     const description = projected.description ?? summarizeEffectiveToolDescription(tool);
-    return {
+    entries.push({
       id: tool.name,
       ...projected,
       label: projected.label ?? resolveEffectiveToolLabel(tool),
@@ -86,8 +87,8 @@ export function buildEffectiveToolInventory(
         projected.rawDescription ??
         (normalizeOptionalString(tool.description) ||
           (projection.rawDescriptionFallback === "summary" ? description : "")),
-    };
-  });
+    });
+  }
   entries.sort((a, b) => a.label.localeCompare(b.label));
   const counts = new Map<string, number>();
   for (const entry of entries) {
