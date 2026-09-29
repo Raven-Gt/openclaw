@@ -377,19 +377,14 @@ function resumeFinalizedSubagentRun(
   }
 
   if (typeof entry.execution.endedAt === "number" && entry.execution.endedAt > 0) {
-    if (entry.killReconciliation) {
-      // Without a pending requester wake, the sweeper owns provisional cancellation cleanup.
+    // Without a pending requester wake, the sweeper owns provisional cancellation cleanup.
+    if (
+      entry.killReconciliation ||
+      contextCleanup.suppressAnnounceForSteerRestart(entry) ||
+      startSubagentAnnounceCleanupFlow(runId, entry)
+    ) {
       resumedRuns.add(runId);
-      return;
     }
-    if (contextCleanup.suppressAnnounceForSteerRestart(entry)) {
-      resumedRuns.add(runId);
-      return;
-    }
-    if (!startSubagentAnnounceCleanupFlow(runId, entry)) {
-      return;
-    }
-    resumedRuns.add(runId);
     return;
   }
 

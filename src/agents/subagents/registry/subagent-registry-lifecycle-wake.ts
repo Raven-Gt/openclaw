@@ -674,16 +674,13 @@ export function completeCleanupBookkeeping(
     return;
   }
   const isDeleteCleanup = cleanupParams.cleanup === "delete";
-  if (isDeleteCleanup) {
-    params.clearPendingLifecycleError(cleanupParams.runId);
-  }
   const retireAfterSettle =
     !cleanupParams.entry.collect &&
     (isDeleteCleanup ||
       (cleanupParams.entry.endedReason === SUBAGENT_ENDED_REASON_KILLED &&
         cleanupParams.entry.suppressAnnounceReason !== "killed"));
   // Reconciled keep-mode kills retire the registry row, not the child session.
-  if (retireAfterSettle && !isDeleteCleanup) {
+  if (isDeleteCleanup || retireAfterSettle) {
     params.clearPendingLifecycleError(cleanupParams.runId);
   }
   if (retireAfterSettle && cleanupParams.skipRequesterSettleWake) {

@@ -307,7 +307,8 @@ the child run instead of completing it. For a child with announced completion,
 `waitFor: "message"` wakes its requester once per pause with a continuation-needed
 notice containing the child's session key, run ID, label, and trimmed
 `acknowledgment` text (up to 12,000 UTF-16 code units, the announce text limit),
-or a default "Paused awaiting continuation." line. The
+or a default "Paused awaiting continuation." line. The acknowledgment is
+presented as child-provided data using the same escaping as completion results. The
 notice is distinct from a completion and uses the requester's existing message
 queue policy if it is already running. It does not resume the child: send the
 continuation with `sessions_send` to the named child session. Yielding again in

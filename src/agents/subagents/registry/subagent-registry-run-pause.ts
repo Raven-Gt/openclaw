@@ -2,7 +2,21 @@ import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { clearDeliveryState, ensureCompletionState } from "./subagent-delivery-state.js";
 import { SUBAGENT_ENDED_REASON_KILLED } from "./subagent-lifecycle-events.js";
 import { shouldSuppressSubagentRecoverySessionEffects } from "./subagent-recovery-state.js";
-import type { SubagentRunRecord } from "./subagent-registry.types.js";
+import type { RequesterSettleWakeState, SubagentRunRecord } from "./subagent-registry.types.js";
+
+export function resetRequesterSettleWakeRetry(
+  wake?: RequesterSettleWakeState,
+): RequesterSettleWakeState {
+  return {
+    ...wake,
+    status: "pending",
+    attemptCount: 0,
+    replayCount: undefined,
+    nextAttemptAt: undefined,
+    deferralCount: undefined,
+    lastError: undefined,
+  };
+}
 
 /** Capture the accepted tool intent before the runtime publishes its yielded terminal. */
 export function markSubagentMessageWaitInRuns(params: {
@@ -28,14 +42,8 @@ export function markSubagentMessageWaitInRuns(params: {
   }
   const previous = entry.requesterSettleWake;
   entry.requesterSettleWake = {
-    ...previous,
+    ...resetRequesterSettleWakeRetry(previous),
     batchRunIds: previous?.batchRunIds ?? [entry.runId],
-    status: "pending",
-    attemptCount: 0,
-    replayCount: undefined,
-    nextAttemptAt: undefined,
-    deferralCount: undefined,
-    lastError: undefined,
     pauseNotice: {
       // Match the announce completion delivery's retained-text bound.
       acknowledgment: truncateUtf16Safe(
@@ -59,15 +67,7 @@ export function consumeSubagentPauseNotice(entry: SubagentRunRecord): boolean {
     return false;
   }
   const { pauseNotice: _notice, ...completionWake } = wake;
-  entry.requesterSettleWake = {
-    ...completionWake,
-    status: "pending",
-    attemptCount: 0,
-    replayCount: undefined,
-    nextAttemptAt: undefined,
-    deferralCount: undefined,
-    lastError: undefined,
-  };
+  entry.requesterSettleWake = resetRequesterSettleWakeRetry(completionWake);
   return true;
 }
 

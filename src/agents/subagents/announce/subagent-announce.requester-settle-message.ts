@@ -1,5 +1,6 @@
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { SILENT_REPLY_TOKEN } from "../../../auto-reply/tokens.js";
+import { wrapPromptDataBlock } from "../../sanitize-for-prompt.js";
 import {
   SUBAGENT_COMPLETION_OUTCOME_INSTRUCTION,
   SUBAGENT_PRIVATE_COMPLETION_INSTRUCTION,
@@ -34,8 +35,7 @@ export function buildRequesterSettleWakeMessage(params: {
         label: child.label ?? null,
       }),
       `The child will resume only through sessions_send to ${child.childSessionKey}. Do not wait for its completion without sending the needed continuation.`,
-      "Acknowledgment:",
-      pauseNotice.acknowledgment,
+      wrapPromptDataBlock({ label: "Acknowledgment", text: pauseNotice.acknowledgment }),
     ].join("\n");
   }
   // The scheduling row need not be the rerouted child. Keep every current
