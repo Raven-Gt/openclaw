@@ -27,6 +27,13 @@ function resolveEffectiveToolLabel(tool: AnyAgentTool): string {
   return resolveToolDisplay({ name: tool.name }).title;
 }
 
+function summarizeEffectiveToolDescription(tool: AnyAgentTool): string {
+  return summarizeToolDescriptionText({
+    rawDescription: normalizeOptionalString(tool.description),
+    displaySummary: tool.displaySummary,
+  });
+}
+
 export type RuntimeCompatibleToolInventoryParams = Pick<
   ResolveEffectiveToolInventoryParams,
   "cfg" | "workspaceDir" | "modelProvider" | "modelId" | "modelApi" | "runtimeModel"
@@ -69,12 +76,7 @@ export function buildEffectiveToolInventory(
   const projectTool = projection.createToolProjection();
   const entries: EffectiveToolInventoryEntry[] = compatible.tools.map((tool) => {
     const projected = projectTool(tool);
-    const description =
-      projected.description ??
-      summarizeToolDescriptionText({
-        rawDescription: normalizeOptionalString(tool.description),
-        displaySummary: tool.displaySummary,
-      });
+    const description = projected.description ?? summarizeEffectiveToolDescription(tool);
     return {
       id: tool.name,
       ...projected,
