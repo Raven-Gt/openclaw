@@ -34,7 +34,7 @@ enum DashboardTestWait {
         }
         Issue.record("""
         Still waiting for \(stage): loading=\(webView.isLoading), \
-        url=\(webView.url?.absoluteString ?? "nil"), \
+        url=\(webView.url?.absoluteString ?? "nil"), currentURL=\(controller.currentURL.absoluteString), \
         deliverable=\(controller.canDeliverNativeCommands), failurePage=\(controller.isShowingFailurePage)
         """)
         throw CancellationError()

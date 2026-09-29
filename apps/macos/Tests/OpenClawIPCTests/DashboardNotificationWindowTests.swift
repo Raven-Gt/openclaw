@@ -81,6 +81,30 @@ extension DashboardWindowOwnershipTests {
         }
     }
 
+    @Test func `superseded failure page finish keeps navigation queued for the restoring document`() async throws {
+        let server = try await DashboardHTTPFixture.start()
+        defer { server.stop() }
+        let auth = DashboardWindowAuth(gatewayUrl: nil, token: nil, password: nil)
+        let controller = DashboardWindowController(
+            url: server.url(), auth: auth, websiteDataStore: .nonPersistent(),
+            windowAutosaveName: "", requestBrowserProfileImportOffer: { _ in false })
+        defer { controller.closeDashboard() }
+        controller.show(url: server.url(), auth: auth)
+        try await self.waitForDashboard(controller, path: "/")
+
+        controller.webView(controller.webView, didFail: nil, withError: URLError(.networkConnectionLost))
+        controller.show(url: server.url(), auth: auth)
+        try #require(controller.webView.isLoading)
+        let path = "/chat/main/dashboard/completed"
+        controller.dispatchNativeNavigation(DashboardNativeNavigation(
+            path: path, search: nil, fallbackURL: server.url(path)))
+        try #require(controller._testPendingNativeNavigation != nil)
+        // WebKit can still report the replaced failure page as finished while the restore loads.
+        controller.webView(controller.webView, didFinish: nil)
+        #expect(controller._testPendingNativeNavigation != nil)
+        try await self.waitForDashboard(controller, path: path)
+    }
+
     @Test(arguments: ["new-session", "window-close", "manager-close"])
     func `pending notification click cannot supersede newer window intent`(_ action: String) async throws {
         let gate = DashboardWindowOwnershipPresentationGate(released: true)

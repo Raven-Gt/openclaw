@@ -1408,7 +1408,11 @@ extension DashboardWindowController {
         if self.nativeBrowser.owns(webView) {
             self.nativeBrowser.navigationDidFinish(navigation, for: webView)
         } else if webView === self.webView {
-            guard !self.isShowingFailurePage else { return }
+            // A superseded navigation, such as a failure page replaced by a restore,
+            // can report completion after the newer load starts. Only a finish with
+            // nothing newer loading owns the document; otherwise pending native
+            // actions would flush into it and their fallback would cut the restore short.
+            guard !self.isShowingFailurePage, !webView.isLoading else { return }
             // A finished sign-in document is usable but never receives native
             // commands. Keep pending intent until the verified dashboard returns.
             self.documentHost.hasLiveContent = true
