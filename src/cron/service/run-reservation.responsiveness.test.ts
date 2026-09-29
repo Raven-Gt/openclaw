@@ -62,10 +62,7 @@ it("services gateway events while completed manual finalization waits for a writ
         }
         observed += 1;
         // Acquire only at finalization, after outcome history and caller preflight have finished.
-        const holder = holdStateDatabaseWriteTransaction(
-          params.context.admission.databasePath,
-          300,
-        );
+        const holder = holdStateDatabaseWriteTransaction(params.context.admission.databasePath);
         const posted = createDeferred();
         let pending: Promise<void> | undefined;
         let settled = false;
