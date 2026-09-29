@@ -614,6 +614,7 @@ src/infra/cli-root-options.ts
 src/infra/command-carriers.ts
 src/infra/config-dir.ts
 src/infra/container-env-file.ts
+src/infra/container-environment.ts
 src/infra/crypto-digest.ts
 src/infra/dedupe.ts
 src/infra/deep-merge.ts
@@ -730,6 +731,7 @@ src/infra/node-sqlite.ts
 src/infra/non-fatal-cleanup.ts
 src/infra/npm-registry-spec.ts
 src/infra/openclaw-exec-env.ts
+src/infra/openclaw-process-census.ts
 src/infra/openclaw-root.fs.runtime.ts
 src/infra/openclaw-root.ts
 src/infra/path-case.ts
@@ -1212,6 +1214,7 @@ src/process/spawn-diagnostics.ts
 src/process/spawn-utils.ts
 src/process/supervisor/cancellation-policy.ts
 src/process/supervisor/darwin-process-command.ts
+src/process/supervisor/service-child-group-ownership.ts
 src/process/supervisor/service-child-windows-job-native.ts
 src/process/windows-command.ts
 src/proxy-capture/env.ts
