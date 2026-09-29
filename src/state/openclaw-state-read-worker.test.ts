@@ -508,6 +508,85 @@ it("captures update history filters and charges retained selectors before dispat
   }
 });
 
+it.each(["descendants", "maintenance"] as const)(
+  "captures queued subagent selectors and charges their retained input (%s)",
+  async (kind) => {
+    const { options } = source();
+    const input = {
+      sessionKeys: ["父会话🦞".repeat(256)],
+      liveTopology: [
+        {
+          childSessionKey: "子会话🦞".repeat(256),
+          requesterSessionKey: "请求者🦞".repeat(256),
+        },
+      ],
+    };
+    const command = {
+      type: "subagents.runs" as const,
+      scope: kind === "descendants" ? { kind, ...input } : { kind },
+    };
+    const expected = structuredClone(command);
+    const selectorBytes =
+      kind === "descendants"
+        ? Buffer.byteLength(input.sessionKeys[0]!) +
+          Buffer.byteLength(input.liveTopology[0]!.childSessionKey) +
+          Buffer.byteLength(input.liveTopology[0]!.requesterSessionKey)
+        : 0;
+    const dispatch = createDeferredCore();
+    const baselineTask = queueTask(dispatch.promise);
+    const task = queueTask(dispatch.promise);
+    const baseline = executeExistingOpenClawStateRead(options, { type: "fleet.list" });
+    const result = executeExistingOpenClawStateRead(options, command);
+    const returned: OpenClawStateReadReply =
+      kind === "maintenance"
+        ? {
+            ok: true,
+            type: "subagents.runs",
+            sourceAdmitted: true,
+            projection: "maintenance",
+            runs: new Map(),
+            maintenanceDigest: "fixture",
+          }
+        : { ok: true, type: "subagents.runs", sourceAdmitted: true, runs: new Map() };
+    try {
+      const [baselineOptions, submitted] = await Promise.all([
+        baselineTask.submitted,
+        Promise.race([
+          task.submitted,
+          result.then(() => {
+            throw new Error("Read settled before queued dispatch");
+          }),
+        ]),
+      ]);
+      input.sessionKeys[0] = "changed";
+      input.sessionKeys.push("added after admission");
+      input.liveTopology[0]!.childSessionKey = "changed child";
+      input.liveTopology[0]!.requesterSessionKey = "changed requester";
+      input.liveTopology.push({
+        childSessionKey: "added child",
+        requesterSessionKey: "added requester",
+      });
+      expect(submitted.inputBytes).toBe(
+        Number(baselineOptions.inputBytes) +
+          Buffer.byteLength("subagents.runs") -
+          Buffer.byteLength("fleet.list") +
+          selectorBytes,
+      );
+      dispatch.resolve();
+      expect((await task.captured).command).toEqual(expected);
+      baselineTask.result.resolve(emptyReply);
+      task.result.resolve(returned);
+      expect(await result).toEqual(returned);
+      await baseline;
+    } finally {
+      dispatch.resolve();
+      baselineTask.result.resolve(emptyReply);
+      task.result.resolve(returned);
+      await Promise.allSettled([baseline, result]);
+    }
+  },
+);
+
 it("captures queued reconciliation selectors and charges their retained input", async () => {
   const { options } = source();
   const input = {
