@@ -159,7 +159,7 @@ it.each([
       undefined,
       expect.objectContaining({
         code: "INVALID_REQUEST",
-        message: "activityPulseBoundaries must be strictly ascending",
+        message: expect.stringContaining("activityPulseBoundaries: must be strictly ascending"),
       }),
     );
   },

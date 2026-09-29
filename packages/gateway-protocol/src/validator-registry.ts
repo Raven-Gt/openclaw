@@ -252,7 +252,20 @@ export const validateSecretsStoreListResult = compile(S.SecretsStoreListResultSc
 export const validateSecretsStoreSetParams = compile(S.SecretsStoreSetParamsSchema);
 export const validateSecretsStoreDeleteParams = compile(S.SecretsStoreDeleteParamsSchema);
 export const validateSecretsStoreMutationResult = compile(S.SecretsStoreMutationResultSchema);
-export const validateSessionsListParams = compile(S.SessionsListParamsSchema);
+// Runs before the schema: compare only numeric boundaries and leave type errors to the schema.
+function checkPulseBoundaries(data: unknown) {
+  const boundaries = (data as Record<string, unknown> | null)?.activityPulseBoundaries;
+  return Array.isArray(boundaries) &&
+    boundaries.every((boundary) => typeof boundary === "number") &&
+    boundaries.some((boundary, index) => index > 0 && boundary <= boundaries[index - 1])
+    ? {
+        keyword: "ascending",
+        instancePath: "/activityPulseBoundaries",
+        message: "must be strictly ascending",
+      }
+    : undefined;
+}
+export const validateSessionsListParams = compile(S.SessionsListParamsSchema, checkPulseBoundaries);
 export const validateSessionCatalogShareRoute = compile(S.SessionCatalogShareRouteSchema);
 export const validateSessionsCatalogListParams = compile(S.SessionsCatalogListParamsSchema);
 export const validateSessionsCatalogReadParams = compile(S.SessionsCatalogReadParamsSchema);
