@@ -25,9 +25,8 @@ import {
   resolveImageToolFactoryAvailable,
   resolveOptionalMediaToolFactoryPlan,
 } from "./openclaw-tools.media-factory-plan.js";
-import { applyNodesToolWorkspaceGuard } from "./openclaw-tools.nodes-workspace-guard.js";
 import {
-  collectPresentOpenClawTools,
+  applyNodesToolWorkspaceGuard,
   shouldIncludePrimarySessionToolForOpenClawTools,
   shouldIncludeProgressCardToolForOpenClawTools,
 } from "./openclaw-tools.registration.js";
@@ -304,7 +303,7 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
       })
     : null;
   const transcriptsTool = resolveTranscriptsTool(resolvedConfig, sessionAgentId, options);
-  const tools = collectPresentOpenClawTools([
+  const tools = [
     createDashboardTool({
       agentSessionKey: options?.runSessionKey ?? options?.agentSessionKey,
       agentId: sessionAgentId,
@@ -531,7 +530,7 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
     webFetchTool,
     imageTool,
     pdfTool,
-  ]);
+  ].filter((tool): tool is AnyAgentTool => tool !== null && tool !== undefined);
   options?.recordToolPrepStage?.("openclaw-tools:core-tool-list");
   let allTools = tools;
   if (!options?.disablePluginTools) {

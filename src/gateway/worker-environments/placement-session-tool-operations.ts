@@ -49,10 +49,6 @@ registerOpenClawStateDatabaseLifecycleListener((event) => {
     waiting.changed.resolve(error);
   }
 });
-function isReceipt(value: unknown): value is PlacementSessionToolReceipt {
-  return Value.Check(PlacementSessionToolReceiptSchema, value);
-}
-
 export function createPlacementSessionToolOperationOps(runtime: {
   path: string;
   instanceId: string;
@@ -91,9 +87,10 @@ export function createPlacementSessionToolOperationOps(runtime: {
       label: "Worker session operation",
       nativeLocation: runtime.path,
       assertCurrent,
-      readReceipt: (facts) => (isReceipt(facts) ? facts : undefined),
+      readReceipt: (facts) =>
+        Value.Check(PlacementSessionToolReceiptSchema, facts) ? facts : undefined,
       stageCommit(facts) {
-        if (!isReceipt(facts)) {
+        if (!Value.Check(PlacementSessionToolReceiptSchema, facts)) {
           throw new Error("Worker session operation commit has no receipt");
         }
         if (facts.toolNames === undefined) {

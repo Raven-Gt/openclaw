@@ -42,7 +42,20 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
     input: SqliteWorkerCommand<PlacementTurnClaimWorkerOperations>,
     assertCurrent?: () => void,
   ): Promise<PlacementTurnClaimReceipt> {
-    const command = structuredClone(input);
+    const command = { ...input };
+    const { sessionId, claimId, runId, owner: requestedOwner } = input.input.claim;
+    const { kind, environmentId, ownerEpoch } = requestedOwner;
+    const owner: typeof requestedOwner =
+      kind === "local" ? { kind, environmentId, ownerEpoch } : { kind, environmentId, ownerEpoch };
+    // Host callers may carry authority callbacks; only claim data crosses the worker boundary.
+    const claim = { sessionId, claimId, runId, owner };
+    if (command.type === "placementTurns.claim") {
+      const { agentId, sessionKey } = command.input.claim;
+      command.input = { ...command.input, claim: { ...claim, agentId, sessionKey } };
+    } else {
+      const { placementGeneration } = command.input.claim;
+      command.input = { ...command.input, claim: { ...claim, placementGeneration } };
+    }
     const close =
       command.type === "placementTurns.release" || command.type === "placementTurns.releaseIfOwned"
         ? prepareWorkerTurnClaimClosed(runtime.path, command.input.claim)
@@ -192,7 +205,11 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
       );
     },
     async handoffRuntimeRefreshResult(
-      input: Omit<
+      {
+        claim,
+        expectedGeneration,
+        gatewayInstanceId,
+      }: Omit<
         PlacementTurnClaimWorkerOperations["placementTurns.handoffRuntimeRefreshResult"]["input"],
         "nowMs"
       >,
@@ -201,7 +218,12 @@ export function createPlacementTurnClaimWorkerOps(runtime: {
       const receipt = await execute(
         {
           type: "placementTurns.handoffRuntimeRefreshResult",
-          input: { ...input, nowMs: runtime.now?.() ?? Date.now() },
+          input: {
+            claim,
+            expectedGeneration,
+            gatewayInstanceId,
+            nowMs: runtime.now?.() ?? Date.now(),
+          },
         },
         assertCurrent,
       );

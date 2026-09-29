@@ -61,13 +61,6 @@ function operationKey(operationSeed: string, purpose: string): string {
   return sha256Base64Url(`openclaw.worker-session-tool-operation.v1\0${operationSeed}\0${purpose}`);
 }
 
-function childSessionKey(operationSeed: string, targetAgentId: string): string {
-  return `agent:${targetAgentId}:dashboard:cloud-${sha256HexPrefixCore(
-    `openclaw.worker-session-tool-operation.v1\0${operationSeed}\0child-session`,
-    32,
-  )}`;
-}
-
 type WorkerGatewayToolsDependencies = {
   resolveGatewayContext: GatewayContextResolver;
   placements: WorkerSessionPlacementStore;
@@ -443,7 +436,10 @@ export function createWorkerSessionToolExecutor(
           }
           if (prepared.toolName === "sessions_spawn") {
             const targetAgentId = normalizeAgentId(prepared.request.agentId ?? source.agentId);
-            const childKey = childSessionKey(started.operationSeed, targetAgentId);
+            const childKey = `agent:${targetAgentId}:dashboard:cloud-${sha256HexPrefixCore(
+              `openclaw.worker-session-tool-operation.v1\0${started.operationSeed}\0child-session`,
+              32,
+            )}`;
             if (
               !(await params.placements.bindWorkerSessionToolOperationChild({
                 ...operationIdentity,
