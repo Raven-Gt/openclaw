@@ -237,10 +237,9 @@ export async function readResponseText(
     return { text: "", truncated: true, bytesRead: 0 };
   }
 
-  const readBytes = res.arrayBuffer;
-  if (typeof readBytes === "function") {
+  if (typeof res.arrayBuffer === "function") {
     try {
-      const bytes = new Uint8Array(await readBytes.call(res));
+      const bytes = new Uint8Array(await res.arrayBuffer());
       return {
         text: decodeResponseBytes(res, bytes),
         truncated: false,

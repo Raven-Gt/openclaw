@@ -39,6 +39,11 @@ import {
   updateMediaGenerationOperation,
 } from "../media-generation-activity.js";
 import { MEDIA_GENERATION_DELIVERING_COMPLETION_PROGRESS } from "../media-generation-task-status-shared.js";
+import {
+  IMAGE_GENERATION_TASK_KIND,
+  MUSIC_GENERATION_TASK_KIND,
+  VIDEO_GENERATION_TASK_KIND,
+} from "../media-generation-task-status.js";
 import { tryResolveSubagentRequesterAgentId } from "../subagents/announce/subagent-announce-delivery.runtime.js";
 import { resolveAnnounceOrigin } from "../subagents/announce/subagent-announce-origin.js";
 import { resolveRequesterStoreKey } from "../subagents/announce/subagent-requester-store-key.js";
@@ -630,6 +635,13 @@ export function scheduleMediaGenerationTaskCompletion<
 }
 
 export function createMediaGenerationTaskLifecycle(kind: "image" | "music" | "video") {
+  const taskKind = (
+    {
+      image: IMAGE_GENERATION_TASK_KIND,
+      music: MUSIC_GENERATION_TASK_KIND,
+      video: VIDEO_GENERATION_TASK_KIND,
+    } as const
+  )[kind];
   const toolName = `${kind}_generate`;
   const title = `${kind.charAt(0).toUpperCase()}${kind.slice(1)}`;
   return {
@@ -640,7 +652,7 @@ export function createMediaGenerationTaskLifecycle(kind: "image" | "music" | "vi
       return createMediaGenerationTaskRun({
         ...runParams,
         toolName,
-        taskKind: `${kind}_generation`,
+        taskKind,
         queuedProgressSummary: `Queued ${kind} generation`,
       });
     },
@@ -664,7 +676,7 @@ export function createMediaGenerationTaskLifecycle(kind: "image" | "music" | "vi
     async wakeTaskCompletion(completionParams: WakeMediaGenerationTaskCompletionParams) {
       return await wakeMediaGenerationTaskCompletion({
         ...completionParams,
-        eventSource: `${kind}_generation`,
+        eventSource: taskKind,
         announceType: `${kind} generation task`,
         toolName,
         completionLabel: kind,

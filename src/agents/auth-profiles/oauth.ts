@@ -253,7 +253,6 @@ async function resolveOAuthProfileAccess(
     validateCredential: params.validateOAuthCredential,
     signal: params.signal,
   });
-  params.signal?.throwIfAborted();
   return resolved
     ? buildApiKeyProfileResult({
         apiKey: resolved.apiKey,
@@ -292,7 +291,9 @@ async function tryResolveOAuthProfile(
     return null;
   }
 
-  return await resolveOAuthProfileAccess(params, cred);
+  const resolved = await resolveOAuthProfileAccess(params, cred);
+  params.signal?.throwIfAborted();
+  return resolved;
 }
 
 function isRetiredOAuthProfileId(profileId: string): boolean {
@@ -473,7 +474,9 @@ export async function resolveApiKeyForProfile(
   }
 
   try {
-    return await resolveOAuthProfileAccess(params, cred);
+    const resolved = await resolveOAuthProfileAccess(params, cred);
+    params.signal?.throwIfAborted();
+    return resolved;
   } catch (error) {
     params.signal?.throwIfAborted();
     let settlementComplete = isSettledOAuthRefreshFailure(error);
@@ -541,6 +544,7 @@ export async function resolveApiKeyForProfile(
           validateOAuthCredential: params.validateOAuthCredential,
           signal: params.signal,
         });
+        params.signal?.throwIfAborted();
         if (fallbackResolved) {
           return fallbackResolved;
         }

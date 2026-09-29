@@ -2001,9 +2001,9 @@ export function createAuthProfileStoreRuntime(
         }
         const runtimeAtSaveEdge = captureRuntimeAuthProfileStorePersistenceSnapshot(owner);
         const derivedRuntimeRevisionsAtSaveEdge = runtimeAtSaveEdge.derivedRuntimeStores?.map(
-          ({ databasePath, agentDir, runtimeRevision }) => ({
+          ({ databasePath, agentDir: derivedAgentDir, runtimeRevision }) => ({
             databasePath,
-            agentDir,
+            agentDir: derivedAgentDir,
             runtimeRevision,
           }),
         );
