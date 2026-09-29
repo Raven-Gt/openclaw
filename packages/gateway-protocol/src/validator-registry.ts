@@ -1,3 +1,4 @@
+import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { lazyCompile as compile } from "./protocol-validator.js";
 import * as S from "./schema-modules.js";
 import type {
@@ -254,10 +255,10 @@ export const validateSecretsStoreDeleteParams = compile(S.SecretsStoreDeletePara
 export const validateSecretsStoreMutationResult = compile(S.SecretsStoreMutationResultSchema);
 // Runs before the schema: compare only numeric boundaries and leave type errors to the schema.
 function checkPulseBoundaries(data: unknown) {
-  const boundaries = (data as Record<string, unknown> | null)?.activityPulseBoundaries;
+  const boundaries = asNullableRecord(data)?.activityPulseBoundaries;
   return Array.isArray(boundaries) &&
-    boundaries.every((boundary) => typeof boundary === "number") &&
-    boundaries.some((boundary, index) => index > 0 && boundary <= boundaries[index - 1])
+    boundaries.every((boundary): boundary is number => typeof boundary === "number") &&
+    boundaries.some((boundary, index) => boundary <= (boundaries[index - 1] ?? -Infinity))
     ? {
         keyword: "ascending",
         instancePath: "/activityPulseBoundaries",
