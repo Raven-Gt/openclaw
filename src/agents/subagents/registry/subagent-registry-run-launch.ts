@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import { resolvePhysicalSessionStorePath } from "../../../config/sessions/session-store-path.js";
 import type { GatewayContextResolver } from "../../../gateway/server-methods/types.js";
 import { captureOperatorToolGatewayContinuationContext } from "../../../gateway/server-plugin-in-process-dispatch.js";
@@ -21,6 +20,7 @@ import { SUBAGENT_ENDED_REASON_ERROR } from "./subagent-lifecycle-events.js";
 import { subagentRuns } from "./subagent-registry-memory.js";
 import {
   SubagentRegistryWriteError,
+  publishSubagentRunPostimages,
   waitForPendingSubagentKillClaim,
 } from "./subagent-registry-persistence.js";
 import { registerRequiredQueuedSubagent } from "./subagent-registry-queued-registration.js";
@@ -210,82 +210,40 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
           });
         }
         if (workerContext) {
-          const staged = new Map(
-            [entry, ...killReconciliationSnapshots.keys()].map((row) => [
-              row,
-              structuredClone(row),
-            ]),
-          );
-          const preimages = new Map(
-            [...staged].map(([row, snapshot]) => [
-              row,
-              row === entry
-                ? previous && structuredClone(previous)
-                : { ...snapshot, killReconciliation: killReconciliationSnapshots.get(row) },
-            ]),
-          );
-          let capturing = true;
+          const preimages = new Map<SubagentRunRecord, SubagentRunRecord | undefined>([
+            [entry, undefined],
+          ]);
+          for (const [row, killReconciliation] of killReconciliationSnapshots) {
+            preimages.set(row, { ...row, killReconciliation });
+          }
           const assertRegistrationCurrent = () => {
             options.assertCurrent?.();
             if (custodyTransferred) {
               completionAuthority?.assertCurrent();
             }
             registrationOwnership.assertCurrent();
-            if (
-              !isAgentEventLifecycleGenerationCurrent(lifecycleGeneration) ||
-              [...staged].some(([row, snapshot]) => {
-                const visible = capturing || row !== entry ? row : previous;
-                return (
-                  this.options.runs.get(row.runId) !== visible ||
-                  !isDeepStrictEqual(visible, capturing ? snapshot : preimages.get(row))
-                );
-              })
-            ) {
+            if (!isAgentEventLifecycleGenerationCurrent(lifecycleGeneration)) {
               throw new Error("Subagent registration changed before worker publication");
             }
           };
           workerOwnsRegistration = true;
           return (async () => {
             try {
-              let publication: Promise<void>;
-              try {
-                publication = this.options.persistAsyncOrThrow(
-                  workerContext,
-                  {
-                    assertCurrent: assertRegistrationCurrent,
-                    onCommitted: () => {
-                      assertRegistrationCurrent();
-                      this.options.runs.set(runId, entry);
-                      for (const [row, snapshot] of staged) {
-                        if (row !== entry) {
-                          row.killReconciliation = snapshot.killReconciliation;
-                        }
-                      }
-                      activateRegistrationLifecycle();
-                    },
-                  },
-                  ...registeredRunIds,
+              const result = await publishSubagentRunPostimages({
+                runs: this.options.runs,
+                previous: preimages,
+                persist: this.options.persistAsyncOrThrow,
+                context: workerContext,
+                assertCurrent: assertRegistrationCurrent,
+                onPublished: activateRegistrationLifecycle,
+              });
+              if (result.publication !== "published") {
+                throw new SubagentRegistryWriteError(
+                  "committed",
+                  new Error("Subagent registration changed before worker publication"),
+                  result.publication,
                 );
-              } finally {
-                // The worker captures synchronously; lifecycle observers keep the preimage until ACK.
-                for (const [row, snapshot] of staged) {
-                  if (
-                    this.options.runs.get(row.runId) !== row ||
-                    !isDeepStrictEqual(row, snapshot)
-                  ) {
-                    continue;
-                  }
-                  if (row !== entry) {
-                    row.killReconciliation = killReconciliationSnapshots.get(row);
-                  } else if (previous) {
-                    this.options.runs.set(runId, previous);
-                  } else {
-                    this.options.runs.delete(runId);
-                  }
-                }
-                capturing = false;
               }
-              await publication;
             } catch (error) {
               // Ambiguous commits retain private custody and the persistence owner's write fence.
               if (

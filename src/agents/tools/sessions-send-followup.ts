@@ -65,9 +65,7 @@ export async function startSessionsSendFollowup(
     if (!completion) {
       request?.custody.release();
     }
-    return { start, completion };
-  }
-  if (request && !completion) {
+  } else if (request && !completion) {
     request.custody.release();
     throw new Error("Gateway did not retain followup result custody; inspect the accepted run.");
   }
@@ -149,7 +147,6 @@ export async function dispatchSessionsSendFollowup(
           },
           replyContext,
         );
-  let registryCompletion = false;
   try {
     if (start.ok && watchedTurn) {
       const { registerSubagentRun, adoptSubagentRunForRequesterTurn } =
@@ -198,11 +195,8 @@ export async function dispatchSessionsSendFollowup(
         accepted = { runId: start.runId, childSessionKey, expectsCompletionMessage: true };
       }
       assertCurrent();
-      if (accepted) {
-        if (instance) {
-          mergeAcceptedSessionSpawnsForRun(instance, [accepted]);
-        }
-        registryCompletion = true;
+      if (instance) {
+        mergeAcceptedSessionSpawnsForRun(instance, [accepted]);
       }
     }
   } catch (error) {
@@ -243,5 +237,10 @@ export async function dispatchSessionsSendFollowup(
           targetAgentId: params.sendParams.agentId,
         })
       : false;
-  return { start, completion, registryCompletion, watchField: options.watch ? { watched } : {} };
+  return {
+    start,
+    completion,
+    registryCompletion: Boolean(start.ok && watchedTurn),
+    watchField: options.watch ? { watched } : {},
+  };
 }

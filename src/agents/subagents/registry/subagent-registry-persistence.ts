@@ -354,7 +354,8 @@ export type SubagentRegistryPostimageResult = {
 /** The existing writer captures staged rows synchronously; live preimages remain until ACK. */
 export async function publishSubagentRunPostimages(params: {
   runs: Map<string, SubagentRunRecord>;
-  previous: ReadonlyMap<SubagentRunRecord, SubagentRunRecord>;
+  /** An undefined preimage registers a new row without exposing it before ACK. */
+  previous: ReadonlyMap<SubagentRunRecord, SubagentRunRecord | undefined>;
   retire?: ReadonlySet<SubagentRunRecord>;
   pendingKillClaim?: SubagentRunRecord;
   persist: (
@@ -384,15 +385,15 @@ export async function publishSubagentRunPostimages(params: {
   };
   let capturing = true;
   let published = false;
-  const matches = (next: boolean) =>
-    selected.every(
-      (selection) =>
-        params.runs.get(selection.entry.runId) === selection.entry &&
-        isDeepStrictEqual(
-          selection.entry,
-          next ? selection.nextSnapshot : selection.previousSnapshot,
-        ),
+  const matchesSelection = (selection: (typeof selected)[number], next: boolean) => {
+    const visible = params.runs.get(selection.entry.runId);
+    return (
+      visible === (next || selection.previous ? selection.entry : undefined) &&
+      isDeepStrictEqual(visible, next ? selection.nextSnapshot : selection.previousSnapshot)
     );
+  };
+  const matches = (next: boolean) =>
+    selected.every((selection) => matchesSelection(selection, next));
   let publication: Promise<void>;
   try {
     params.assertCurrent();
@@ -422,6 +423,9 @@ export async function publishSubagentRunPostimages(params: {
               params.runs.delete(selection.entry.runId);
             } else {
               replace(selection.entry, selection.next);
+              if (!selection.previous) {
+                params.runs.set(selection.entry.runId, selection.entry);
+              }
             }
           }
           published = true;
@@ -431,9 +435,18 @@ export async function publishSubagentRunPostimages(params: {
       ...selected.map(({ entry }) => entry.runId),
     );
   } finally {
-    if (matches(true)) {
+    // Registration hides its provisional row even if an older tombstone changed during capture.
+    const registration = selected.some((selection) => selection.previous === undefined);
+    if (registration || matches(true)) {
       for (const selection of selected) {
-        replace(selection.entry, selection.previous);
+        if (registration && !matchesSelection(selection, true)) {
+          continue;
+        }
+        if (selection.previous) {
+          replace(selection.entry, selection.previous);
+        } else {
+          params.runs.delete(selection.entry.runId);
+        }
       }
     }
     capturing = false;
