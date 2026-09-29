@@ -57,7 +57,6 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runWithGatewayIndependentRootWorkAdmission } from "../process/gateway-work-admission.js";
 import type { OpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.types.js";
 import {
-  type DeliveryContext,
   mergeDeliveryContext,
   normalizeDeliveryContext,
 } from "../utils/delivery-context.shared.js";
@@ -107,9 +106,17 @@ function enqueueRestartSentinelWake(
   entry: QueuedSessionDelivery,
   sessionKey: string,
   agentId: string,
-  deliveryContext?: DeliveryContext,
 ) {
   const message = entry.kind === "systemEvent" ? entry.text : entry.message;
+  const deliveryContext =
+    entry.kind === "agentTurn" && entry.route
+      ? {
+          channel: entry.route.channel,
+          to: entry.route.to,
+          ...(entry.route.accountId ? { accountId: entry.route.accountId } : {}),
+          ...(entry.route.threadId ? { threadId: entry.route.threadId } : {}),
+        }
+      : entry.deliveryContext;
   const eventOptions = {
     sessionKey,
     // Recovered work keeps its ordinary turn budget when delivered by heartbeat.
@@ -124,20 +131,6 @@ function enqueueRestartSentinelWake(
     agentId,
     sessionKey,
   });
-}
-
-function resolveQueuedSessionDeliveryContext(
-  entry: QueuedSessionDelivery,
-): DeliveryContext | undefined {
-  if (entry.kind === "agentTurn" && entry.route) {
-    return {
-      channel: entry.route.channel,
-      to: entry.route.to,
-      ...(entry.route.accountId ? { accountId: entry.route.accountId } : {}),
-      ...(entry.route.threadId ? { threadId: entry.route.threadId } : {}),
-    };
-  }
-  return entry.deliveryContext;
 }
 
 export async function deliverQueuedSessionDelivery(params: {
@@ -165,11 +158,9 @@ export async function deliverQueuedSessionDelivery(params: {
       ...(queuedEntry.kind === "systemEvent" ? { agentId: queuedEntry.agentId } : {}),
     },
   );
-  const deliveryContext = resolveQueuedSessionDeliveryContext(queuedEntry);
-
   if (queuedEntry.kind === "systemEvent") {
     const systemEventAgentId = queuedEntry.agentId ?? agentId;
-    enqueueRestartSentinelWake(queuedEntry, canonicalKey, systemEventAgentId, deliveryContext);
+    enqueueRestartSentinelWake(queuedEntry, canonicalKey, systemEventAgentId);
     return;
   }
 
@@ -185,7 +176,7 @@ export async function deliverQueuedSessionDelivery(params: {
   }
 
   if (sessionChanged || !queuedEntry.route) {
-    enqueueRestartSentinelWake(queuedEntry, canonicalKey, agentId, deliveryContext);
+    enqueueRestartSentinelWake(queuedEntry, canonicalKey, agentId);
     return;
   }
 
@@ -198,9 +189,7 @@ export async function deliverQueuedSessionDelivery(params: {
       storePath,
       sessionEntry: entry,
       queueContext: params.queueContext,
-      ...(params.resolveGatewayContext
-        ? { resolveGatewayContext: params.resolveGatewayContext }
-        : {}),
+      resolveGatewayContext: params.resolveGatewayContext,
     })
   ) {
     return;
@@ -357,9 +346,7 @@ export async function recoverPendingRestartContinuationDeliveries(params: {
         deps: params.deps,
         entry,
         queueContext,
-        ...(params.resolveGatewayContext
-          ? { resolveGatewayContext: params.resolveGatewayContext }
-          : {}),
+        resolveGatewayContext: params.resolveGatewayContext,
       }),
     log: params.log ?? log,
     maxEnqueuedAt: params.maxEnqueuedAt,

@@ -22,6 +22,8 @@ import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js"
 import { resolveIngressWorkspaceOverrideForSessionRun } from "../../agents/spawned-context.js";
 import { resolveExactSubagentCompletionEvent } from "../../agents/subagents/announce/subagent-announce-handoff.js";
 import type { FollowupCompletionOwner } from "../../agents/subagents/completion/session-followup-completion.types.js";
+import { getLatestLiveSubagentRunByChildSessionKey } from "../../agents/subagents/registry/subagent-registry-read.js";
+import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { assertAgentRunLifecycleGenerationCurrent } from "../../infra/agent-events.js";
 import { claimAgentRunContext } from "../../infra/agent-run-registry.js";
 import { isSubagentCoordinationInputProvenance } from "../../sessions/input-provenance.js";
@@ -101,25 +103,44 @@ export async function prepareAgentRunDispatch(
   }
 
   const {
-    timeoutMs,
-    timeoutSeconds,
     effectiveProviderOverride,
     effectiveModelOverride,
     effectiveThinking,
     effectiveAllowModelOverride,
-    activeModel,
     resolvedRuntime,
-    activeModelProvider,
     lifecycleStorePath,
   } = resolveAgentRunAdmissionModel(params);
+  let timeoutSeconds: number | undefined;
   let operationalRunInstance: OperationalRunInstanceRef | undefined;
   try {
     await params.acquireGatewayWorkAdmission(lifecycleStorePath);
-    params.assertGatewayWorkAdmissionAllowed();
+    const admittedSessionEntry = params.assertGatewayWorkAdmissionAllowed();
     if (!params.hasGatewayAdmissionOutcome()) {
       // Close may finish its cancellation sweep while session acquisition waits.
       // Reject before publishing a controller that the closing Gateway cannot cancel.
       params.context.requestEntryLifetime?.signal.throwIfAborted();
+      const registeredRun =
+        params.request.timeout === undefined &&
+        !params.isOneShotModelRun &&
+        params.resolvedSessionKey
+          ? getLatestLiveSubagentRunByChildSessionKey(params.resolvedSessionKey)
+          : undefined;
+      const registeredTarget = registeredRun?.execution.transcriptTarget;
+      // Admission may adopt a replacement; retained rows must match its final identity.
+      const inheritsRegisteredTimeout =
+        registeredRun &&
+        !registeredRun.execution.suppressSessionEffects &&
+        (registeredTarget?.sessionId === undefined ||
+          registeredTarget.sessionId === params.getAdmittedSessionId()) &&
+        (registeredTarget?.expectedLifecycleRevision === undefined ||
+          registeredTarget.expectedLifecycleRevision === admittedSessionEntry?.lifecycleRevision);
+      timeoutSeconds =
+        params.request.timeout ??
+        (inheritsRegisteredTimeout ? (registeredRun.runTimeoutSeconds ?? 0) : undefined);
+      const timeoutMs = resolveAgentTimeoutMs({
+        cfg: params.cfgForAgent ?? params.cfg,
+        overrideSeconds: timeoutSeconds,
+      });
       operationalRunInstance = createOperationalRunInstanceRef(params.runId);
       const now = Date.now();
       params.setAdmittedRunAbort(
@@ -135,8 +156,8 @@ export async function prepareAgentRunDispatch(
           expiresAtMs: resolveAgentRunExpiresAtMs({ now, timeoutMs }),
           ownerConnId: params.ownerConnId,
           ownerDeviceId: params.ownerDeviceId,
-          providerId: activeModelProvider,
-          authProviderId: resolveProviderIdForAuth(activeModelProvider, {
+          providerId: resolvedRuntime.provider,
+          authProviderId: resolveProviderIdForAuth(resolvedRuntime.provider, {
             config: params.cfgForAgent ?? params.cfg,
           }),
           isAbortable: () => isEmbeddedAgentRunAbortableForRunId(params.runId),
@@ -533,8 +554,8 @@ export async function prepareAgentRunDispatch(
             targetSessionKey: params.resolvedSessionKey,
             targetSessionId: params.getAdmittedSessionId(),
             idempotencyKey: params.request.idempotencyKey,
-            provider: activeModel.provider,
-            model: activeModel.model,
+            provider: resolvedRuntime.provider,
+            model: resolvedRuntime.model,
           })
         : undefined;
     if (followupCompletion) {

@@ -8,6 +8,7 @@ import {
   getSubagentRunByChildSessionKey,
   resetSubagentRegistryForTests,
 } from "../../agents/subagents/registry/subagent-registry.test-helpers.js";
+import * as admissionController from "../agent-turn/agent-admission-controller.js";
 import { resolveAgentRunExpiresAtMs } from "../chat-abort.js";
 import { withPluginSubagentTestState } from "./agent.spawned-child.test-support.js";
 import {
@@ -66,6 +67,8 @@ describe("gateway agent follow-up activity", () => {
       priorSessionId: "retired-session",
     },
     { label: "reset child uses the agent default", budget: 90, priorRevision: "retired-revision" },
+    { label: "session id rotated during admission wait", budget: 0, rotation: "sessionId" },
+    { label: "lifecycle revision rotated during admission wait", budget: 90, rotation: "revision" },
   ])(
     "preserves timeout policy and prior completion for $label",
     async ({
@@ -79,6 +82,7 @@ describe("gateway agent follow-up activity", () => {
       retired,
       priorSessionId,
       priorRevision,
+      rotation,
     }) => {
       await withPluginSubagentTestState("openclaw-parent-followup-", async ({ stateDir: root }) => {
         resetSubagentRegistryForTests({ persist: false });
@@ -133,18 +137,39 @@ describe("gateway agent follow-up activity", () => {
         mocks.updateSessionStore.mockResolvedValue(undefined);
         const storePath = path.join(root, "agents", "main", "sessions", "sessions.json");
         mocks.userTurnStorePath = storePath;
-        mocks.loadSessionEntry.mockReturnValue({
+        let currentEntry = {
+          sessionId: "spawned-child-session",
+          lifecycleRevision: "current-revision",
+          updatedAt: Date.now(),
+          spawnedBy: requesterSessionKey,
+          label: "Candidate review",
+        };
+        mocks.loadSessionEntry.mockImplementation(() => ({
           cfg,
           storePath,
-          entry: {
-            sessionId: "spawned-child-session",
-            lifecycleRevision: "current-revision",
-            updatedAt: Date.now(),
-            spawnedBy: requesterSessionKey,
-            label: "Candidate review",
-          },
+          entry: currentEntry,
           canonicalKey: childSessionKey,
-        });
+        }));
+        const admissionStarted = createDeferred();
+        const releaseAdmission = createDeferred();
+        const createController = admissionController.createAgentAdmissionController;
+        const admissionSpy = rotation
+          ? vi
+              .spyOn(admissionController, "createAgentAdmissionController")
+              .mockImplementation((params) => {
+                const controller = createController(params);
+                return {
+                  ...controller,
+                  acquire: async (scope) => {
+                    if (controller.getAdmission()) {
+                      admissionStarted.resolve();
+                      await releaseAdmission.promise;
+                    }
+                    await controller.acquire(scope);
+                  },
+                };
+              })
+          : undefined;
         const run = createDeferred<{ payloads: []; meta: { durationMs: number } }>();
         mocks.agentCommand.mockReturnValueOnce(run.promise);
         const context = makeContext();
@@ -169,21 +194,33 @@ describe("gateway agent follow-up activity", () => {
           }
         });
         try {
-          await invokeAgent(request, {
+          const pending = invokeAgent(request, {
             context,
             respond,
             reqId: runId,
             client: backendGatewayClient(),
           });
+          if (rotation) {
+            await admissionStarted.promise;
+            currentEntry = {
+              ...currentEntry,
+              sessionId: rotation === "sessionId" ? "replacement-session" : currentEntry.sessionId,
+              lifecycleRevision: "replacement-revision",
+            };
+            releaseAdmission.resolve();
+          }
+          await pending;
           const expectedSeconds =
             timeout ??
-            (unregistered || retired || priorSessionId || priorRevision
+            (unregistered || retired || priorSessionId || priorRevision || rotation
               ? undefined
               : (budget ?? 0));
           expect(mocks.agentCommand.mock.calls.at(-1)?.[0].timeout).toBe(
             expectedSeconds?.toString(),
           );
           const admitted = context.chatAbortControllers.get(runId)!;
+          expect(admitted.sessionId).toBe(currentEntry.sessionId);
+          expect(mocks.agentCommand.mock.calls.at(-1)?.[0].sessionId).toBe(currentEntry.sessionId);
           const expectedMs =
             expectedSeconds === 0
               ? MAX_TIMER_TIMEOUT_MS
@@ -196,6 +233,8 @@ describe("gateway agent follow-up activity", () => {
           await invokeAgent(request, { context, reqId: "replay", client: backendGatewayClient() });
           expect(mocks.agentCommand).toHaveBeenCalledTimes(callCount);
         } finally {
+          releaseAdmission.resolve();
+          admissionSpy?.mockRestore();
           run.resolve({ payloads: [], meta: { durationMs: 1 } });
           await terminal.promise;
           expectRecordFields(context.dedupe.get(`agent:${runId}`)?.payload, { status: "ok" });
