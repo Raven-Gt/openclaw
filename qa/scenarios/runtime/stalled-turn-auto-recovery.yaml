@@ -1,0 +1,121 @@
+title: Stalled channel turn auto-recovery
+
+scenario:
+  id: stalled-turn-auto-recovery
+  surface: runtime
+  coverage:
+    primary:
+      - agent-runtime.failure-recovery
+    secondary:
+      - agent-runtime.failure-recovery-retry-policy
+      - agent-runtime.progress-visibility-failure-recovery
+      - agent-runtime.session-dm
+  objective: Verify a DM turn aborted by the stuck-session detector before producing output continues automatically and the user gets an answer instead of a retry notice.
+  successCriteria:
+    - Scenario is mock-openai only so live lanes do not pick it up implicitly.
+    - The first turn loops on failing model requests until the QA-tuned stuck detector aborts it.
+    - Exactly one follow-up model request carries the stalled-turn recovery context.
+    - The DM receives the recovered answer marker.
+    - The DM never receives the "stopped making progress. Please try again" notice.
+  docsRefs:
+    - docs/help/testing.md
+  codeRefs:
+    - extensions/qa-lab/src/providers/mock-openai/server.ts
+    - src/logging/diagnostic-session-attention.ts
+    - src/auto-reply/reply
+  gatewayConfigPatch:
+    diagnostics:
+      enabled: true
+    models:
+      providers:
+        mock-openai:
+          # Matches the repeated-request e2e allowance so the held request stays
+          # abortable by stuck recovery rather than timing out first.
+          timeoutSeconds: 45
+  gatewayRuntime:
+    env:
+      # Minimum QA-accepted stuck-session abort bound (production uses minutes).
+      QA_DIAGNOSTIC_STUCK_SESSION_ABORT_MS: "30000"
+  execution:
+    kind: flow
+    summary: Verify a stuck-detector-aborted DM turn auto-recovers into a visible answer.
+    suiteIsolation: isolated
+    isolationReason: Needs QA-tuned stuck-session diagnostics and a shorter provider allowance on a fresh gateway.
+    retryCount: 0
+    config:
+      requiredProviderMode: mock-openai
+      requiredProvider: mock-openai
+      conversationId: qa-stalled-traveler
+      promptSnippet: Stalled turn recovery QA check
+      prompt: "Stalled turn recovery QA check: I'm travelling to Lisbon next week. What should I pack? Include the exact marker STALLED-TURN-RECOVERED-OK."
+      expectedReply: STALLED-TURN-RECOVERED-OK
+      recoveryNeedle: previous turn stopped making progress
+      forbiddenNotices:
+        - Please try again
+        - stopped making progress
+
+flow:
+  steps:
+    - name: recovers a stalled DM turn into a visible answer
+      actions:
+        - assert:
+            expr: "env.providerMode === 'mock-openai'"
+            message: this seeded scenario is mock-openai only
+        - call: waitForGatewayHealthy
+          args:
+            - ref: env
+            - 60000
+        - resetTransport: true
+        - set: outboundStartIndex
+          value:
+            expr: "state.getSnapshot().messages.filter((message) => message.direction === 'outbound').length"
+        - set: requestCursorBefore
+          value:
+            expr: "(await fetchJson(`${env.mock.baseUrl}/debug/request-cursor`)).cursor"
+        - sendInbound:
+            conversation:
+              id:
+                ref: config.conversationId
+              kind: direct
+            senderId:
+              ref: config.conversationId
+            senderName: QA Traveler
+            text:
+              ref: config.prompt
+        # Settle on the first answer or notice so a regressed notice fails fast.
+        - set: settledOutbound
+          value:
+            expr: "(async () => { const deadline = Date.now() + 300000; do { const messages = state.getSnapshot().messages.filter((message) => message.direction === 'outbound').slice(outboundStartIndex).filter((message) => message.conversation.id === config.conversationId); const hit = messages.find((message) => { const text = String(message.text ?? ''); return text.includes(config.expectedReply) || config.forbiddenNotices.some((notice) => text.includes(notice)); }); if (hit) { return hit; } await sleep(250); } while (Date.now() < deadline); throw new Error(`timed out waiting for stalled-turn recovery reply; transcript=${recentOutboundSummary(state)}`); })()"
+        # Catch a late notice or duplicate answer racing the recovered reply.
+        - call: sleep
+          args:
+            - 3000
+        - set: scenarioOutbound
+          value:
+            expr: "state.getSnapshot().messages.filter((message) => message.direction === 'outbound').slice(outboundStartIndex).filter((message) => message.conversation.id === config.conversationId)"
+        - assert:
+            expr: "!scenarioOutbound.some((message) => config.forbiddenNotices.some((notice) => String(message.text ?? '').includes(notice)))"
+            message:
+              expr: "`user received the stalled-turn retry notice instead of an automatic recovery: ${JSON.stringify(scenarioOutbound.map((message) => String(message.text ?? '')))}`"
+        - assert:
+            expr: "scenarioOutbound.filter((message) => String(message.text ?? '').includes(config.expectedReply)).length === 1"
+            message:
+              expr: "`expected exactly one recovered answer, saw ${JSON.stringify(scenarioOutbound.map((message) => String(message.text ?? '')))}`"
+        - set: scenarioRequests
+          value:
+            expr: "(await fetchJson(`${env.mock.baseUrl}/debug/requests?after=${requestCursorBefore}`)).filter((request) => String(request.allInputText ?? '').includes(config.promptSnippet))"
+        - set: stalledRequests
+          value:
+            expr: "scenarioRequests.filter((request) => !String(request.allInputText ?? '').includes(config.recoveryNeedle))"
+        - set: recoveryRequests
+          value:
+            expr: "scenarioRequests.filter((request) => String(request.allInputText ?? '').includes(config.recoveryNeedle))"
+        - assert:
+            expr: "stalledRequests.length >= 5 && stalledRequests.every((request) => request.outcome === 'error')"
+            message:
+              expr: "`expected the first turn to loop on failing model requests before recovery: ${JSON.stringify(scenarioRequests.map((request) => ({ cursor: request.cursor, model: request.model, outcome: request.outcome, recovery: String(request.allInputText ?? '').includes(config.recoveryNeedle) })))}`"
+        - assert:
+            expr: "recoveryRequests.length === 1 && scenarioRequests.at(-1) === recoveryRequests[0] && recoveryRequests[0].outcome === 'success'"
+            message:
+              expr: "`expected exactly one recovery request after the stall: ${JSON.stringify(scenarioRequests.map((request) => ({ cursor: request.cursor, model: request.model, outcome: request.outcome, recovery: String(request.allInputText ?? '').includes(config.recoveryNeedle) })))}`"
+      detailsExpr: "`${settledOutbound.text}\\nstalledRequests=${String(stalledRequests.length)} recoveryRequests=${String(recoveryRequests.length)}`"

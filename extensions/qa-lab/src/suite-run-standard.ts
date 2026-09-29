@@ -168,6 +168,7 @@ export async function runQaFlowSuiteStandard(
       runtimeEnvPatch: mergeQaRuntimeEnvPatches(
         transport.createRuntimeEnvPatch?.(),
         buildQaGatewayHeapCheckpointRuntimeEnvPatch(),
+        gatewayRuntimeOptions?.env,
       ),
       ...(runtimePreloads ? { runtimePreloads } : {}),
     });

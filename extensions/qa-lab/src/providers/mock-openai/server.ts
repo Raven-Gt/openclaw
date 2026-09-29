@@ -50,6 +50,9 @@ import {
   QA_REPEATED_REQUEST_RECOVERY_PROMPT_RE,
   QA_REPEATED_REQUEST_QUEUED_REPLY_PROMPT_RE,
   QA_REPEATED_REQUEST_QUEUED_REPLY_MARKER,
+  QA_STALLED_TURN_RECOVERY_PROMPT_RE,
+  QA_STALLED_TURN_RECOVERY_NEEDLE,
+  QA_STALLED_TURN_RECOVERY_MARKER,
   QA_STREAMING_PROMPT_RE,
   QA_FINAL_ONLY_MARKER_STREAMING_PROMPT_RE,
   QA_BLOCK_STREAMING_PROMPT_RE,
@@ -325,6 +328,10 @@ const QA_TELEGRAM_VISIBLE_PARTIAL_FAILURE_MARKER = "TELEGRAM-VISIBLE-PARTIAL-BEF
 const QA_REPEATED_REQUEST_RESPONSE_PAUSE_MS = 80_000;
 const QA_REPEATED_REQUEST_STALLED_RESPONSE_PAUSE_MS = 180_000;
 const QA_REPEATED_REQUEST_STALL_ATTEMPT = 5;
+// Stalled-turn recovery mirrors the repeated-request e2e timings: short failing
+// retries, then one held request the QA-tuned stuck detector must abort.
+const QA_STALLED_TURN_RESPONSE_PAUSE_MS = 8_000;
+const QA_STALLED_TURN_STALLED_RESPONSE_PAUSE_MS = 90_000;
 
 function normalizeResponsesInput(value: unknown): ResponsesInputItem[] {
   if (Array.isArray(value)) {
@@ -549,6 +556,11 @@ async function buildResponsesPayload(
   }
   if (QA_REPEATED_REQUEST_RECOVERY_PROMPT_RE.test(allInputText)) {
     return buildFailedResponseEvents();
+  }
+  if (QA_STALLED_TURN_RECOVERY_PROMPT_RE.test(allInputText)) {
+    return allInputText.includes(QA_STALLED_TURN_RECOVERY_NEEDLE)
+      ? buildAssistantEvents(QA_STALLED_TURN_RECOVERY_MARKER)
+      : buildFailedResponseEvents();
   }
   // The hard-kill fixture shares the first real checkpoint below, but recovery
   // must settle without scheduling the repeated-restart fixture's later waits.
@@ -2187,6 +2199,12 @@ export async function startQaMockOpenAiServer(params?: QaMockOpenAiServerOptions
     if (repeatedRequestRecovery) {
       scenarioState.repeatedRequestRecoveryAttempts += 1;
     }
+    const stalledTurnAttempt =
+      QA_STALLED_TURN_RECOVERY_PROMPT_RE.test(allInputText) &&
+      !allInputText.includes(QA_STALLED_TURN_RECOVERY_NEEDLE);
+    if (stalledTurnAttempt) {
+      scenarioState.stalledTurnRecoveryAttempts += 1;
+    }
     const held = requestLog.waitForContinuation(recorded);
     if (held) {
       await held;
@@ -2213,6 +2231,14 @@ export async function startQaMockOpenAiServer(params?: QaMockOpenAiServerOptions
               scenarioState.repeatedRequestRecoveryAttempts === QA_REPEATED_REQUEST_STALL_ATTEMPT
                 ? repeatedRequestStalledResponsePauseMs
                 : repeatedRequestResponsePauseMs,
+          }
+        : {}),
+      ...(stalledTurnAttempt
+        ? {
+            responsePauseMs:
+              scenarioState.stalledTurnRecoveryAttempts === QA_REPEATED_REQUEST_STALL_ATTEMPT
+                ? QA_STALLED_TURN_STALLED_RESPONSE_PAUSE_MS
+                : QA_STALLED_TURN_RESPONSE_PAUSE_MS,
           }
         : {}),
     };
