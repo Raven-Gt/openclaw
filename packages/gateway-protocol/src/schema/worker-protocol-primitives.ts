@@ -10,6 +10,23 @@ export const WORKER_PROTOCOL_MAX_PAYLOAD_BYTES = 64 * 1024;
 // Non-image control data keeps the ordinary frame budget.
 export const WORKER_PROTOCOL_MAX_MEDIA_PAYLOAD_BYTES = 25 * 1024 * 1024;
 
+/** Image data alone may exceed the ordinary control-frame budget. */
+export function isWorkerFrameWithinBudget(frame: unknown, readImageData: () => readonly string[]) {
+  try {
+    const bytes = Buffer.byteLength(JSON.stringify(frame), "utf8");
+    if (bytes > WORKER_PROTOCOL_MAX_MEDIA_PAYLOAD_BYTES) {
+      return false;
+    }
+    const imageBytes = readImageData().reduce(
+      (total, data) => total + Buffer.byteLength(JSON.stringify(data), "utf8") - 2,
+      0,
+    );
+    return bytes - imageBytes <= WORKER_PROTOCOL_MAX_PAYLOAD_BYTES;
+  } catch {
+    return false;
+  }
+}
+
 export const WorkerIdentifierSchema = Type.String({
   minLength: 1,
   maxLength: WORKER_PROTOCOL_MAX_IDENTIFIER_LENGTH,

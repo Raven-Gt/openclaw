@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import { lazyCompile } from "../protocol-validator.js";
 import { closedObject } from "./closed-object.js";
 import {
+  isWorkerFrameWithinBudget,
   WORKER_PROTOCOL_MAX_MEDIA_PAYLOAD_BYTES,
   WORKER_PROTOCOL_MAX_PAYLOAD_BYTES,
   WorkerIdentifierSchema,
@@ -131,8 +132,8 @@ export function isWorkerGatewayToolFrameWithinBudget(
   frame: unknown,
   result?: WorkerGatewayToolResult,
 ): boolean {
-  const limit = result?.content.some((part) => part.type === "image")
-    ? WORKER_PROTOCOL_MAX_MEDIA_PAYLOAD_BYTES
-    : WORKER_PROTOCOL_MAX_PAYLOAD_BYTES;
-  return Buffer.byteLength(JSON.stringify(frame), "utf8") <= limit;
+  return isWorkerFrameWithinBudget(
+    frame,
+    () => result?.content.flatMap((part) => (part.type === "image" ? [part.data] : [])) ?? [],
+  );
 }

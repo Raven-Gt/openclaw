@@ -86,12 +86,12 @@ import {
   WorkerConnectionStoppedError,
 } from "./worker-connection-contract.js";
 import { createWorkerConnection, type WorkerConnectionState } from "./worker-connection.js";
+import { createWorkerPlacementTools } from "./worker-placement-tools.js";
 import {
   buildWorkerProcessTurn,
   parseWorkerProcessMessage,
   type WorkerProcessResult,
 } from "./worker-process-protocol.js";
-import { createWorkerPlacementTools } from "./worker-placement-tools.js";
 import { WorkerInferenceProxyClient } from "./worker-rpc-inference-client.js";
 import { WorkerLiveEventClient } from "./worker-rpc-live-event-client.js";
 import { WorkerTranscriptCommitClient } from "./worker-rpc-transcript-client.js";

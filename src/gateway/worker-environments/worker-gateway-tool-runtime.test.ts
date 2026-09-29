@@ -413,9 +413,12 @@ describe("worker Gateway tool runtime", () => {
     },
   );
 
-  it("bounds aggregate result and update bytes without ending the tool's update sequence", async () => {
+  it.each([false, true])("bounds result and update control bytes with images=%s", async (image) => {
     const oversized = {
       ...success,
+      ...(image
+        ? { content: [{ type: "image" as const, data: "AA==", mimeType: "image/png" }] }
+        : {}),
       details: { data: "x".repeat(WORKER_PROTOCOL_MAX_PAYLOAD_BYTES) },
     };
     const { runtime } = fixture([

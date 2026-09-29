@@ -117,8 +117,10 @@ Hosted turns honor global and agent-specific `tools.fs.workspaceOnly`,
 same session permission-mode precedence as local turns. Workspace containment
 uses the assigned node workspace. Model read budgets and image sanitization also
 come from the Gateway; the worker does not reconstruct them from an empty config.
-The Gateway includes this tool catalog and policy in the worker admission response,
-so a turn does not need a separate discovery request. This uses the existing
+The Gateway includes this tool catalog and policy in each turn's worker admission
+response, including when a warm worker process is reused. A retained process receives
+the current turn's catalog and generation, so a turn does not need a separate
+discovery request. This uses the existing
 build-bound worker tool capability: the worker and Gateway must run the same
 bundle. If the complete admission response exceeds the control-frame limit, the
 turn fails explicitly instead of receiving a truncated catalog. The catalog grants

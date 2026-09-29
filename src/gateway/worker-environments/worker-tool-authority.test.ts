@@ -89,7 +89,9 @@ describe("resolveWorkerToolAuthority", () => {
       modelRef: { provider: "openai", model: "gpt-test" },
       turn: turnParams,
     };
-    expect(resolveWorkerToolAuthority(params).toolAuthority.allowedToolNames).not.toContain("computer");
+    expect(resolveWorkerToolAuthority(params).toolAuthority.allowedToolNames).not.toContain(
+      "computer",
+    );
     expect(
       resolveWorkerToolAuthority({
         ...params,
