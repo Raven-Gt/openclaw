@@ -25,6 +25,7 @@ import {
 import { createHeadlessDeadlineScope } from "../agents/code-mode-headless.js";
 import type {
   CodeModeNamespaceDescriptor,
+  CodeModeUnavailableMcpServer,
   SerializedCodeModeNamespaceValue,
 } from "../agents/code-mode-namespaces.js";
 import {
@@ -119,7 +120,7 @@ void assertTriggerCodesCoverHeadless;
 
 type PreparedTriggerRuntime = {
   createTools: (admitted: AdmittedRunContext, signal: AbortSignal) => AnyAgentTool[];
-  /** Starts this evaluation's own MCP runtime when the job's policy can reach MCP tools. */
+  /** Starts this evaluation's own MCP runtime for servers its toolsAllow names by prefix. */
   acquireMcpTools?: (
     admitted: AdmittedRunContext,
     reservedToolNames: readonly string[],
@@ -537,9 +538,12 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
           // Retry setup once with the same admission and deadline, never script execution.
         }
       }
+      let unavailableMcpServers: CodeModeUnavailableMcpServer[] = [];
       if (mcp) {
         // Server connection and tool listing spend the evaluation's own deadline.
-        tools = [...tools, ...(await evaluationScope.wait(mcp.tools))];
+        const surface = await evaluationScope.wait(mcp.surface);
+        tools = [...tools, ...surface.tools];
+        unavailableMcpServers = surface.unavailableServers;
       }
       const ctx: ToolSearchToolContext = {
         ...runtime.context,
@@ -589,6 +593,7 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
           wallClockMs: remainingWallClockMs,
           maxToolCalls: params.maxToolCalls,
           extraNamespaces: [triggerStateNamespace(params.state, params.streamBatch)],
+          unavailableMcpServers,
           signal: evaluationScope.signal,
         });
         if (result.status === "failed") {
