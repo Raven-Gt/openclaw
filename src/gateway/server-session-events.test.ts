@@ -77,7 +77,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
         }),
       }),
       expect.any(Set),
-      expect.objectContaining({ sessionRows: expect.any(Object) }),
+      expect.objectContaining({ prepareSessionProjection: expect.any(Function) }),
     );
   });
 
@@ -107,7 +107,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
         "sessions.changed",
         expect.objectContaining({ sessionKey: "agent:main:main" }),
         expect.any(Set),
-        expect.objectContaining({ sessionRows: expect.any(Object) }),
+        expect.objectContaining({ prepareSessionProjection: expect.any(Function) }),
       );
       expect(broadcastToConnIds.mock.calls[0]?.[1]).not.toHaveProperty("message");
       expect(readSessionMessageCountAsyncMock).not.toHaveBeenCalled();
@@ -134,7 +134,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
         messageSeq: 1,
       }),
       expect.any(Set),
-      expect.objectContaining({ sessionRows: expect.any(Object) }),
+      expect.objectContaining({ prepareSessionProjection: expect.any(Function) }),
     );
   });
 
@@ -183,7 +183,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
         phase: "message",
       }),
       new Set(["conn-broad", "conn-shared", "conn-targeted"]),
-      expect.objectContaining({ sessionRows: expect.any(Object) }),
+      expect.objectContaining({ prepareSessionProjection: expect.any(Function) }),
     );
     const payload = broadcastToConnIds.mock.calls[0]?.[1];
     expect(payload).not.toHaveProperty("message");
@@ -218,7 +218,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
       "sessions.changed",
       expect.objectContaining({ sessionKey: "agent:main:current" }),
       new Set(["conn-1", "conn-current"]),
-      expect.objectContaining({ sessionRows: expect.any(Object) }),
+      expect.objectContaining({ prepareSessionProjection: expect.any(Function) }),
     );
   });
 
@@ -522,7 +522,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
         messageSeq: 1,
       }),
       expect.any(Set),
-      expect.objectContaining({ sessionRows: expect.any(Object) }),
+      expect.objectContaining({ prepareSessionProjection: expect.any(Function) }),
     );
     const payload = broadcastToConnIds.mock.calls[0]?.[1];
     expect(payload).not.toHaveProperty("lifecycleRevision");
@@ -559,7 +559,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
         messageSeq: 1,
       }),
       expect.any(Set),
-      expect.objectContaining({ sessionRows: expect.any(Object) }),
+      expect.objectContaining({ prepareSessionProjection: expect.any(Function) }),
     );
   });
 
@@ -589,7 +589,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
         messageSeq: 3,
       }),
       expect.any(Set),
-      expect.objectContaining({ sessionRows: expect.any(Object) }),
+      expect.objectContaining({ prepareSessionProjection: expect.any(Function) }),
     );
   });
 
@@ -624,7 +624,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
         }),
       }),
       expect.any(Set),
-      expect.objectContaining({ sessionRows: expect.any(Object) }),
+      expect.objectContaining({ prepareSessionProjection: expect.any(Function) }),
     );
   });
 
@@ -734,7 +734,7 @@ describe("createTranscriptUpdateBroadcastHandler", () => {
       "session.message",
       expect.objectContaining({ sessionKey: "global" }),
       new Set(["conn-scoped", "conn-global"]),
-      expect.objectContaining({ sessionRows: expect.any(Object) }),
+      expect.objectContaining({ prepareSessionProjection: expect.any(Function) }),
     );
     const payload = broadcastToConnIds.mock.calls[0]?.[1];
     if (agentId) {

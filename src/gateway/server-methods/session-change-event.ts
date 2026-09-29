@@ -10,6 +10,7 @@ import {
   drainSessionEventPublications,
   sessionEventPublicationRows,
 } from "../session-event-prepared-row.js";
+import { prepareSessionEventProjection } from "../session-event-projection.js";
 import {
   resolvePrivateSessionEventBroadcastScope,
   resolveSessionEventAgentScope,
@@ -192,10 +193,13 @@ function broadcastSessionsChanged(
     );
     return;
   }
+  const projection = getSessionRowProjection(context);
   const broadcastOptions = {
     ...routingOptions,
     ...resolvePrivateSessionEventBroadcastScope(payload.sessionKey, scope),
-    ...(read ? { sessionRows: read } : {}),
+    ...(read && projection
+      ? { prepareSessionProjection: prepareSessionEventProjection(projection, read) }
+      : {}),
   };
   // A deletion describes the removed generation, never the row now occupying its key.
   const query = snapshotTarget(payload, scope);
@@ -203,7 +207,6 @@ function broadcastSessionsChanged(
     context.broadcastToConnIds("sessions.changed", eventPayload, connIds, broadcastOptions);
     return;
   }
-  const projection = getSessionRowProjection(context);
   const preparedRow = read?.describe(query);
   const currentRow = read
     ? preparedRow && read.present(preparedRow)

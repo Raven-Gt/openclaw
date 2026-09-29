@@ -126,7 +126,7 @@ it.each(["replacement", "reset"])(
       "sessions.changed",
       expect.objectContaining({ sessionKey: keys[0], reason: "rename" }),
       new Set(["viewer"]),
-      { dropIfSlow: true, sessionRows: expect.any(Object) },
+      { dropIfSlow: true, prepareSessionProjection: expect.any(Function) },
     );
   },
 );

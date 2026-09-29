@@ -27,6 +27,7 @@ import { resolveVisibleActiveSessionRunState } from "./server-methods/session-ac
 import { hasSessionChangeReceivers } from "./session-change-receivers.js";
 import { buildGatewaySessionSnapshot } from "./session-event-payload.js";
 import { withPreparedEventRow } from "./session-event-prepared-row.js";
+import { prepareSessionEventProjection } from "./session-event-projection.js";
 import {
   resolvePrivateSessionEventBroadcastScope,
   resolveSessionEventAgentScope,
@@ -540,6 +541,10 @@ async function handleTranscriptUpdateBroadcast(
         includeSession: true,
         activeRunState,
       });
+      const broadcastOptions =
+        read && projection
+          ? { prepareSessionProjection: prepareSessionEventProjection(projection, read) }
+          : undefined;
       if (message === undefined) {
         // A committed batch or unavailable selected row must invalidate
         // both session-list and targeted transcript subscribers exactly once.
@@ -553,7 +558,7 @@ async function handleTranscriptUpdateBroadcast(
             ...sessionSnapshot,
           },
           connIds,
-          read ? { sessionRows: read } : undefined,
+          broadcastOptions,
         );
         return;
       }
@@ -568,12 +573,7 @@ async function handleTranscriptUpdateBroadcast(
         sessionSnapshot,
       });
       if (projected.payload) {
-        params.broadcastToConnIds(
-          "session.message",
-          projected.payload,
-          connIds,
-          read ? { sessionRows: read } : undefined,
-        );
+        params.broadcastToConnIds("session.message", projected.payload, connIds, broadcastOptions);
         return;
       }
 
@@ -595,7 +595,7 @@ async function handleTranscriptUpdateBroadcast(
           ...sessionSnapshot,
         },
         sessionEventConnIds,
-        { dropIfSlow: true, ...(read ? { sessionRows: read } : {}) },
+        { dropIfSlow: true, ...broadcastOptions },
       );
     },
   );
@@ -716,7 +716,12 @@ export function createLifecycleEventBroadcastHandler(params: {
               : {}),
           },
           connIds,
-          { dropIfSlow: true, ...(read ? { sessionRows: read } : {}) },
+          {
+            dropIfSlow: true,
+            ...(read && projection
+              ? { prepareSessionProjection: prepareSessionEventProjection(projection, read) }
+              : {}),
+          },
         );
       });
     } finally {

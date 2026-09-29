@@ -44,8 +44,10 @@ import {
 } from "./session-accessor.sqlite-scope.js";
 import type { SqliteSessionWriteOperation } from "./session-accessor.sqlite-write-operation.js";
 import type { SessionEntryCreateWithTranscriptOptions } from "./session-accessor.types.js";
-import type { CapturedSessionEntryCurrentRead } from "./session-entry-current-runtime.js";
-import type { SessionEntryCurrentFacts } from "./session-entry-current.types.js";
+import type {
+  CapturedSessionEntryCurrentRead,
+  SessionEntryCurrentFacts,
+} from "./session-entry-current.types.js";
 import type { SessionEntry } from "./types.js";
 
 type DeletionEntry = { sessionKey: string; entry: SessionEntry };

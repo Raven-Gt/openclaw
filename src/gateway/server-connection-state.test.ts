@@ -23,6 +23,7 @@ import { createGatewayRequestContext } from "./server-request-context.js";
 import { makeContextParams } from "./server-request-context.test-support.js";
 import { buildGatewaySnapshot } from "./server/health-state.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
+import { prepareSessionEventProjection } from "./session-event-projection.js";
 import { createSessionRowProjection } from "./session-row-projection.js";
 
 type ConnectionIdReads = { count: number };
@@ -210,7 +211,11 @@ describe("gateway connection state", () => {
               state.broadcast(
                 "sessions.changed",
                 { sessionKey: ownKey, agentId: "main", reason: "metadata" },
-                { sessionKeys: [ownKey], agentId: "main", sessionRows: read },
+                {
+                  sessionKeys: [ownKey],
+                  agentId: "main",
+                  prepareSessionProjection: prepareSessionEventProjection(projection, read),
+                },
               );
             },
             { includeAncestors: true },
@@ -228,6 +233,44 @@ describe("gateway connection state", () => {
           expect(JSON.parse(later.send.mock.lastCall![0]).payload).not.toHaveProperty(
             "ancestorSessionRefs",
           );
+          const replacement = await createSessionRowProjection({
+            cfg: runtimeConfig,
+            getPolicyConfig: () => committedConfig,
+          });
+          let detachReplacement: (() => void) | undefined;
+          try {
+            await replacement.ensureMaterialized();
+            peer.send.mockClear();
+            later.send.mockClear();
+            await projection.withPreparedExactRows(
+              () => [{ key: ownKey, agentId: "main" }],
+              (read) => {
+                detachReplacement = state.attachSessionRowProjection(replacement);
+                state.broadcast(
+                  "sessions.changed",
+                  { sessionKey: ownKey, agentId: "main", reason: "metadata" },
+                  {
+                    sessionKeys: [ownKey],
+                    agentId: "main",
+                    prepareSessionProjection: prepareSessionEventProjection(projection, read),
+                  },
+                );
+              },
+              { includeAncestors: true },
+            );
+            expect(peer.send).not.toHaveBeenCalled();
+            expect(later.send).not.toHaveBeenCalled();
+            state.broadcast(
+              "sessions.changed",
+              { sessionKey: ownKey, agentId: "main", reason: "metadata" },
+              { sessionKeys: [ownKey], agentId: "main" },
+            );
+            expect(peer.send).toHaveBeenCalledOnce();
+            expect(later.send).toHaveBeenCalledOnce();
+          } finally {
+            detachReplacement?.();
+            replacement.dispose();
+          }
         } finally {
           detach();
           projection.dispose();

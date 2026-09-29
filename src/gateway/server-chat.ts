@@ -83,6 +83,7 @@ import type {
 import { roundedChatSendTimingMs } from "./server-methods/chat-server-timing.js";
 import { hasSessionChangeReceivers } from "./session-change-receivers.js";
 import { withPreparedSessionEventRow } from "./session-event-prepared-row.js";
+import { prepareSessionEventProjection } from "./session-event-projection.js";
 import {
   isRestartRecoveryLifecycleEvent,
   persistGatewaySessionLifecycleEvent,
@@ -668,7 +669,12 @@ export function createAgentEventHandler({
               ),
             },
             sessionEventConnIds,
-            { dropIfSlow: true, ...(read ? { sessionRows: read } : {}) },
+            {
+              dropIfSlow: true,
+              ...(read && projection
+                ? { prepareSessionProjection: prepareSessionEventProjection(projection, read) }
+                : {}),
+            },
           );
         };
         // Terminal writes serialize with restart markers. Reload only after the
