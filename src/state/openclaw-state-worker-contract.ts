@@ -71,6 +71,7 @@ import type {
   InterruptedUpdateSettlement,
   InterruptedUpdateSettlementResult,
 } from "../infra/update-run-interruption-contract.js";
+import type { UpdateRunReconciliationOperations } from "../infra/update-run-reconciliation.types.js";
 import type { readRemoteModelCatalog } from "../model-catalog/remote-store.js";
 import type { NodeWorkerJournalWorkerOperations } from "../node-host/node-worker-journal.worker-contract.js";
 import type { PluginBlobWorkerOperations } from "../plugin-state/plugin-blob-worker-contract.js";
@@ -98,6 +99,10 @@ import type {
 import type { TuiLastSessionWorkerOperations } from "../tui/tui-last-session.contract.js";
 import type { AgentProvenance } from "./agent-provenance.types.js";
 import type { PreparedBackupRunRecord } from "./backup-run-records.kernel.js";
+import type {
+  GitHubSessionReceiptGeneration,
+  GitHubSessionReceiptIdentities,
+} from "./github-publication-read.types.js";
 import type { OnboardingRecommendationWriteOperations } from "./onboarding-recommendations.contract.js";
 import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "./openclaw-agent-db-lease.js";
 import type { OpenClawStateLeaseLifecycleOperations } from "./openclaw-state-lease-context.js";
@@ -108,7 +113,8 @@ import type { UserProfileWorkerOperations } from "./user-profiles.worker.js";
 export type OpenClawStateWorkerOpenPreparation = { type: "deviceIdentity"; identityKey: string };
 
 /** Commands share one physical shared-state actor; bindings belong to commands, not open input. */
-export type OpenClawStateWorkerOperations = CaptureWorkerOperations &
+export type OpenClawStateWorkerOperations = UpdateRunReconciliationOperations &
+  CaptureWorkerOperations &
   TuiLastSessionWorkerOperations &
   AcpSessionWriteOperations &
   WorktreeRetirementOperations &
@@ -166,6 +172,19 @@ export type OpenClawStateWorkerOperations = CaptureWorkerOperations &
     "updateRuns.reconcileInterrupted": {
       input: InterruptedUpdateSettlement;
       output: InterruptedUpdateSettlementResult;
+    };
+    "githubPublication.prepareSessionReceiptDeletion": {
+      input: { agentId: string; sessionKeys: readonly string[] };
+      output: GitHubSessionReceiptIdentities;
+    };
+    "githubPublication.deleteSessionReceipts": {
+      input: {
+        agentId: string;
+        sessionKeys: readonly string[];
+        generations: readonly GitHubSessionReceiptGeneration[];
+        receipts: GitHubSessionReceiptIdentities;
+      };
+      output: void;
     };
     "githubRepository.personalPending": {
       input: RepositoryGitHubPublicationPendingQuery;

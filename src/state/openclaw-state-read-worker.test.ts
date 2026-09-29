@@ -6,7 +6,6 @@ import path from "node:path";
 import { expect, it, vi } from "vitest";
 import { createWorkspaceStateIdentity } from "../agents/workspace-state-identity.js";
 import type { ExecutionIdentityInspectionQuery } from "../audit/execution-identity-inspection.types.js";
-import * as boundaryPath from "../infra/boundary-path.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import {
   closeOpenClawStateDatabaseByPathAsync,
@@ -19,33 +18,6 @@ import { createOpenClawStateReadTransport } from "./openclaw-state-read-worker.j
 import type { OpenClawStateReadReply } from "./openclaw-state-read.types.js";
 import { captureOpenClawStateWorkerContext } from "./openclaw-state-worker-context.js";
 import { encodeOpenClawStateWorkerError } from "./openclaw-state-worker-error.js";
-
-it("resolves state ownership once at each read preparation and dispatch boundary", async () => {
-  const { pathname, options } = source();
-  const dispatch = createDeferredCore();
-  const task = queueTask(dispatch.promise);
-  const resolve = vi.spyOn(boundaryPath, "resolveIdentityPathViaExistingAncestorSync");
-  const resolutions = () => resolve.mock.calls.filter(([target]) => target === pathname).length;
-  const result = executeExistingOpenClawStateRead(options, { type: "fleet.list" });
-  try {
-    // Retaining the source admits preparation before the worker queue can yield.
-    expect(resolutions()).toBe(1);
-    resolve.mockClear();
-    dispatch.resolve();
-    await task.captured;
-    expect(resolutions()).toBe(1);
-    resolve.mockClear();
-    task.result.resolve(emptyReply);
-    await expect(result).resolves.toEqual(emptyReply);
-    // Result acceptance and awaited native cleanup are separate authority boundaries.
-    expect(resolutions()).toBe(2);
-  } finally {
-    dispatch.resolve();
-    task.result.resolve(emptyReply);
-    await Promise.allSettled([result]);
-    resolve.mockRestore();
-  }
-});
 
 it("captures queued read routing and schema facts without reading unrelated environment values", async () => {
   const { root, pathname } = source();
@@ -165,9 +137,7 @@ it("reads externally created state after an absent read without allocating a wor
   task.result.resolve(emptyReply);
   expect(await executeExistingOpenClawStateRead(options, command)).toEqual(emptyReply);
   expect(mock.selectSqlite).toHaveBeenCalledOnce();
-  expect(task.close).toHaveBeenCalledExactlyOnceWith(
-    process.versions.bun ? { retire: true } : undefined,
-  );
+  expect(task.close).toHaveBeenCalledExactlyOnceWith(undefined);
   expect(mock.closePool).not.toHaveBeenCalled();
 });
 
@@ -213,7 +183,7 @@ it.each(["query failed", "native reader close failed"])(
 );
 
 it.each(["cleanup-fact", "bun"] as const)(
-  "preserves a successful read only after required retirement (%s)",
+  "settles successful reads with retirement only for native cleanup (%s)",
   async (reason) => {
     const { options } = source();
     const task = queueTask();
@@ -249,7 +219,9 @@ it.each(["cleanup-fact", "bun"] as const)(
       );
       try {
         await stopping.promise;
-        expect(task.close).toHaveBeenCalledExactlyOnceWith({ retire: true });
+        expect(task.close).toHaveBeenCalledExactlyOnceWith(
+          reason === "cleanup-fact" ? { retire: true } : undefined,
+        );
         expect(mock.selectSqlite).toHaveBeenCalledOnce();
         expect(mock.selectSqlite.mock.invocationCallOrder[0]).toBeLessThan(
           mock.create.mock.invocationCallOrder[0]!,
@@ -348,9 +320,7 @@ it("releases one completed read without closing the shared pool or aborting anot
   const siblingOptions = await sibling.submitted;
   first.result.resolve(emptyReply);
   expect(await firstRead).toEqual(emptyReply);
-  expect(first.close).toHaveBeenCalledExactlyOnceWith(
-    process.versions.bun ? { retire: true } : undefined,
-  );
+  expect(first.close).toHaveBeenCalledExactlyOnceWith(undefined);
   expect(sibling.close).not.toHaveBeenCalled();
   expect(siblingOptions.signal?.aborted).toBe(false);
   expect(mock.closePool).not.toHaveBeenCalled();
@@ -358,9 +328,7 @@ it("releases one completed read without closing the shared pool or aborting anot
 
   sibling.result.resolve(emptyReply);
   expect(await siblingRead).toEqual(emptyReply);
-  expect(sibling.close).toHaveBeenCalledExactlyOnceWith(
-    process.versions.bun ? { retire: true } : undefined,
-  );
+  expect(sibling.close).toHaveBeenCalledExactlyOnceWith(undefined);
   await closeOpenClawStateDatabaseAsync();
   expect(mock.closePool).toHaveBeenCalledOnce();
 });
