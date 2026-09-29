@@ -12,14 +12,18 @@ const state: CronJobPolicyContext = {
   },
 };
 
-function ownedJob(payload: CronPayload, sessionTarget: CronJob["sessionTarget"]): CronJob {
+function ownedJob(
+  payload: CronPayload,
+  sessionTarget: CronJob["sessionTarget"],
+  schedule: CronJob["schedule"] = { kind: "every", everyMs: 60_000 },
+): CronJob {
   return {
     id: `owned-${payload.kind}`,
     name: "owned job",
     enabled: true,
     createdAtMs: nowMs - 60_000,
     updatedAtMs: nowMs - 60_000,
-    schedule: { kind: "every", everyMs: 60_000 },
+    schedule,
     sessionTarget,
     wakeMode: "now",
     payload,
@@ -59,6 +63,22 @@ describe("failure repair eligibility", () => {
     {
       name: "command",
       job: ownedJob({ kind: "command", argv: ["true"], env: {}, input: "" }, "isolated"),
+      repairs: false,
+    },
+    {
+      name: "agentTurn on an operator-only on-exit schedule",
+      job: ownedJob({ kind: "agentTurn", message: "sync" }, "isolated", {
+        kind: "on-exit",
+        command: "make build",
+      }),
+      repairs: false,
+    },
+    {
+      name: "agentTurn on an operator-only stream schedule",
+      job: ownedJob({ kind: "agentTurn", message: "sync" }, "isolated", {
+        kind: "stream",
+        command: ["tail", "-f", "app.log"],
+      }),
       repairs: false,
     },
   ])("$name: repair=$repairs, otherwise the normal alert", ({ job, repairs }) => {

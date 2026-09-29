@@ -407,10 +407,15 @@ export function maybeEmitFailureAlert(
   // Repair runs as an agent turn with the job's own tool cap. Only jobs that already run
   // as an agent turn (a capless agentTurn runs with the agent's full policy today) or as a
   // script with an explicit cap qualify; main-session events and command jobs never ran with
-  // agent tools, so a repair would widen them. They alert as before.
+  // agent tools, so a repair would widen them. On-exit and stream schedules are operator-only:
+  // the repair grant rejects them, so a silent turn could swallow the alert. They alert as before.
   const payload = params.job.payload;
+  const scheduleKind = params.job.schedule.kind;
   const repairable =
-    payload.kind === "agentTurn" || (payload.kind === "script" && payload.toolsAllow !== undefined);
+    scheduleKind !== "on-exit" &&
+    scheduleKind !== "stream" &&
+    (payload.kind === "agentTurn" ||
+      (payload.kind === "script" && payload.toolsAllow !== undefined));
   if (
     !repair &&
     repairable &&
