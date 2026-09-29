@@ -25,6 +25,7 @@ export type PreparedAgentRunDispatch = {
   releaseCallerAuthority?: () => void;
   operatorAuthority?: AdmittedRunOperatorAuthority;
   operationalRunInstance: OperationalRunInstanceRef;
+  timeoutSeconds?: number;
   effectiveProviderOverride?: string;
   effectiveModelOverride?: string;
   effectiveThinking?: string;

@@ -102,6 +102,7 @@ export async function prepareAgentRunDispatch(
 
   const {
     timeoutMs,
+    timeoutSeconds,
     effectiveProviderOverride,
     effectiveModelOverride,
     effectiveThinking,
@@ -611,6 +612,7 @@ export async function prepareAgentRunDispatch(
       },
       ...(capturedOperator.authority ? { operatorAuthority: capturedOperator.authority } : {}),
       operationalRunInstance,
+      timeoutSeconds,
       effectiveProviderOverride,
       effectiveModelOverride,
       effectiveThinking,
