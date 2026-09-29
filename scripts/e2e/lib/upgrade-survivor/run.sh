@@ -47,7 +47,7 @@ if [ "$SCENARIO" = "mobile-pairing-reconnect" ]; then
     node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))'
   )"
 fi
-if [ "$SCENARIO" = "watchos-direct-node" ] || [ "$SCENARIO" = "mobile-pairing-reconnect" ] || [ "$SCENARIO" = "dreaming-cron-doctor" ] || [ "$WORKER_CELL" = "1" ]; then
+if [ "$SCENARIO" = "watchos-direct-node" ] || [ "$SCENARIO" = "mobile-pairing-reconnect" ] || [ "$SCENARIO" = "dreaming-cron-doctor" ] || [ "$SCENARIO" = "cron-failure-repair" ] || [ "$WORKER_CELL" = "1" ]; then
   unset OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY DISCORD_BOT_TOKEN TELEGRAM_BOT_TOKEN
 else
   export OPENAI_API_KEY="sk-openclaw-upgrade-survivor"
@@ -70,7 +70,7 @@ chmod 700 "$RUNTIME_ROOT"
 export TMPDIR="${OPENCLAW_UPGRADE_SURVIVOR_TMPDIR:-$RUNTIME_ROOT/tmp}"
 export OPENCLAW_TEST_STATE_TMPDIR="${OPENCLAW_UPGRADE_SURVIVOR_TEST_STATE_TMPDIR:-$RUNTIME_ROOT/state-tmp}"
 mkdir -p "$TMPDIR" "$OPENCLAW_TEST_STATE_TMPDIR"
-if [ "$WORKER_CELL" = "1" ] || [ "$SCENARIO" = "dreaming-cron-doctor" ]; then
+if [ "$WORKER_CELL" = "1" ] || [ "$SCENARIO" = "dreaming-cron-doctor" ] || [ "$SCENARIO" = "cron-failure-repair" ]; then
   export XDG_CACHE_HOME="$RUNTIME_ROOT/xdg-cache"
   export OPENCLAW_SKIP_CRON=1
   export OPENCLAW_SKIP_STARTUP_MODEL_PREWARM=1
@@ -1055,6 +1055,18 @@ install_companion_plugins() {
 start_legacy_operator_mock() {
   export MOCK_REQUEST_LOG="$ARTIFACT_ROOT/legacy-operator-requests.jsonl"
   local log="$ARTIFACT_ROOT/legacy-operator-mock.log"
+  mock_openai_pid="$(openclaw_e2e_start_mock_openai 0 "$log")"
+  OPENCLAW_UPGRADE_SURVIVOR_MOCK_PORT="$(openclaw_e2e_wait_mock_openai 0 80 400 "" "$mock_openai_pid" "$log")" || return "$?"
+  export OPENCLAW_UPGRADE_SURVIVOR_MOCK_PORT
+}
+
+start_cron_failure_repair_mock() {
+  export MOCK_REQUEST_LOG="$ARTIFACT_ROOT/cron-failure-repair-requests.jsonl"
+  export MOCK_RESPONSE_CONTROL="$ARTIFACT_ROOT/cron-failure-repair-mock-control.json"
+  # The repair brief follows the full system prompt; keep whole bodies for its assertions.
+  export OPENCLAW_MOCK_OPENAI_REQUEST_LOG_BODY_MAX_BYTES=16777216
+  printf '%s\n' '{"text":"CRON_REPAIR_MOCK_STARTING"}' >"$MOCK_RESPONSE_CONTROL"
+  local log="$ARTIFACT_ROOT/cron-failure-repair-mock.log"
   mock_openai_pid="$(openclaw_e2e_start_mock_openai 0 "$log")"
   OPENCLAW_UPGRADE_SURVIVOR_MOCK_PORT="$(openclaw_e2e_wait_mock_openai 0 80 400 "" "$mock_openai_pid" "$log")" || return "$?"
   export OPENCLAW_UPGRADE_SURVIVOR_MOCK_PORT
@@ -2293,6 +2305,36 @@ if [ "$SCENARIO" = "dreaming-cron-doctor" ]; then
     assert-runtime "$GATEWAY_LOG"
   run_completed="1"
   echo "Dreaming cron survivor passed: published updater child repaired active and inactive partitions, retained a verified backup, repeated Doctor made no cron changes, and the installed Gateway converged despite an authored tagged row."
+  exit 0
+fi
+if [ "$SCENARIO" = "cron-failure-repair" ]; then
+  if [ "$baseline_spec" != "openclaw@2026.9.6" ] || [ "$CANDIDATE_KIND" != "tarball" ] ||
+    [ "$UPDATE_RESTART_MODE" != "manual" ] || [ "$ROOT_MANAGED_VPS" != "0" ] || [ "$LIVE_ENABLED" != "0" ]; then
+    echo "cron-failure-repair requires published openclaw@2026.9.6, a candidate tarball, isolated manual restart, and no live provider" >&2
+    exit 2
+  fi
+  export OPENCLAW_UPGRADE_SURVIVOR_GATEWAY_LOG="$GATEWAY_LOG"
+  phase start-cron-repair-mock start_cron_failure_repair_mock
+  phase configure-cron-repair-baseline node scripts/e2e/lib/upgrade-survivor/cron-failure-repair.mjs configure
+  GATEWAY_LOG="$ARTIFACT_ROOT/cron-repair-baseline-gateway.log"
+  OPENCLAW_SKIP_CRON=0 phase cron-repair-baseline-gateway-start start_gateway
+  phase seed-cron-repair-baseline node scripts/e2e/lib/upgrade-survivor/cron-failure-repair.mjs seed-baseline
+  phase cron-repair-baseline-gateway-stop stop_gateway
+  GATEWAY_LOG="$OPENCLAW_UPGRADE_SURVIVOR_GATEWAY_LOG"
+  phase resolve-cron-repair-candidate resolve_candidate_version
+  phase update-cron-repair-candidate update_candidate
+  if [ "$update_outcome" != "success" ] || [ "$update_repair_required" != "0" ]; then
+    echo "cron-failure-repair requires the original updater to finish without follow-up repair" >&2
+    exit 1
+  fi
+  phase assert-cron-repair-updated node scripts/e2e/lib/upgrade-survivor/cron-failure-repair.mjs assert-updated
+  OPENCLAW_SKIP_CRON=0 phase cron-repair-candidate-gateway-start start_gateway
+  phase cron-repair-candidate-gateway-probes check_gateway_probes
+  phase exercise-cron-repair node scripts/e2e/lib/upgrade-survivor/cron-failure-repair.mjs exercise
+  phase cron-repair-final-gateway-probes check_gateway_probes
+  phase cron-repair-candidate-gateway-stop stop_gateway
+  run_completed="1"
+  echo "Cron failure repair survivor passed: the published updater kept both one-failure streaks, the owned job's threshold failure ran one silent owner-conversation repair instead of the alert, and the unowned job still alerted."
   exit 0
 fi
 if [ "$SCENARIO" = "channel-owner-policy" ]; then

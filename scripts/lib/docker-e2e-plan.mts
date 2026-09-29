@@ -811,7 +811,8 @@ export function requiredPrepublishPluginPackagesForLanes(
       scenario === "projects-startup-migration" ||
       scenario === "workshop-doctor-recovery" ||
       scenario === "update-report-recovery" ||
-      scenario === "dreaming-cron-doctor"
+      scenario === "dreaming-cron-doctor" ||
+      scenario === "cron-failure-repair"
     ) {
       continue;
     }
