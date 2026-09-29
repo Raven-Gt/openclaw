@@ -18,6 +18,8 @@ export function dispatchCronNotification(
 ): void {
   if (notification.kind === "auto-disabled") {
     enqueueCronNotification(state, notification.job, notification.text, notification.kind);
+  } else if (notification.kind === "failure-repair") {
+    transportFailureRepair(state, notification);
   } else {
     transportFailureAlert(state, notification);
   }
@@ -138,4 +140,47 @@ function transportFailureAlert(
         "cron: failure alert delivery failed",
       );
     });
+}
+
+function transportFailureRepair(
+  state: CronServiceState,
+  params: Extract<CronNotificationIntent, { kind: "failure-repair" }>,
+): void {
+  const start = state.deps.startCronFailureRepair;
+  const { job } = params.fallback;
+  const findLiveJob = () => state.store?.jobs.find((candidate) => candidate.id === job.id);
+  const liveJob = findLiveJob();
+  if (!start || !liveJob) {
+    transportFailureAlert(state, params.fallback);
+    return;
+  }
+  const repairAtMs = job.state.lastFailureAlertAtMs;
+  const cycle: FailureAlertCycle = {
+    alertAtMs: repairAtMs,
+    jobId: job.id,
+    lifecycleGeneration: state.lifecycleGeneration,
+    notificationId: job.state.lastFailureNotificationId,
+    runAtMs: job.state.lastRunAtMs,
+  };
+  const fallBack = (reason: string) => {
+    // A verification run can resolve the incident before a failing repair settles.
+    if (findLiveJob()?.state.failureAlertIncident?.repair?.atMs !== repairAtMs) {
+      return;
+    }
+    state.deps.log.warn(
+      { jobId: job.id, reason },
+      "cron: failure repair did not complete; alerting",
+    );
+    transportFailureAlert(state, params.fallback);
+  };
+  void start({ ...params.request, job: structuredClone(liveJob) })
+    .then(async (outcome) => {
+      if (outcome !== "completed") {
+        fallBack(outcome);
+        return;
+      }
+      // Close the repair's notification cycle: no alert was sent for it.
+      await recordFailureAlertOutcome(state, cycle, { status: "not-requested" });
+    })
+    .catch((err: unknown) => fallBack(formatErrorMessage(err)));
 }

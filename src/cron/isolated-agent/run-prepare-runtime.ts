@@ -5,6 +5,7 @@ import { hasAnyAuthProfileStoreSource } from "../../agents/auth-profiles/source-
 import { SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import type { CliDeps } from "../../cli/outbound-send-deps.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { CronManagementEntitlement } from "../../gateway/cron-creator-authority-grant.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import type { SkillSnapshot } from "../../skills/types.js";
 import type {
@@ -36,6 +37,14 @@ export type RunCronAgentTurnParams = {
   executionRoot?: string;
   /** Explicit instruction set for a host-owned turn, including an empty review context. */
   skillsSnapshot?: SkillSnapshot;
+  /**
+   * Host-minted automation management for this exact run (failure repair). Never persisted;
+   * `isCurrent` owns liveness and the scope is revoked when the run settles.
+   */
+  cronManagement?: {
+    entitlement: CronManagementEntitlement;
+    isCurrent: () => boolean;
+  };
 };
 
 export type WithRunSession = (

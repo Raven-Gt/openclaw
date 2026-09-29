@@ -41,14 +41,32 @@ export type ResolvedFailureAlert = CronFailureAlertRoute & {
   after: number;
   cooldownMs: number;
   includeSkipped: boolean;
+  /** Owner-conversation repair replaces the first chat alert of a failure streak. */
+  repair: boolean;
+};
+
+type CronFailureAlertIntent = {
+  kind: "failure-alert";
+  job: CronNotificationJob;
+  payload: ReplyPayload;
+  runAtMs?: number;
+  route: CronFailureAlertRoute;
+};
+
+/** Facts the host needs to start one owner-conversation repair turn for a failing job. */
+export type CronFailureRepairRequest = {
+  jobId: string;
+  ownerSessionKey: string;
+  consecutiveErrors: number;
+  runAtMs?: number;
 };
 
 export type CronNotificationIntent =
   | { kind: "auto-disabled"; job: CronNotificationJob; text: string }
+  | CronFailureAlertIntent
   | {
-      kind: "failure-alert";
-      job: CronNotificationJob;
-      payload: ReplyPayload;
-      runAtMs?: number;
-      route: CronFailureAlertRoute;
+      kind: "failure-repair";
+      request: CronFailureRepairRequest;
+      /** Sent instead when the repair cannot start or fails. */
+      fallback: CronFailureAlertIntent;
     };

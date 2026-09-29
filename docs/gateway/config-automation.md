@@ -75,6 +75,7 @@ activates/tunes the policy even when no route existed. The retired
 - `after`: consecutive failures before an alert fires (positive integer, min: `1`; default: `2`).
 - `cooldownMs`: minimum milliseconds between repeated alerts for the same job (non-negative integer; default: `3600000`).
 - `includeSkipped`: count consecutive skipped runs toward the alert threshold (default: `false`). Skipped runs are tracked separately and do not affect execution-error backoff.
+- `repair`: when a job with an owner conversation reaches the threshold, start one background repair turn in that conversation instead of sending the first chat alert (default: `true`). Set `false` to always alert directly. See [owner-conversation repair](/automation/cron-jobs/delivery#owner-conversation-repair).
 - `mode`: delivery mode - `"announce"` sends via a channel message; `"webhook"` posts to the target in `to`. Defaults to `"announce"` when enough target data exists.
 - `channel`: channel override for announce delivery. `"last"` reuses the last known delivery channel.
 - `to`: explicit announce target or webhook URL. Required for webhook mode.

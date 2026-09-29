@@ -7,7 +7,10 @@ import { normalizeCronJobCreate, normalizeCronJobPatch } from "../../cron/normal
 import type { CronDelivery } from "../../cron/types.js";
 import { normalizeHttpWebhookUrl } from "../../cron/webhook-url.js";
 import { GatewayClientRequestError } from "../../gateway/client.js";
-import { CRON_MANAGEMENT_METHODS } from "../../gateway/cron-creator-authority-grant.js";
+import {
+  CRON_FAILURE_REPAIR_METHODS,
+  CRON_MANAGEMENT_METHODS,
+} from "../../gateway/cron-creator-authority-grant.js";
 import { recordCronNextCheckProposal } from "../../infra/agent-run-registry.js";
 import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import { isRecord } from "../../utils.js";
@@ -228,21 +231,25 @@ export function createCronTool(opts?: CronToolOptions, deps?: CronToolDeps): Any
   // Trigger-gated surfaces default on, matching cron/service/jobs-validation.ts.
   const triggersEnabled = opts?.config?.cron?.triggers?.enabled !== false;
   const selfRemoveOnly = Boolean(readCronSelfRemoveOnlyJobId(opts));
+  const failureRepairJobId = managementAuthority?.failureRepairJobId;
   const tool: AnyAgentTool = {
     label: "Automations",
     name: AUTOMATIONS_TOOL_NAME,
     displaySummary: CRON_TOOL_DISPLAY_SUMMARY,
-    description: selfRemoveOnly
-      ? managementAuthority?.managementOnly
-        ? "Inspect or remove only the current automation. Actions: list [includeDisabled], get jobId, remove jobId. Use the current job ID; other jobs and management actions are unavailable."
-        : 'Inspect or remove only the current automation. Actions: status; list [includeDisabled]; get/runs/remove jobId; next_check in:"15m" for this paced run. Use the current job ID. To stop a finished job, remove it; creating/updating/running jobs and waking sessions are unavailable. Return the task result; the scheduler owns delivery.'
-      : managementAuthority?.managementOnly
-        ? 'Manage any existing automation on this Gateway with the admitted automation management authority. Actions: list [includeDisabled,limit,offset] (compact summaries with timing; follow nextOffset); get jobId (full schedule, payload, and delivery details); update jobId job (partial patch, null clears); run jobId (runMode:"force" runs now); remove jobId (operator removal requests cancellation of an active run; the result reports activeRunCancellationRequested:true). Creator attribution and scheduled execution policy stay intact. Use the Automations page for other actions.'
-        : buildCronToolDescription({ triggersEnabled }),
+    description: failureRepairJobId
+      ? `Repair only automation ${failureRepairJobId}. Actions: get jobId; update jobId job (payload and trigger only; payload kind stays the same; toolsAllow may only drop entries); run jobId runMode:"force" to verify a fix. Other automations and actions are unavailable.`
+      : selfRemoveOnly
+        ? managementAuthority?.managementOnly
+          ? "Inspect or remove only the current automation. Actions: list [includeDisabled], get jobId, remove jobId. Use the current job ID; other jobs and management actions are unavailable."
+          : 'Inspect or remove only the current automation. Actions: status; list [includeDisabled]; get/runs/remove jobId; next_check in:"15m" for this paced run. Use the current job ID. To stop a finished job, remove it; creating/updating/running jobs and waking sessions are unavailable. Return the task result; the scheduler owns delivery.'
+        : managementAuthority?.managementOnly
+          ? 'Manage any existing automation on this Gateway with the admitted automation management authority. Actions: list [includeDisabled,limit,offset] (compact summaries with timing; follow nextOffset); get jobId (full schedule, payload, and delivery details); update jobId job (partial patch, null clears); run jobId (runMode:"force" runs now); remove jobId (operator removal requests cancellation of an active run; the result reports activeRunCancellationRequested:true). Creator attribution and scheduled execution policy stay intact. Use the Automations page for other actions.'
+          : buildCronToolDescription({ triggersEnabled }),
     outputSchema: CronToolOutputSchema,
     parameters: createCronToolSchema({
       agentSessionKey: opts?.agentSessionKey,
       triggersEnabled,
+      failureRepair: Boolean(failureRepairJobId),
       selfRemoveOnly,
       management: managementAuthority
         ? managementAuthority.managementOnly
@@ -281,15 +288,26 @@ export function createCronTool(opts?: CronToolOptions, deps?: CronToolDeps): Any
       };
       const params = args as Record<string, unknown>;
       const action = readToolStringParam(params, "action", { required: true });
-      if (
-        managementAuthority?.managementOnly &&
-        !CRON_MANAGEMENT_METHODS.some((method) => method === `cron.${action}`)
-      ) {
-        throw new Error(
-          "This turn can only list, get, update, run, or remove automations. Use the Automations page for other actions.",
-        );
+      if (failureRepairJobId) {
+        if (
+          !CRON_FAILURE_REPAIR_METHODS.some((method) => method === `cron.${action}`) ||
+          readCronJobIdParam(params) !== failureRepairJobId
+        ) {
+          throw new Error(
+            `This repair turn can only get, update, or run automation ${failureRepairJobId}.`,
+          );
+        }
+      } else {
+        if (
+          managementAuthority?.managementOnly &&
+          !CRON_MANAGEMENT_METHODS.some((method) => method === `cron.${action}`)
+        ) {
+          throw new Error(
+            "This turn can only list, get, update, run, or remove automations. Use the Automations page for other actions.",
+          );
+        }
+        assertCronSelfRemoveScope(opts, action, params);
       }
-      assertCronSelfRemoveScope(opts, action, params);
       const parsedGatewayOpts = readGatewayCallOptions(params);
       const gatewayOpts: GatewayCallOptions = {
         ...parsedGatewayOpts,
@@ -561,7 +579,7 @@ export function createCronTool(opts?: CronToolOptions, deps?: CronToolDeps): Any
               params,
               "update",
             );
-            if (!managementAuthority) {
+            if (!managementAuthority || failureRepairJobId) {
               assertNoCronShellExecution(canonicalPatch);
             }
             assertCronDeliveryInputNonBlankFields(canonicalPatch.delivery);
@@ -583,7 +601,7 @@ export function createCronTool(opts?: CronToolOptions, deps?: CronToolDeps): Any
               await updateCronJobFromAgentTool({
                 id,
                 patch,
-                adminManagement: Boolean(managementAuthority),
+                adminManagement: Boolean(managementAuthority) && !failureRepairJobId,
                 creatorToolAllowlist: creatorOptions?.creatorToolAllowlist,
                 creatorToolAllowlistCaptureRef: creatorOptions?.creatorToolAllowlistCaptureRef,
                 resolveCreatorToolAuthority: creatorOptions?.resolveCreatorToolAuthority,

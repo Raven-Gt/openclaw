@@ -279,8 +279,16 @@ export type CronJobState = Omit<
   runningReceiptId?: string;
   /** Nonce for a committed schedule edit during the pending run. */
   runningScheduleChangeId?: string;
-  /** Unresolved recovery scope and last notified signature, when an alert was requested. */
-  failureAlertIncident?: { signature?: string; scope: "run" | "trigger" };
+  /**
+   * Unresolved recovery scope and last notified signature, when an alert was requested.
+   * `repair` records the one owner-conversation repair attempt of this failure streak;
+   * `alerted` means the user has since received a failure alert for it.
+   */
+  failureAlertIncident?: {
+    signature?: string;
+    scope: "run" | "trigger";
+    repair?: { atMs: number; alerted?: true };
+  };
   /** Fences notification settlement when multiple cycles share a timestamp. */
   lastFailureNotificationId?: string;
   /** Number of consecutive schedule computation errors. Auto-disables job after threshold. */

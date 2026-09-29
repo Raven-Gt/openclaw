@@ -8,6 +8,7 @@ type RunIsolatedAgentJob = NonNullable<CronServiceParams["runIsolatedAgentJob"]>
 type IsolatedAgentRunResult = Awaited<ReturnType<RunIsolatedAgentJob>>;
 type FailureAlertConfig = NonNullable<CronServiceParams["cronConfig"]>["failureAlert"];
 type SendCronFailureAlert = NonNullable<CronServiceParams["sendCronFailureAlert"]>;
+type StartCronFailureRepair = NonNullable<CronServiceParams["startCronFailureRepair"]>;
 
 export function createTelegramDelivery(): NonNullable<CronJobCreate["delivery"]> {
   return { mode: "announce", channel: "telegram", to: "19098680" };
@@ -40,6 +41,7 @@ export function setupFailureAlertSuite() {
       failureAlert?: FailureAlertConfig;
       runResult?: IsolatedAgentRunResult;
       useFallback?: boolean;
+      startCronFailureRepair?: StartCronFailureRepair;
     },
     run: (context: {
       cron: CronService;
@@ -72,6 +74,9 @@ export function setupFailureAlertSuite() {
       requestHeartbeat,
       runIsolatedAgentJob,
       ...(params.useFallback ? {} : { sendCronFailureAlert }),
+      ...(params.startCronFailureRepair
+        ? { startCronFailureRepair: params.startCronFailureRepair }
+        : {}),
     });
 
     await cron.start();

@@ -166,6 +166,11 @@ export function recordCronFailureAlertOutcomeInWorker(
         job.state.lastFailureNotificationDelivered = input.outcome.delivered;
         job.state.lastFailureNotificationDeliveryStatus = input.outcome.status;
         job.state.lastFailureNotificationDeliveryError = input.outcome.error;
+        // An alert sent for a repair's own cycle is its fallback: the user has been told.
+        const repair = job.state.failureAlertIncident?.repair;
+        if (repair && repair.atMs === input.alertAtMs && input.outcome.status !== "not-requested") {
+          repair.alerted = true;
+        }
         upsertCronJobRow(db, input.storeKey, job, row.sort_order);
       }
       return retainCronRuntimeMutationOutcome("cron.recordFailureAlertOutcome", db, input.nonce, {

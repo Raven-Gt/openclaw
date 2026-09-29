@@ -42,6 +42,7 @@ import type {
 } from "../types.js";
 import type { CronJobsSortBy, CronSortDir } from "./list-page-types.js";
 import type {
+  CronFailureRepairRequest,
   CronNotificationIntent,
   CronNotificationJob,
   ResolvedFailureAlert,
@@ -258,6 +259,14 @@ export type CronServiceDeps = {
     /** Persists the transport-owned terminal fact before Gateway work admission releases. */
     onDeliverySettled: (outcome: CronFailureNotificationDelivery) => Promise<void>;
   }) => Promise<void>;
+  /**
+   * Runs one owner-conversation repair turn for a job past its alert threshold, from a
+   * snapshot of the stored job. `unavailable` and `failed` fall back to the failure
+   * alert; `completed` means the turn finished and owned any messaging.
+   */
+  startCronFailureRepair?: (
+    request: CronFailureRepairRequest & { job: CronStoredJob },
+  ) => Promise<"completed" | "unavailable" | "failed">;
   onEvent?: (evt: CronEvent, context?: CronEventContext) => void;
 };
 
@@ -467,6 +476,11 @@ export type CronUpdateOptions = Pick<
 > & {
   /** Null forbids policy adoption; undefined retains in-process operator defaults. */
   scheduledToolPolicy?: CronScheduledToolPolicy | null;
+  /**
+   * Keep the job's own capture provenance and exec pin across an explicit cap edit.
+   * Only valid for callers that may merely narrow the cap (failure repair).
+   */
+  retainToolsAllowAuthority?: true;
 };
 
 export type CronCommitGuardOptions = {

@@ -125,6 +125,7 @@ import {
 } from "./scheduled-run-gateway-context.js";
 import type { GatewayCronServiceContract } from "./server-cron-contract.js";
 import { drainGatewayCron } from "./server-cron-drain.js";
+import { runGatewayCronFailureRepair } from "./server-cron-failure-repair.js";
 import {
   dispatchGatewayCronFinishedNotifications,
   sendGatewayCronWebhook,
@@ -994,6 +995,16 @@ export function buildGatewayCronService(params: {
         resolveCronAgent,
         webhookToken: params.cfg.cron?.webhookToken,
         ssrfPolicy: webhookSsrfPolicy,
+      }),
+    startCronFailureRepair: async (request) =>
+      await runGatewayCronFailureRepair({
+        request,
+        getJob: (jobId) => cron.getJob(jobId),
+        storePath,
+        deps: params.deps,
+        resolveCronAgent,
+        runSchedulerOwned,
+        log: cronServiceLogger,
       }),
     log: toPinoLikeLogger(
       getChildLogger({ module: "cron", storeKey: storePath }),

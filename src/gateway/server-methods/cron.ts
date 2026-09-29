@@ -46,6 +46,7 @@ import {
 } from "../../sessions/agent-harness-session-key.js";
 import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import {
+  getCronFailureRepairAuthority,
   getCronManagementAuthority,
   withCronManagementGrant,
 } from "../cron-creator-authority-grant.js";
@@ -147,6 +148,7 @@ function requiresExplicitAgentRuntimeToolsAllow(params: {
   return (
     params.callerScope !== undefined &&
     !params.callerScope.manageAll &&
+    !params.callerScope.failureRepair &&
     cronJobUsesToolRuntime(params.job) &&
     params.job.payload.toolsAllow === undefined
   );
@@ -154,6 +156,39 @@ function requiresExplicitAgentRuntimeToolsAllow(params: {
 
 function cronPatchTouchesToolRuntime(patch: CronJobPatch): boolean {
   return patch.payload !== undefined || Object.hasOwn(patch, "trigger");
+}
+
+/**
+ * A failure repair edits what the job runs, never its identity, routing, schedule, or
+ * execution ceiling: payload (same kind) and trigger only, and toolsAllow may only shrink.
+ */
+function assertCronFailureRepairPatch(job: CronJob, patch: CronJobPatch): void {
+  const outside = Object.keys(patch).filter((key) => key !== "payload" && key !== "trigger");
+  if (outside.length > 0) {
+    throw new TypeError(
+      `automation repair can only change payload or trigger, not ${outside.join(", ")}`,
+    );
+  }
+  const payload = patch.payload;
+  if (!payload) {
+    return;
+  }
+  if (payload.kind !== undefined && payload.kind !== job.payload.kind) {
+    throw new TypeError("automation repair cannot change the payload kind");
+  }
+  if (!("toolsAllow" in payload)) {
+    return;
+  }
+  const current = "toolsAllow" in job.payload ? job.payload.toolsAllow : undefined;
+  const next = payload.toolsAllow;
+  if (
+    !Array.isArray(next) ||
+    (current !== undefined &&
+      !current.includes("*") &&
+      next.some((tool) => !current.includes(tool)))
+  ) {
+    throw new TypeError("automation repair can only remove entries from payload.toolsAllow");
+  }
 }
 
 export const cronHandlers: GatewayRequestHandlers = {
@@ -748,7 +783,11 @@ export const cronHandlers: GatewayRequestHandlers = {
       }
     }
     const touchesToolRuntime = cronPatchTouchesToolRuntime(patch);
+    const failureRepair = callerScope?.failureRepair;
     const validateUpdate = async (jobToUpdate: CronJob) => {
+      if (failureRepair) {
+        assertCronFailureRepairPatch(jobToUpdate, patch);
+      }
       const nextJob = await assertValidCronUpdatePatch({
         cfg,
         defaultAgentId: context.cron.getDefaultAgentId(),
@@ -775,14 +814,16 @@ export const cronHandlers: GatewayRequestHandlers = {
       captureRuntimeAuthority ||
       callerScope?.toolsAllowProvenance
         ? {
-            // Management access preserves the job's existing execution ceiling.
+            // Management and failure repair preserve the job's existing execution ceiling.
             ...(touchesToolRuntime
-              ? {
-                  scheduledToolPolicy: callerScope?.manageAll
-                    ? null
-                    : resolveCronScheduledToolPolicyForCaller(callerScope),
-                  toolsAllowExecTarget: callerScope?.toolsAllowExecTarget,
-                }
+              ? failureRepair
+                ? { scheduledToolPolicy: null, retainToolsAllowAuthority: true as const }
+                : {
+                    scheduledToolPolicy: callerScope?.manageAll
+                      ? null
+                      : resolveCronScheduledToolPolicyForCaller(callerScope),
+                    toolsAllowExecTarget: callerScope?.toolsAllowExecTarget,
+                  }
               : {}),
             ...(commitGuard ? { commitGuard } : {}),
             ...(captureRuntimeAuthority ? { captureRuntimeAuthority } : {}),
@@ -813,7 +854,7 @@ export const cronHandlers: GatewayRequestHandlers = {
             }
           }
           await validateUpdate(lockedJob);
-          if (updateOptions) {
+          if (updateOptions && !failureRepair) {
             updateOptions.toolsAllowProvenance = resolveCronRequesterProvenanceForJob(
               lockedJob,
               readCronCallerScope(client),
@@ -992,6 +1033,7 @@ for (const [method, handler] of Object.entries(cronHandlers)) {
           ) {
             assertActiveAgentRuntimeAuthority(args.client, args.context);
             getCronManagementAuthority(identity)?.();
+            getCronFailureRepairAuthority(identity)?.assertActive();
           }
           succeeded = response[0];
           args.respond(...response);

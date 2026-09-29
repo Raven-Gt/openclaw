@@ -419,8 +419,15 @@ async function updateLoadedJob(params: {
     scheduleValidationNowMs: now,
     cronConfig: state.deps.cronConfig,
     scheduledToolPolicy: opts?.scheduledToolPolicy,
-    toolsAllowProvenance: opts?.toolsAllowProvenance,
-    toolsAllowExecTarget: opts?.toolsAllowExecTarget,
+    ...(opts?.retainToolsAllowAuthority
+      ? {
+          toolsAllowProvenance: job.toolsAllowProvenance,
+          toolsAllowExecTarget: job.toolsAllowExecTarget,
+        }
+      : {
+          toolsAllowProvenance: opts?.toolsAllowProvenance,
+          toolsAllowExecTarget: opts?.toolsAllowExecTarget,
+        }),
     configuredChannels,
   });
   if (patch.agentId !== undefined) {

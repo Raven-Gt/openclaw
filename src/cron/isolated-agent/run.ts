@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { retireSessionMcpRuntime } from "../../agents/agent-bundle-mcp-tools.js";
+import {
+  createCronCreatorAuthorityCapability,
+  runWithCronCreatorAuthorityCapability,
+} from "../../agents/cron-creator-authority-context.js";
 import { withPreparedModelRuntimePluginGenerationScope } from "../../agents/prepared-model-runtime-generation-scope.js";
 import {
   createAgentRunRestartAbortError,
@@ -256,10 +260,25 @@ export async function runCronIsolatedAgentTurn(
               executionIdentity: params.executionIdentity,
               admissionSource: params.admissionSource,
             };
-            const execution = await prepared.context.sessionWorkAdmission.run(() =>
+            const cronManagement = params.cronManagement;
+            // Tools bind management at construction from this exact run's scope; it is
+            // revoked when execution settles, before finalization and delivery.
+            const managementCapability = cronManagement
+              ? createCronCreatorAuthorityCapability(
+                  runId,
+                  { kind: "unknown" },
+                  cronManagement.entitlement,
+                  cronManagement.isCurrent,
+                )
+              : undefined;
+            const execute = () =>
               withAgentRunLifecycleGeneration(runLifecycleGeneration, () =>
                 executeCronRun(executionParams),
-              ),
+              );
+            const execution = await prepared.context.sessionWorkAdmission.run(() =>
+              managementCapability
+                ? runWithCronCreatorAuthorityCapability(managementCapability, execute, abortSignal)
+                : execute(),
             );
             // Publish the execution fact captured before bookkeeping; cron persistence
             // and delivery retain their separate workflow outcome.

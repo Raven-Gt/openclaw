@@ -3,7 +3,10 @@ import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coerc
 import { Type, type TSchema } from "typebox";
 import { parseCronPacingBounds } from "../../cron/pacing.js";
 import type { CronPacing } from "../../cron/types.js";
-import { CRON_MANAGEMENT_METHODS } from "../../gateway/cron-creator-authority-grant.js";
+import {
+  CRON_FAILURE_REPAIR_METHODS,
+  CRON_MANAGEMENT_METHODS,
+} from "../../gateway/cron-creator-authority-grant.js";
 import { isRecord } from "../../utils.js";
 import {
   optionalNonNegativeIntegerSchema,
@@ -50,6 +53,8 @@ const CRON_RUN_MODES = ["due", "force"] as const;
 type CronToolSchemaOptions = {
   agentSessionKey?: string;
   management?: "only" | "also";
+  /** A failure-repair turn: get/update/run of one job, payload and trigger only. */
+  failureRepair?: boolean;
   selfRemoveOnly?: boolean;
   /**
    * Whether cron.triggers.enabled is on for this deployment. When false, the
@@ -392,6 +397,23 @@ export function createCronToolSchema(options?: CronToolSchemaOptions): TSchema {
       },
     ),
   );
+  const runMode = optionalStringEnum(CRON_RUN_MODES, {
+    description:
+      'Run mode for action="run": omitted defaults to "due"; use "force" to trigger now.',
+  });
+  if (options?.failureRepair) {
+    return Type.Object(
+      {
+        action: stringEnum(CRON_FAILURE_REPAIR_METHODS.map((method) => method.slice(5))),
+        ...gatewayCallOptionSchemaProperties(),
+        job: Type.Optional(Type.Pick(job, ["payload", "trigger"])),
+        jobId: Type.Optional(Type.String()),
+        id: Type.Optional(Type.String()),
+        runMode,
+      },
+      { additionalProperties: true },
+    );
+  }
   const schema = Type.Object(
     {
       action: stringEnum(
@@ -420,10 +442,7 @@ export function createCronToolSchema(options?: CronToolSchemaOptions): TSchema {
       mode: optionalStringEnum(CRON_WAKE_MODES, {
         description: 'Wake mode for action="wake" (default next-heartbeat)',
       }),
-      runMode: optionalStringEnum(CRON_RUN_MODES, {
-        description:
-          'Run mode for action="run": omitted defaults to "due"; use "force" to trigger now.',
-      }),
+      runMode,
       contextMessages: Type.Optional(
         Type.Integer({ minimum: 0, maximum: REMINDER_CONTEXT_MESSAGES_MAX }),
       ),
