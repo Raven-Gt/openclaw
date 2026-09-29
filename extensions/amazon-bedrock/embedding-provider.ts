@@ -316,10 +316,10 @@ export async function createBedrockEmbeddingProvider(
   let refreshStaticCredentials = false;
   const credentialDefaultProvider: typeof bedrockCredentialDefaultProvider = (init) => {
     const shared = (credentialProvider ??= bedrockCredentialDefaultProvider(init));
-    return async (options) => {
+    return async (credentialOptions) => {
       const resolved = await shared({
-        ...options,
-        forceRefresh: options?.forceRefresh || refreshStaticCredentials,
+        ...credentialOptions,
+        forceRefresh: credentialOptions?.forceRefresh || refreshStaticCredentials,
       });
       // Role credentials use SDK expiry handling; profile files without expiry
       // must still be reread after external rotation, as with per-request clients.

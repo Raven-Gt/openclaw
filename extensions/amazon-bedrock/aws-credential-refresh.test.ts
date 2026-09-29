@@ -18,7 +18,7 @@ it("shares role credentials across embedding batches and refreshes after expiry"
   const configFile = path.join(dir, "config");
   await writeFile(credentialsFile, "");
   await writeFile(configFile, "");
-  for (const name of Object.keys(process.env).filter((name) => name.startsWith("AWS_"))) {
+  for (const name of Object.keys(process.env).filter((key) => key.startsWith("AWS_"))) {
     vi.stubEnv(name, undefined);
   }
   vi.stubEnv("AWS_CONFIG_FILE", configFile);
@@ -45,7 +45,9 @@ it("shares role credentials across embedding batches and refreshes after expiry"
       );
     }
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
   try {
     const address = server.address();
     if (!address || typeof address === "string") {
@@ -53,28 +55,35 @@ it("shares role credentials across embedding batches and refreshes after expiry"
     }
     vi.stubEnv("AWS_EC2_METADATA_SERVICE_ENDPOINT", `http://127.0.0.1:${address.port}`);
     const resolved: string[] = [];
-    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockImplementation(async function (
+    const pendingCredentials: Promise<void>[] = [];
+    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockImplementation(function (
       this: BedrockRuntimeClient,
     ) {
-      resolved.push((await this.config.credentials()).accessKeyId);
+      pendingCredentials.push(
+        this.config.credentials().then((credentials) => {
+          resolved.push(credentials.accessKeyId);
+        }),
+      );
       return { $metadata: {}, body: new TextEncoder().encode('{"embedding":[1,0]}') };
     });
     const { provider } = await createBedrockEmbeddingProvider({ config: {}, model: "" });
     const inputs = Array.from({ length: 20 }, (_, i) => `memory ${i}`);
     expect(await provider.embedBatch(inputs)).toEqual(inputs.map(() => [1, 0]));
+    await Promise.all(pendingCredentials);
     expect(credentialRequests).toBe(1);
     expect(resolved).toEqual(inputs.map(() => "TEST_A"));
     generation = "B";
     vi.spyOn(Date, "now").mockReturnValue(now + 7200000);
     resolved.length = 0;
     expect(await provider.embedBatch(inputs)).toEqual(inputs.map(() => [1, 0]));
+    await Promise.all(pendingCredentials);
     expect(resolved).toEqual(inputs.map(() => "TEST_B"));
     expect(credentialRequests).toBe(2);
   } finally {
     server.closeAllConnections();
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    );
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
   }
 });
 
@@ -90,7 +99,7 @@ it("assumes a profile role in the region selected by the Bedrock endpoint", asyn
     configFile,
     "[profile role]\nrole_arn = arn:aws-us-gov:iam::123456789012:role/synthetic\nsource_profile = source\n",
   );
-  for (const name of Object.keys(process.env).filter((name) => name.startsWith("AWS_"))) {
+  for (const name of Object.keys(process.env).filter((key) => key.startsWith("AWS_"))) {
     vi.stubEnv(name, undefined);
   }
   vi.stubEnv("AWS_CONFIG_FILE", configFile);
@@ -105,17 +114,24 @@ it("assumes a profile role in the region selected by the Bedrock endpoint", asyn
       `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>TEST_ASSUMED</AccessKeyId><SecretAccessKey>synthetic-secret</SecretAccessKey><SessionToken>synthetic-session</SessionToken><Expiration>${new Date(Date.now() + 3600000).toISOString()}</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>`,
     );
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
   try {
     const address = server.address();
     if (!address || typeof address === "string") {
       throw new Error("Expected loopback listener");
     }
     vi.stubEnv("AWS_ENDPOINT_URL_STS", `http://127.0.0.1:${address.port}`);
-    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockImplementation(async function (
+    const pendingCredentials: Promise<void>[] = [];
+    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockImplementation(function (
       this: BedrockRuntimeClient,
     ) {
-      expect((await this.config.credentials()).accessKeyId).toBe("TEST_ASSUMED");
+      pendingCredentials.push(
+        this.config.credentials().then((credentials) => {
+          expect(credentials.accessKeyId).toBe("TEST_ASSUMED");
+        }),
+      );
       return { $metadata: {}, body: new TextEncoder().encode('{"embedding":[1,0]}') };
     });
     const { provider } = await createBedrockEmbeddingProvider({
@@ -124,12 +140,13 @@ it("assumes a profile role in the region selected by the Bedrock endpoint", asyn
       remote: { baseUrl: "https://bedrock-runtime.us-gov-west-1.amazonaws.com" },
     });
     expect(await provider.embed("memory")).toEqual([1, 0]);
+    await Promise.all(pendingCredentials);
     expect(signatures).toEqual([expect.stringContaining("/us-gov-west-1/sts/aws4_request")]);
   } finally {
     server.closeAllConnections();
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    );
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
   }
 });
 
