@@ -1,6 +1,7 @@
 import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { html, nothing } from "lit";
 import { repeat } from "lit/directives/repeat.js";
+import type { MessageReactionSummary } from "../../../../../packages/gateway-protocol/src/index.js";
 import { groupToolCalls, type ToolCallGroup } from "../../../../../src/chat/tool-call-grouping.js";
 import { resolveLocalUserName } from "../../../app/user-identity.ts";
 import type { BrowserTabSelection } from "../../../components/browser/browser-target.ts";
@@ -43,6 +44,7 @@ import {
   resolveMessageActionDetails,
   type MessageReplyTarget,
 } from "./chat-message-markdown.ts";
+import { renderMessageReactions, type MessageReactionAction } from "./chat-message-reactions.ts";
 import { renderChatSendStatus, type ChatSendStatusActions } from "./chat-message-send-status.ts";
 import {
   emptyGroupFooter,
@@ -104,6 +106,8 @@ type RenderMessageGroupOptions = Omit<
     showAssistantAvatar?: boolean;
     contextWindow?: number | null;
     onReply?: (target: MessageReplyTarget) => void;
+    onReact?: MessageReactionAction;
+    messageReactions?: ReadonlyMap<string, MessageReactionSummary[]>;
     resolveReplyPreview?: (replyToId: string) => ReplyPreview | undefined;
     onRewind?: () => void;
     rewindDisabled?: boolean;
@@ -167,12 +171,14 @@ function renderPreparedGroupMessage(
         : {}),
     };
   }
-  return renderGroupedMessage(
+  const isStreaming = group.isStreaming && index === group.messages.length - 1;
+  const reactionMessageId = !isStreaming ? actionDetails?.reactionMessageId : undefined;
+  return html`${renderGroupedMessage(
     source,
     item.key,
     {
       ...opts,
-      isStreaming: group.isStreaming && index === group.messages.length - 1,
+      isStreaming,
       entryId: persistedMessageEntryId(item.message) ?? undefined,
       entryRef: opts.entryRefFor?.(item.key),
       duplicateCount: item.duplicateCount ?? 1,
@@ -182,7 +188,7 @@ function renderPreparedGroupMessage(
       messageActions: actionDetails,
     },
     opts.onOpenSidebar,
-  );
+  )}${renderMessageReactions(reactionMessageId, opts)}`;
 }
 
 function isOwnSenderGroup(
@@ -530,7 +536,8 @@ export function renderMessageGroup(group: MessageGroup, opts: RenderMessageGroup
     Boolean(
       (footerActionDetails?.replyTarget && opts.onReply) ||
       (opts.onRewind && !opts.rewindDisabled) ||
-      footerActionDetails?.markdown,
+      footerActionDetails?.markdown ||
+      (footerActionDetails?.reactionMessageId && opts.onReact),
     );
   const userFooterActions = hasUserFooterActions
     ? html`
@@ -545,8 +552,8 @@ export function renderMessageGroup(group: MessageGroup, opts: RenderMessageGroup
           }
           ${opts.onRewind && !opts.rewindDisabled ? renderRewindButton(opts.onRewind) : nothing}
           ${
-            footerActionDetails?.markdown
-              ? renderMessageActionButtons(footerActionDetails, {})
+            footerActionDetails
+              ? renderMessageActionButtons(footerActionDetails, { onReact: opts.onReact })
               : nothing
           }
         </div>
@@ -623,7 +630,9 @@ export function renderMessageGroup(group: MessageGroup, opts: RenderMessageGroup
                 )}
                 ${
                   actionDetails &&
-                  (actionDetails.markdown || (actionDetails.replyTarget && opts.onReply)) &&
+                  (actionDetails.markdown ||
+                    (actionDetails.replyTarget && opts.onReply) ||
+                    (actionDetails.reactionMessageId && opts.onReact)) &&
                   index < lastMessageIndex &&
                   !isTurnBlock
                     ? html`

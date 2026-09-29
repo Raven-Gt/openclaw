@@ -21,6 +21,8 @@ import {
 } from "../chat-message-recovery.ts";
 import { persistedMessageEntryId } from "../chat-thread.ts";
 import { extractMessageMediaText } from "./chat-message-media.ts";
+import type { MessageReactionAction } from "./chat-message-reactions.ts";
+import "./chat-message-reactions.ts";
 
 registerChatMessageMetadataEnglish();
 
@@ -32,6 +34,7 @@ export type MessageActionDetails = {
   markdown?: string;
   fullMessage?: { messageId: string; state: AssistantMessageExpansionState | undefined };
   replyTarget?: MessageReplyTarget;
+  reactionMessageId?: string;
 };
 
 // Loading and completion each advance the revision: three automatic attempts.
@@ -103,12 +106,15 @@ export function resolveMessageActionDetails(
     role === "assistant" || role === "user" || pendingInput ? visibleMarkdown : undefined;
   const copyMarkdown = resolveMessageReplyText(message, normalizedMessage, visibleMarkdown);
   const replyText = onReply && !pendingInput ? truncateUtf16Safe(copyMarkdown, 500) : "";
-  if (!copyMarkdown && !markdown && !replyText && !fullMessage) {
+  const sourceMessageId = persistedMessageEntryId(message);
+  const reactionMessageId =
+    (role === "user" || role === "assistant") && !pendingInput ? sourceMessageId : null;
+  if (!copyMarkdown && !markdown && !replyText && !fullMessage && !reactionMessageId) {
     return null;
   }
-  const sourceMessageId = persistedMessageEntryId(message);
   return {
     copyMarkdown,
+    ...(reactionMessageId ? { reactionMessageId } : {}),
     ...(markdown === undefined ? {} : { markdown }),
     fullMessage,
     ...(replyText
@@ -128,6 +134,7 @@ export function renderMessageActionButtons(
   details: MessageActionDetails,
   opts: {
     onReply?: (target: MessageReplyTarget) => void;
+    onReact?: MessageReactionAction;
   },
 ) {
   return html`
@@ -137,6 +144,14 @@ export function renderMessageActionButtons(
         : nothing
     }
     ${details.markdown ? renderCopyAsMarkdownButton(details.markdown) : nothing}
+    ${
+      details.reactionMessageId && opts.onReact
+        ? html`<openclaw-message-reaction-picker
+            class="chat-reaction-action"
+            .onSelect=${(emoji: string) => opts.onReact?.(details.reactionMessageId!, emoji, false)}
+          ></openclaw-message-reaction-picker>`
+        : nothing
+    }
   `;
 }
 

@@ -3206,6 +3206,14 @@ export const en: TranslationMap & {
       publicDisabled: "Public access disabled.",
       publicUnavailable: "Public access requires a saved, non-incognito session.",
     },
+    reactions: {
+      add: "Add reaction",
+      emoji: "Emoji",
+      more: "More…",
+      apply: "Apply",
+      shortcut: "Use {shortcut} to open your emoji picker.",
+      hint: "Type or paste an emoji.",
+    },
     sessionSuggestions: {
       suggest: "Suggest",
       suggestMessage: "Suggest message",
