@@ -17,6 +17,7 @@ import {
   buildInboundHistoryFromEntries,
   createChannelHistoryWindow,
 } from "openclaw/plugin-sdk/reply-history";
+import { resolveBatchedReplyThreadingPolicy } from "openclaw/plugin-sdk/reply-reference";
 import { buildAgentSessionKey, resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import { danger, logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { evaluateSupplementalContextVisibility } from "openclaw/plugin-sdk/security-runtime";
@@ -391,6 +392,8 @@ export async function buildDiscordMessageProcessContext(params: {
     },
   );
 
+  const batchMessageIds =
+    ctx.sourceMessageIds && ctx.sourceMessageIds.length > 1 ? [...ctx.sourceMessageIds] : undefined;
   const ctxPayload = await (ctx.buildContext ?? buildChannelInboundEventContext)({
     channelIngress,
     channel: "discord",
@@ -514,6 +517,13 @@ export async function buildDiscordMessageProcessContext(params: {
       groupSystemPrompt: isGuildMessage ? groupSystemPrompt : undefined,
     },
     extra: {
+      MessageSids: batchMessageIds,
+      MessageSidFirst: batchMessageIds?.[0],
+      MessageSidLast: batchMessageIds?.at(-1),
+      ReplyThreading: resolveBatchedReplyThreadingPolicy(
+        replyToMode,
+        batchMessageIds !== undefined,
+      ),
       ...(preflightAudioTranscript !== undefined ? { Transcript: preflightAudioTranscript } : {}),
       GroupSubject: isDirectMessage ? undefined : groupChannel,
       GroupChannel: groupChannel,
