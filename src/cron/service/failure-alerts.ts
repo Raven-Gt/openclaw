@@ -404,8 +404,16 @@ export function maybeEmitFailureAlert(
   const ownerSessionKey = params.job.owner?.sessionKey?.trim();
   const repairIncident = params.job.state.failureAlertIncident;
   const repairAtMs = params.job.state.lastFailureAlertAtMs;
+  // Repair runs as an agent turn with the job's own tool cap. Only jobs that already run
+  // as an agent turn (a capless agentTurn runs with the agent's full policy today) or as a
+  // script with an explicit cap qualify; main-session events and command jobs never ran with
+  // agent tools, so a repair would widen them. They alert as before.
+  const payload = params.job.payload;
+  const repairable =
+    payload.kind === "agentTurn" || (payload.kind === "script" && payload.toolsAllow !== undefined);
   if (
     !repair &&
+    repairable &&
     alertConfig.repair &&
     alertConfig.mode === "announce" &&
     params.status === "error" &&

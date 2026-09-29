@@ -37,12 +37,13 @@ scenario:
     isolationReason: Forces failing and repaired cron runs whose alerts and repair replies share one owner conversation.
     channel: qa-channel
     retryCount: 0
-    timeoutMs: 420000
+    timeoutMs: 540000
     summary: Fail an owned announce job twice with mock-openai, then prove the owner-conversation repair replaces the failure alert.
     config:
       requiredProviderMode: mock-openai
       conversationId: qa-cron-failure-repair
       controlConversationId: qa-cron-failure-repair-control
+      eventConversationId: qa-cron-failure-repair-event
       ownerMarker: QA-CRON-REPAIR-OWNER-READY
       brokenMessage: "Cron failure repair QA check: broken step. Reply exactly `QA-CRON-REPAIR-JOB-OK`."
       fixedMessage: "Cron failure repair QA check: fixed step. Reply exactly `QA-CRON-REPAIR-JOB-OK`."
@@ -350,3 +351,91 @@ flow:
             - 30000
             - 250
       detailsExpr: "`control alert=${JSON.stringify(controlAlerts.map((message) => message.text))}`"
+
+    - name: an owned main-session event job alerts instead of repairing
+      actions:
+        - set: eventCursor
+          value:
+            expr: "(await fetchJson(`${env.mock.baseUrl}/debug/request-cursor`)).cursor"
+        - call: env.gateway.call
+          saveAs: eventJob
+          args:
+            - cron.add
+            - agentId: qa
+              owner:
+                agentId: qa
+                sessionKey:
+                  ref: ownerSessionKey
+              name:
+                expr: "`qa-cron-failure-repair-event-${randomUUID()}`"
+              enabled: true
+              deleteAfterRun: false
+              schedule:
+                kind: at
+                at:
+                  expr: "new Date(Date.now() + 10 * 60 * 1000).toISOString()"
+              sessionTarget: main
+              wakeMode: now
+              payload:
+                kind: systemEvent
+                text:
+                  ref: config.brokenMessage
+              failureAlert:
+                after: 2
+                cooldownMs: 0
+                channel: qa-channel
+                to:
+                  expr: "`group:${config.eventConversationId}`"
+            - timeoutMs: 30000
+        - assert:
+            expr: "Boolean(eventJob.id) && eventJob.owner?.sessionKey === ownerSessionKey && eventJob.payload?.kind === 'systemEvent'"
+            message:
+              expr: "`owned event job was not created as requested: ${JSON.stringify(eventJob)}`"
+        - forEach:
+            items:
+              expr: "[1, 2]"
+            item: attempt
+            actions:
+              - set: runStartedAt
+                value:
+                  expr: "Date.now()"
+              - call: env.gateway.call
+                saveAs: eventRunResponse
+                args:
+                  - cron.run
+                  - id:
+                      expr: eventJob.id
+                    mode: force
+                  - timeoutMs: 30000
+              - call: waitForCronRunCompletion
+                saveAs: eventRun
+                args:
+                  - callGateway:
+                      expr: "env.gateway.call.bind(env.gateway)"
+                    jobId:
+                      expr: eventJob.id
+                    afterTs:
+                      ref: runStartedAt
+                    runId:
+                      expr: "eventRunResponse?.runId"
+                    timeoutMs:
+                      expr: "liveTurnTimeoutMs(env, 90000)"
+              - assert:
+                  expr: "eventRun.status === 'error'"
+                  message:
+                    expr: "`expected failed event run ${attempt}, got ${JSON.stringify(eventRun)}`"
+        - call: waitForCondition
+          saveAs: eventAlerts
+          args:
+            - lambda:
+                expr: '(() => { const matches = state.getSnapshot().messages.filter((message) => message.direction === ''outbound'' && !message.deleted && message.conversation.id === config.eventConversationId && message.text.startsWith(`Automation "${eventJob.name}" failed 2 times`)); return matches.length > 0 ? matches : undefined; })()'
+            - 30000
+            - 250
+        - set: eventRepairRequests
+          value:
+            expr: "(await fetchJson(`${env.mock.baseUrl}/debug/requests?after=${eventCursor}`)).filter((request) => String(request.prompt ?? '').includes(config.repairBriefNeedle))"
+        - assert:
+            expr: "eventRepairRequests.length === 0"
+            message:
+              expr: "`a main-session event job started a repair turn: ${eventRepairRequests.length}`"
+      detailsExpr: "`event alert=${JSON.stringify(eventAlerts.map((message) => message.text))} repairRequests=${eventRepairRequests.length}`"
