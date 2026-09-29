@@ -156,11 +156,15 @@ describe("cron.update with a failure-repair grant", () => {
             await expect(
               update(other.id, { payload: { kind: "agentTurn", message: "hijack" } }),
             ).resolves.toMatchObject({ ok: false, message: expect.stringContaining("not found") });
-            await expect(
-              update(repaired.id, {
-                payload: { kind: "agentTurn", toolsAllow: ["read", "write"] },
-              }),
-            ).resolves.toMatchObject({ ok: false, message: expect.stringContaining("toolsAllow") });
+            // Any cap edit, narrowing included, would drop captured MCP runtime authority.
+            for (const toolsAllow of [["read", "write"], ["read"]]) {
+              await expect(
+                update(repaired.id, { payload: { kind: "agentTurn", toolsAllow } }),
+              ).resolves.toMatchObject({
+                ok: false,
+                message: expect.stringContaining("payload.toolsAllow"),
+              });
+            }
             await expect(
               update(repaired.id, { schedule: { kind: "every", everyMs: 60_000 } }),
             ).resolves.toMatchObject({ ok: false, message: expect.stringContaining("schedule") });
