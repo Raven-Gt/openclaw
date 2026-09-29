@@ -4,8 +4,8 @@ import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { runCommandWithTimeout, type SpawnResult } from "openclaw/plugin-sdk/process-runtime";
 import { describe, expect, it, vi } from "vitest";
 import { openWarmImageStore } from "./crabbox-state.test-support.js";
-import { commandResult } from "./crabbox-worker-provider.test-support.js";
 import { stopCrabboxLease } from "./crabbox-worker-command.js";
+import { commandResult } from "./crabbox-worker-provider.test-support.js";
 import {
   createWarmProvider,
   LEASE_ID,
