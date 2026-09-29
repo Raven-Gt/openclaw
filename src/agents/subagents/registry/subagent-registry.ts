@@ -46,6 +46,7 @@ import {
   countPendingDescendantRuns,
   getLatestLiveSubagentRunByChildSessionKey,
 } from "./subagent-registry-read.js";
+import { adoptSubagentRunForRequesterTurnInRuns } from "./subagent-registry-requester-yield.js";
 import { createSubagentRegistryRestorer } from "./subagent-registry-restore.js";
 import type { RegisterSubagentRunParams } from "./subagent-registry-run-launch-record.js";
 import { createSubagentRunManager } from "./subagent-registry-run-manager.js";
@@ -706,6 +707,18 @@ export const settleRequesterAfterSessionSpawns = publicApi.settleRequesterAfterS
 export const markRequesterTurnYielded = publicApi.markRequesterTurnYielded;
 export const listUnsettledRequesterChildren = publicApi.listUnsettledRequesterChildren;
 export type { UnsettledRequesterChild } from "./subagent-registry-requester-yield.js";
+
+export function adoptSubagentRunForRequesterTurn(
+  params: Omit<Parameters<typeof adoptSubagentRunForRequesterTurnInRuns>[0], "runs" | "persist">,
+) {
+  return adoptSubagentRunForRequesterTurnInRuns({
+    ...params,
+    runs: subagentRuns,
+    persist: persistSubagentRunsAsyncOrThrow,
+    assertCurrent: () =>
+      subagentRuns.runWithCompletionAuthority(params.expected, params.assertCurrent),
+  });
+}
 
 /** Attaches presentation to an existing wake without changing completion ownership. */
 export function attachRequesterProgressPresentation(params: {

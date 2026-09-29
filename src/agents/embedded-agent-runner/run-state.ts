@@ -77,6 +77,28 @@ export type EmbeddedAgentQueueHandle = {
   taskSuggestionDeliveryMode?: TaskSuggestionDeliveryMode;
 };
 
+export type EmbeddedAgentQueueMessageOutcome =
+  | {
+      queued: true;
+      sessionId: string;
+      /** Physical execution selected by queue admission, retained across the awaited receipt. */
+      runId?: string;
+      target: "embedded_run" | "reply_run";
+      gatewayHealth: "live";
+      /** Input is non-replayable, but its delivery or commitment could not be confirmed. */
+      transcriptCommit?: "unconfirmed";
+      errorMessage?: string;
+      deliveredAtMs?: number;
+      enqueuedAtMs?: number;
+    }
+  | {
+      queued: false;
+      sessionId: string;
+      reason: EmbeddedAgentQueueFailureReason;
+      gatewayHealth: "live";
+      errorMessage?: string;
+    };
+
 export type EmbeddedAgentQueueFailureReason =
   | "input_visibility_mismatch"
   | "no_active_run"

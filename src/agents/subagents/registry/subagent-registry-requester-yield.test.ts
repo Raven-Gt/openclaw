@@ -1,14 +1,20 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getAgentEventLifecycleGeneration } from "../../../infra/agent-events.js";
+import {
+  createOpenClawTestState,
+  type OpenClawTestState,
+} from "../../../test-utils/openclaw-test-state.js";
 import {
   consumeRequesterFinalAttachment,
   registerRequesterFinalAttachment,
 } from "../requester-final-attachment.js";
 import {
+  adoptSubagentRunForRequesterTurnInRuns,
   listUnsettledRequesterChildrenInRuns,
   markRequesterTurnYieldedInRuns,
   settleRequesterTurnAfterSessionSpawns,
 } from "./subagent-registry-requester-yield.js";
+import { persistSubagentRunsToDiskAsyncOrThrow } from "./subagent-registry-state.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
 const REQUESTER = "agent:main:main";
@@ -54,6 +60,130 @@ function settleRuns(
     ...overrides,
   });
 }
+
+describe("adoptSubagentRunForRequesterTurnInRuns", () => {
+  let state: OpenClawTestState;
+  beforeAll(async () => {
+    state = await createOpenClawTestState({ scenario: "minimal" });
+  });
+  afterAll(async () => {
+    await state.cleanup();
+  });
+
+  function pendingChild(): SubagentRunRecord {
+    return {
+      ...makeRun("steered-child", false),
+      taskRunId: "original-task",
+      requesterAgentId: "main",
+      requesterTurnRunId: undefined,
+      execution: { status: "running", startedAt: 1_000 },
+      completion: { required: true },
+      delivery: { status: "pending" },
+      requesterSettleWake: {
+        status: "pending",
+        attemptCount: 0,
+        batchRunIds: ["steered-child"],
+        requesterYieldBatch: true,
+        rearmGeneration: 1,
+      },
+    };
+  }
+
+  function adoption(entry: SubagentRunRecord) {
+    const runs = new Map([[entry.runId, entry]]);
+    const persist: Parameters<typeof adoptSubagentRunForRequesterTurnInRuns>[0]["persist"] = (
+      context,
+      callbacks,
+      ...runIds
+    ) => persistSubagentRunsToDiskAsyncOrThrow(runs, runIds, { ...callbacks, context });
+    return {
+      expected: entry,
+      requesterSessionKey: REQUESTER,
+      requesterAgentId: "main",
+      requesterTurnRunId: REQUESTER_TURN,
+      assertCurrent: () => {},
+      runs,
+      persist,
+    };
+  }
+
+  it("keeps the pending batch and logical task while making the current turn yieldable", async () => {
+    const child = pendingChild();
+    const before = structuredClone(child);
+    const params = adoption(child);
+    const receipt = await adoptSubagentRunForRequesterTurnInRuns(params);
+    expect(receipt).toEqual({
+      runId: "original-task",
+      childSessionKey: child.childSessionKey,
+      expectsCompletionMessage: true,
+    });
+    expect(child).toEqual({
+      ...before,
+      requesterTurnRunId: REQUESTER_TURN,
+      requesterTurnYielded: undefined,
+    });
+    expect(
+      markRequesterTurnYieldedInRuns({
+        requesterSessionKey: REQUESTER,
+        requesterAgentId: "main",
+        requesterTurnRunId: REQUESTER_TURN,
+        runs: params.runs,
+        persistOrThrow: () => {},
+      }),
+    ).toBe(1);
+  });
+
+  it.each(["stale", "cancelled", "dispatching", "different-turn"] as const)(
+    "does not take a %s child completion",
+    async (reason) => {
+      const child = pendingChild();
+      const params = adoption(child);
+      if (reason === "stale") {
+        params.runs.set(child.runId, structuredClone(child));
+      } else if (reason === "cancelled") {
+        child.killIntent = { requestedAt: 2_000, reason: "operator stop" };
+      } else if (reason === "dispatching") {
+        child.requesterSettleWake = { status: "dispatching", attemptCount: 1 };
+      } else {
+        child.requesterTurnRunId = "another-live-requester-turn";
+      }
+      const before = structuredClone(child);
+      const persist = vi.fn(async () => {});
+      expect(await adoptSubagentRunForRequesterTurnInRuns({ ...params, persist })).toBeUndefined();
+      expect(persist).not.toHaveBeenCalled();
+      expect(child).toEqual(before);
+    },
+  );
+
+  it.each(["persistence failure", "revoked caller"] as const)(
+    "retains the previous requester claim after an asynchronous %s",
+    async (failure) => {
+      const child = pendingChild();
+      const before = structuredClone(child);
+      const params = adoption(child);
+      let current = true;
+      await expect(
+        adoptSubagentRunForRequesterTurnInRuns({
+          ...params,
+          assertCurrent: () => {
+            if (!current) {
+              throw new Error("caller retired");
+            }
+          },
+          persist: async (_context, callbacks) => {
+            await Promise.resolve();
+            if (failure === "revoked caller") {
+              current = false;
+              callbacks.assertCurrent();
+            }
+            throw new Error("storage unavailable");
+          },
+        }),
+      ).rejects.toThrow(failure === "revoked caller" ? "caller retired" : "storage unavailable");
+      expect(child).toEqual(before);
+    },
+  );
+});
 
 describe("settleRequesterTurnAfterSessionSpawns", () => {
   it.each([false, true])(

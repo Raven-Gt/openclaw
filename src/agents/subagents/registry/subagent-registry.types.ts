@@ -262,6 +262,7 @@ export type SubagentRegistrationScope = {
 };
 
 export type RegisterSubagentRunOptions = {
+  persistence?: "worker";
   assertCurrent?: () => void;
   retainOwnership?: (scope: SubagentRegistrationScope) => void;
 };

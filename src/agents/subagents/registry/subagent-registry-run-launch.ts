@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { resolvePhysicalSessionStorePath } from "../../../config/sessions/session-store-path.js";
 import type { GatewayContextResolver } from "../../../gateway/server-methods/types.js";
 import { captureOperatorToolGatewayContinuationContext } from "../../../gateway/server-plugin-in-process-dispatch.js";
@@ -18,7 +19,10 @@ import {
 import { bindSwarmRunReservation } from "../swarm/swarm-scheduler.js";
 import { SUBAGENT_ENDED_REASON_ERROR } from "./subagent-lifecycle-events.js";
 import { subagentRuns } from "./subagent-registry-memory.js";
-import { waitForPendingSubagentKillClaim } from "./subagent-registry-persistence.js";
+import {
+  SubagentRegistryWriteError,
+  waitForPendingSubagentKillClaim,
+} from "./subagent-registry-persistence.js";
 import { registerRequiredQueuedSubagent } from "./subagent-registry-queued-registration.js";
 import {
   createSubagentRegistrationRecord,
@@ -75,6 +79,24 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
     const previous = this.options.runs.get(runId);
     const previousGeneration = previous?.generation;
     const previousCreatedAt = previous?.createdAt;
+    if (options.persistence === "worker" && previous) {
+      options.assertCurrent?.();
+      if (
+        previous.childSessionKey !== childSessionKey ||
+        previous.requesterSessionKey !== requesterSessionKey ||
+        previous.requesterAgentId !== requesterAgentId ||
+        previous.requesterTurnRunId !== (registerParams.requesterTurnRunId?.trim() || undefined) ||
+        previous.expectsCompletionMessage !== registerParams.expectsCompletionMessage ||
+        Boolean(previous.collect) !== Boolean(registerParams.collect)
+      ) {
+        throw new Error(
+          "Accepted run already has another completion owner; inspect it before retrying.",
+        );
+      }
+      // Admission replay retains the original result, generation, custody, and sole waiter.
+      subagentRuns.runWithCompletionAuthority(previous, () => options.assertCurrent?.());
+      return;
+    }
     const requesterStorePath = previous
       ? previous.requesterStorePath
       : resolvePhysicalSessionStorePath(
@@ -92,7 +114,10 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
         );
     const queued = registerParams.queued === true;
     const queuedContext = queued ? captureOpenClawStateWorkerContext() : undefined;
+    const workerContext =
+      !queued && options.persistence === "worker" ? captureOpenClawStateWorkerContext() : undefined;
     const registrationOwnership = subagentRuns.captureRegistrationOwnership(childSessionKey);
+    let workerOwnsRegistration = false;
     const register = (
       completionAuthority?: Awaited<
         ReturnType<typeof captureOperatorToolGatewayContinuationContext>
@@ -184,6 +209,97 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
             ...options,
           });
         }
+        if (workerContext) {
+          const staged = new Map(
+            [entry, ...killReconciliationSnapshots.keys()].map((row) => [
+              row,
+              structuredClone(row),
+            ]),
+          );
+          const preimages = new Map(
+            [...staged].map(([row, snapshot]) => [
+              row,
+              row === entry
+                ? previous && structuredClone(previous)
+                : { ...snapshot, killReconciliation: killReconciliationSnapshots.get(row) },
+            ]),
+          );
+          let capturing = true;
+          const assertRegistrationCurrent = () => {
+            options.assertCurrent?.();
+            if (custodyTransferred) {
+              completionAuthority?.assertCurrent();
+            }
+            registrationOwnership.assertCurrent();
+            if (
+              !isAgentEventLifecycleGenerationCurrent(lifecycleGeneration) ||
+              [...staged].some(([row, snapshot]) => {
+                const visible = capturing || row !== entry ? row : previous;
+                return (
+                  this.options.runs.get(row.runId) !== visible ||
+                  !isDeepStrictEqual(visible, capturing ? snapshot : preimages.get(row))
+                );
+              })
+            ) {
+              throw new Error("Subagent registration changed before worker publication");
+            }
+          };
+          workerOwnsRegistration = true;
+          return (async () => {
+            try {
+              let publication: Promise<void>;
+              try {
+                publication = this.options.persistAsyncOrThrow(
+                  workerContext,
+                  {
+                    assertCurrent: assertRegistrationCurrent,
+                    onCommitted: () => {
+                      assertRegistrationCurrent();
+                      this.options.runs.set(runId, entry);
+                      for (const [row, snapshot] of staged) {
+                        if (row !== entry) {
+                          row.killReconciliation = snapshot.killReconciliation;
+                        }
+                      }
+                      activateRegistrationLifecycle();
+                    },
+                  },
+                  ...registeredRunIds,
+                );
+              } finally {
+                // The worker captures synchronously; lifecycle observers keep the preimage until ACK.
+                for (const [row, snapshot] of staged) {
+                  if (
+                    this.options.runs.get(row.runId) !== row ||
+                    !isDeepStrictEqual(row, snapshot)
+                  ) {
+                    continue;
+                  }
+                  if (row !== entry) {
+                    row.killReconciliation = killReconciliationSnapshots.get(row);
+                  } else if (previous) {
+                    this.options.runs.set(runId, previous);
+                  } else {
+                    this.options.runs.delete(runId);
+                  }
+                }
+                capturing = false;
+              }
+              await publication;
+            } catch (error) {
+              // Ambiguous commits retain private custody and the persistence owner's write fence.
+              if (
+                error instanceof SubagentRegistryWriteError &&
+                error.outcome === "not-committed"
+              ) {
+                subagentRuns.releaseCompletionAuthority(entry);
+              }
+              throw error;
+            } finally {
+              registrationOwnership.release();
+            }
+          })();
+        }
         try {
           this.options.persistOrThrow(...registeredRunIds);
         } catch (error) {
@@ -199,7 +315,9 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
         }
         throw error;
       } finally {
-        registrationOwnership.release();
+        if (!workerOwnsRegistration) {
+          registrationOwnership.release();
+        }
       }
     };
     try {
