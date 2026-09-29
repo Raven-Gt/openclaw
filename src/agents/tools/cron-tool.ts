@@ -237,7 +237,7 @@ export function createCronTool(opts?: CronToolOptions, deps?: CronToolDeps): Any
     name: AUTOMATIONS_TOOL_NAME,
     displaySummary: CRON_TOOL_DISPLAY_SUMMARY,
     description: failureRepairJobId
-      ? `Repair only automation ${failureRepairJobId}. Actions: get jobId; update jobId job (payload and trigger only; payload kind stays the same; toolsAllow may only drop entries); run jobId runMode:"force" to verify a fix. Other automations and actions are unavailable.`
+      ? `Repair only automation ${failureRepairJobId}. Actions: get jobId; update jobId job (only payload.message, payload.script, or trigger.script; same payload kind); run jobId runMode:"force" to verify a fix. Other automations and actions are unavailable.`
       : selfRemoveOnly
         ? managementAuthority?.managementOnly
           ? "Inspect or remove only the current automation. Actions: list [includeDisabled], get jobId, remove jobId. Use the current job ID; other jobs and management actions are unavailable."

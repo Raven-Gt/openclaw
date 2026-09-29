@@ -79,13 +79,8 @@ export function buildCronFailureRepairBrief(params: {
     "",
     "Diagnose the failure (inspect the workspace and the automation as needed), then do exactly one:",
     `1. Transient outage (provider, network, rate limit, or temporary upstream error; the job itself is fine): change nothing and reply exactly ${SILENT_REPLY_TOKEN}.`,
-    `2. Fixable job logic (wrong prompt, broken or missing workspace helper script, wrong tool or arguments, too much work per run): fix it durably for the next run. Edit the workspace helper script and/or update this automation with the automations tool (update jobId "${job.id}": payload and trigger only, same payload kind, toolsAllow can only lose entries). Verify the fix, for example run it with runMode "force" and read its state with get. Then reply with one short sentence saying what you fixed, or ${SILENT_REPLY_TOKEN}.`,
-    "3. Needs the user (expired or missing credentials, access only they can grant, or a decision only they can make): leave the automation unchanged and tell the user concisely what is wrong and what they need to do.",
-    ...(job.runtimeAuthority
-      ? [
-          "Changing toolsAllow drops this automation's captured configured-MCP tool authority until its owner saves it again; avoid it unless the fix needs it.",
-        ]
-      : []),
+    `2. Fixable job logic (wrong prompt, broken or missing workspace helper script, wrong tool or arguments, too much work per run): fix it durably for the next run. Edit the workspace helper script and/or update this automation's text with the automations tool (update jobId "${job.id}" with only payload.message for agentTurn, payload.script for script payloads, or trigger.script; tools, schedule, and delivery stay as they are). Verify the fix, for example run it with runMode "force" and read its state with get. Then reply with one short sentence saying what you fixed, or ${SILENT_REPLY_TOKEN}.`,
+    "3. Needs the user (expired or missing credentials, access only they can grant, a tool the job is not allowed to use, or a decision only they can make): leave the automation unchanged and tell the user concisely what is wrong and what they need to do.",
     `Your final reply is posted to this conversation as-is; ${SILENT_REPLY_TOKEN} keeps it silent. If the automation keeps failing after this turn, the user gets the normal failure alert.`,
   ].join("\n");
 }

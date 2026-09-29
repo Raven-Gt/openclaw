@@ -476,11 +476,6 @@ export type CronUpdateOptions = Pick<
 > & {
   /** Null forbids policy adoption; undefined retains in-process operator defaults. */
   scheduledToolPolicy?: CronScheduledToolPolicy | null;
-  /**
-   * Keep the job's own capture provenance and exec pin across an explicit cap edit.
-   * Only valid for callers that may merely narrow the cap (failure repair).
-   */
-  retainToolsAllowAuthority?: true;
 };
 
 export type CronCommitGuardOptions = {

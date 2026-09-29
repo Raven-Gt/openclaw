@@ -54,7 +54,7 @@ afterEach(async () => {
 });
 
 describe("cron.update with a failure-repair grant", () => {
-  it("updates only the repaired job's payload and never widens its tool cap", async () => {
+  it("updates only the repaired job's payload text", async () => {
     const storePath = path.join(expectDefined(stateDir, "state dir"), "cron", "jobs.json");
     const service = new CronService({
       scheduler: createTestGatewayScheduler(),
@@ -166,7 +166,7 @@ describe("cron.update with a failure-repair grant", () => {
             ).resolves.toMatchObject({ ok: false, message: expect.stringContaining("schedule") });
             await expect(
               update(repaired.id, {
-                payload: { kind: "agentTurn", message: "sync with helper", toolsAllow: ["read"] },
+                payload: { kind: "agentTurn", message: "sync with helper" },
               }),
             ).resolves.toMatchObject({ ok: true });
           },
@@ -179,7 +179,7 @@ describe("cron.update with a failure-repair grant", () => {
 
     expect(service.getJob(repaired.id)?.payload).toMatchObject({
       message: "sync with helper",
-      toolsAllow: ["read"],
+      toolsAllow: ["read", "exec"],
     });
     expect(service.getJob(other.id)?.payload).toMatchObject({ message: "sync" });
   });

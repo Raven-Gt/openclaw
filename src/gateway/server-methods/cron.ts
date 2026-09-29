@@ -159,35 +159,38 @@ function cronPatchTouchesToolRuntime(patch: CronJobPatch): boolean {
 }
 
 /**
- * A failure repair edits what the job runs, never its identity, routing, schedule, or
- * execution ceiling: payload (same kind) and trigger only, and toolsAllow may only shrink.
+ * A failure repair edits only the text the job runs: payload.message (agentTurn),
+ * payload.script (script payload), or trigger.script. It never touches identity,
+ * routing, schedule, or the tool cap, so captured runtime authority survives the edit.
  */
 function assertCronFailureRepairPatch(job: CronJob, patch: CronJobPatch): void {
-  const outside = Object.keys(patch).filter((key) => key !== "payload" && key !== "trigger");
-  if (outside.length > 0) {
+  const textField = job.payload.kind === "script" ? "script" : "message";
+  const payloadKeys = patch.payload ? Object.keys(patch.payload) : [];
+  const outside = [
+    ...Object.keys(patch).filter((key) => key !== "payload" && key !== "trigger"),
+    ...payloadKeys
+      .filter((key) => key !== "kind" && key !== textField)
+      .map((key) => `payload.${key}`),
+    ...(patch.trigger === undefined
+      ? []
+      : patch.trigger === null
+        ? ["trigger"]
+        : Object.keys(patch.trigger)
+            .filter((key) => key !== "script")
+            .map((key) => `trigger.${key}`)),
+  ];
+  if (
+    outside.length > 0 ||
+    (job.payload.kind !== "agentTurn" && job.payload.kind !== "script" && payloadKeys.length > 0)
+  ) {
     throw new TypeError(
-      `automation repair can only change payload or trigger, not ${outside.join(", ")}`,
+      `automation repair can only change payload.message, payload.script, or trigger.script${
+        outside.length > 0 ? `, not ${outside.join(", ")}` : ""
+      }`,
     );
   }
-  const payload = patch.payload;
-  if (!payload) {
-    return;
-  }
-  if (payload.kind !== undefined && payload.kind !== job.payload.kind) {
+  if (patch.payload?.kind !== undefined && patch.payload.kind !== job.payload.kind) {
     throw new TypeError("automation repair cannot change the payload kind");
-  }
-  if (!("toolsAllow" in payload)) {
-    return;
-  }
-  const current = "toolsAllow" in job.payload ? job.payload.toolsAllow : undefined;
-  const next = payload.toolsAllow;
-  if (
-    !Array.isArray(next) ||
-    (current !== undefined &&
-      !current.includes("*") &&
-      next.some((tool) => !current.includes(tool)))
-  ) {
-    throw new TypeError("automation repair can only remove entries from payload.toolsAllow");
   }
 }
 
@@ -817,7 +820,7 @@ export const cronHandlers: GatewayRequestHandlers = {
             // Management and failure repair preserve the job's existing execution ceiling.
             ...(touchesToolRuntime
               ? failureRepair
-                ? { scheduledToolPolicy: null, retainToolsAllowAuthority: true as const }
+                ? { scheduledToolPolicy: null }
                 : {
                     scheduledToolPolicy: callerScope?.manageAll
                       ? null
