@@ -116,3 +116,16 @@ export function expectMockCallFields(
 ): Record<string, unknown> {
   return expectRecordFields(mockCallArg(mock, callIndex), expected);
 }
+
+export function expectContinuationDispatchFields(
+  mock: { mock: { calls: Array<Array<unknown>> } },
+  expected: Record<string, unknown>,
+  expectedCtx?: Record<string, unknown>,
+  callIndex = 0,
+): Record<string, unknown> {
+  const params = expectMockCallFields(mock, expected, callIndex);
+  if (expectedCtx) {
+    expectRecordFields(params.ctxPayload, expectedCtx);
+  }
+  return params;
+}

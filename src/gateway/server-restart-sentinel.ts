@@ -104,13 +104,16 @@ export const settleQueuedSessionDelivery: SettleSessionDeliveryFn = async (
 };
 
 function enqueueRestartSentinelWake(
-  message: string,
+  entry: QueuedSessionDelivery,
   sessionKey: string,
   agentId: string,
   deliveryContext?: DeliveryContext,
 ) {
+  const message = entry.kind === "systemEvent" ? entry.text : entry.message;
   const eventOptions = {
     sessionKey,
+    // Recovered work keeps its ordinary turn budget when delivered by heartbeat.
+    contextKey: `task:restart-sentinel:${entry.id}`,
     ...(deliveryContext ? { deliveryContext } : {}),
   };
   enqueueSystemEvent(message, withSystemEventOwner(eventOptions, agentId));
@@ -165,8 +168,8 @@ export async function deliverQueuedSessionDelivery(params: {
   const deliveryContext = resolveQueuedSessionDeliveryContext(queuedEntry);
 
   if (queuedEntry.kind === "systemEvent") {
-    const { agentId: systemEventAgentId = agentId, text } = queuedEntry;
-    enqueueRestartSentinelWake(text, canonicalKey, systemEventAgentId, deliveryContext);
+    const systemEventAgentId = queuedEntry.agentId ?? agentId;
+    enqueueRestartSentinelWake(queuedEntry, canonicalKey, systemEventAgentId, deliveryContext);
     return;
   }
 
@@ -182,7 +185,7 @@ export async function deliverQueuedSessionDelivery(params: {
   }
 
   if (sessionChanged || !queuedEntry.route) {
-    enqueueRestartSentinelWake(queuedEntry.message, canonicalKey, agentId, deliveryContext);
+    enqueueRestartSentinelWake(queuedEntry, canonicalKey, agentId, deliveryContext);
     return;
   }
 

@@ -36,6 +36,7 @@ import { normalizeSessionDeliveryState } from "../utils/delivery-context.shared.
 import { resolveRuntimeServiceVersion } from "../version.js";
 import {
   createGeneratedMediaDeliveryEntry,
+  expectContinuationDispatchFields as assertContinuationDispatchFields,
   expectCapturedQueueContext,
   expectRecordFields,
   mockCallArg,
@@ -527,21 +528,10 @@ function expectNthSystemEventFields(callIndex: number, expected: Record<string, 
   expectRecordFields(mocks.enqueueSystemEvent.mock.calls[callIndex]?.[1], expected);
 }
 
-function expectContinuationDispatchFields(
-  expected: Record<string, unknown>,
-  expectedCtx?: Record<string, unknown>,
-  callIndex = 0,
-): Record<string, unknown> {
-  const params = expectMockCallFields(
-    mocks.recordInboundSessionAndDispatchReply,
-    expected,
-    callIndex,
-  );
-  if (expectedCtx) {
-    expectRecordFields(params.ctxPayload, expectedCtx);
-  }
-  return params;
-}
+const expectContinuationDispatchFields = assertContinuationDispatchFields.bind(
+  null,
+  mocks.recordInboundSessionAndDispatchReply,
+);
 
 function deliverGeneratedMedia(
   overrides: Parameters<typeof createGeneratedMediaDeliveryEntry>[0],
@@ -1569,6 +1559,7 @@ describe("scheduleRestartSentinelWake", () => {
 
     expect(mocks.enqueueSystemEvent).toHaveBeenCalledWith("restart message", {
       sessionKey: "agent:main:main",
+      contextKey: `task:restart-sentinel:${await mocks.enqueueSessionDelivery.mock.results[0]!.value}`,
       deliveryContext: {
         channel: "whatsapp",
         to: "+15550002",
@@ -2997,6 +2988,7 @@ describe("scheduleRestartSentinelWake", () => {
     expect(mocks.recordInboundSessionAndDispatchReply).not.toHaveBeenCalled();
     expect(mocks.enqueueSystemEvent).toHaveBeenCalledWith("continue after restart", {
       sessionKey: "agent:main:main",
+      contextKey: `task:restart-sentinel:${await mocks.enqueueSessionDelivery.mock.results[0]!.value}`,
       deliveryContext: {
         channel: "whatsapp",
         to: "+15550002",
@@ -3045,6 +3037,7 @@ describe("scheduleRestartSentinelWake", () => {
 
     expect(mocks.enqueueSystemEvent).toHaveBeenNthCalledWith(2, "continue after restart", {
       sessionKey: "agent:main:main",
+      contextKey: `task:restart-sentinel:${await mocks.enqueueSessionDelivery.mock.results[1]!.value}`,
       deliveryContext: {
         channel: "whatsapp",
         to: "+15550002",
@@ -3285,6 +3278,7 @@ describe("scheduleRestartSentinelWake", () => {
 
     expect(mocks.enqueueSystemEvent).toHaveBeenNthCalledWith(2, "continue after restart", {
       sessionKey: "agent:main:main",
+      contextKey: `task:restart-sentinel:${await mocks.enqueueSessionDelivery.mock.results[1]!.value}`,
       deliveryContext: {
         channel: "whatsapp",
         to: "+15550002",
