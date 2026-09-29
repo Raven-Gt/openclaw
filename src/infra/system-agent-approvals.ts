@@ -14,5 +14,13 @@ export type SystemAgentApprovalRequestPayload = {
   turnSourceAccountId?: null;
 };
 
+export type SystemAgentApprovalRequest = {
+  approvalKind?: "system-agent";
+  id: string;
+  request: SystemAgentApprovalRequestPayload;
+  createdAtMs: number;
+  expiresAtMs: number;
+};
+
 export const SYSTEM_AGENT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
 export const SYSTEM_AGENT_APPROVAL_DECISIONS = ["allow-once", "deny"] as const;

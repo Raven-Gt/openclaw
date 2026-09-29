@@ -21,9 +21,13 @@ export type NormalizedApprovalRequest<TRequest extends ApprovalRequestInput> =
       : never;
 
 function deriveApprovalRequestKind(request: { request: object }): ChannelApprovalKind {
+  const isSystemAgent = "proposalHash" in request.request && "sessionId" in request.request;
+  if (isSystemAgent) {
+    return "system-agent";
+  }
   const isExec = "command" in request.request;
   const isPlugin = "title" in request.request && "description" in request.request;
-  if (isExec === isPlugin) {
+  if ([isSystemAgent, isExec, isPlugin].filter(Boolean).length !== 1) {
     throw new Error("approval request payload does not identify exactly one owner");
   }
   return isExec ? "exec" : "plugin";

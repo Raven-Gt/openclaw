@@ -77,6 +77,20 @@ describe("buildPendingApprovalView", () => {
     });
   });
 
+  it("identifies system-agent requests before overlapping exec and plugin fields", () => {
+    expect(
+      resolveApprovalRequestKind({
+        request: {
+          title: "OpenClaw change",
+          description: "Set gateway.port to 19001",
+          command: "Set gateway.port to 19001",
+          proposalHash: "a".repeat(64),
+          sessionId: "delegation-1",
+        },
+      }),
+    ).toBe("system-agent");
+  });
+
   const approvalRequestBase = { id: "approval-id", createdAtMs: 1, expiresAtMs: 2 };
 
   it.each([
