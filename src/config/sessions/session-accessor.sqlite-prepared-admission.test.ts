@@ -16,6 +16,7 @@ import {
 } from "../../plugins/registry-lifecycle.js";
 import { withPluginRuntimeRegistryScope } from "../../plugins/runtime/gateway-request-scope.js";
 import { createPluginRecord } from "../../plugins/status.test-helpers.js";
+import { closeCachedOpenClawAgentDatabase } from "../../state/openclaw-agent-db-lifecycle.js";
 import { invalidateOpenClawAgentDatabaseValidation } from "../../state/openclaw-agent-db-validation-cache.js";
 import {
   closeOpenClawAgentDatabaseByPath,
@@ -42,6 +43,7 @@ import {
   applySessionEntryMaintenance,
   finalizeSessionEntryMaintenancePlansAfterWriterReleaseBestEffort,
 } from "./session-accessor.sqlite-maintenance.js";
+import { holdLifecycleProjectionAdmission } from "./session-accessor.sqlite-prepared-admission.test-support.js";
 import {
   applySessionEntryLifecycleMutation,
   applySessionEntryReplacements,
@@ -629,10 +631,12 @@ it("reacquires post-builder references before planning lifecycle transcript dele
   expect(loadTranscriptEventsSync(transcript.scope)).toEqual(transcript.events);
 });
 
-it("reacquires the split lifecycle commit after real archive materialization", async () => {
+it("reacquires the split lifecycle writer after archive materialization evicts its cached handle", async () => {
   const f = fixture();
   const transcript = seedTranscript(f);
-  const probe = observeAdmission(f.databasePath, true);
+  const probe = observeAdmission(f.databasePath);
+  const commit = holdLifecycleProjectionAdmission(fs.realpathSync(f.databasePath));
+  releases.push(commit.release);
   let materializations = 0;
   let preparationWriterRan = false;
   hooks.afterMaterialize = async () => {
@@ -644,7 +648,12 @@ it("reacquires the split lifecycle commit after real archive materialization", a
       },
       "session.transcript.batch",
     );
-    closeForIntegrityAdmission(f);
+    const cached = getOpenClawAgentDatabaseIfOpen(f.options);
+    if (!cached) {
+      throw new Error("Fixture lost its cached handle before materialization");
+    }
+    closeCachedOpenClawAgentDatabase(cached, { eviction: true });
+    expect(cached.db.isOpen).toBe(false);
   };
   const work = own(
     applySessionEntryLifecycleMutation({
@@ -653,7 +662,9 @@ it("reacquires the split lifecycle commit after real archive materialization", a
       removals: [{ sessionKey: f.input.sessionKey, archiveRemovedTranscript: true }],
     }),
   );
-  await probe.expectPending(work);
+  expect(
+    await Promise.race([commit.entered.then(() => "commit"), work.then(() => "completed")]),
+  ).toBe("commit");
   let laterRan = false;
   const later = own(
     runExclusiveSqliteSessionWrite(
@@ -668,7 +679,7 @@ it("reacquires the split lifecycle commit after real archive materialization", a
   expect(laterRan).toBe(false);
   expect(preparationWriterRan).toBe(true);
   expect(loadSessionEntryReadOnly(f.input)?.sessionId).toBe("original");
-  probe.release.resolve();
+  commit.release();
   const result = await work;
   await later;
   expect(materializations).toBe(1);
@@ -681,7 +692,8 @@ it("reacquires the split lifecycle commit after real archive materialization", a
   ).toBe(true);
   expect(loadSessionEntryReadOnly(f.input)).toBeUndefined();
   expect(loadTranscriptEventsSync(transcript.scope)).toEqual([]);
-  probe.expectHealthy(1);
+  probe.expectHealthy(0);
+  expect(commit.requests()).toBe(1);
 });
 
 it.each([false, true])(
