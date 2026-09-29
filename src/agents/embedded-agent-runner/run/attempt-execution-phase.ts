@@ -120,12 +120,12 @@ export async function runEmbeddedAttemptExecutionPhase(
       if (input.runAbortController.signal.aborted) {
         return abortable(Promise.resolve());
       }
+      const runPrompt = () => activeSession.prompt(prompt, options);
       return abortable(
         trackPromptSettlePromise(
-          withGuardedFetchRequestAuthority(
-            input.sessionLock.ownedTranscriptWriteContext.assertCommitAllowed,
-            async () => activeSession.prompt(prompt, options),
-          ),
+          input.sessionLock.assertCronRootCurrent
+            ? withGuardedFetchRequestAuthority(input.sessionLock.assertCronRootCurrent, runPrompt)
+            : runPrompt(),
         ),
       );
     });

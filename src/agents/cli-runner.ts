@@ -3,6 +3,7 @@
  */
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { runWithCliHistoryWriter } from "../config/sessions/cli-history-boundary.js";
+import { prepareCronRootSessionGeneration } from "../config/sessions/session-delivery-generation.js";
 import { buildGenericCliContextEngineHostSupport } from "../context-engine/host-compat.js";
 import {
   assertAgentRunLifecycleGenerationCurrent,
@@ -24,11 +25,6 @@ import {
 import { resolveBlockMessage } from "../plugins/hook-decision-types.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { bindOperatorModelExecution, readRunOperatorAuthority } from "./admitted-run-context.js";
-import {
-  loadAuthProfileStoreForRuntime,
-  markAuthProfileFailure,
-  markAuthProfileSuccess,
-} from "./auth-profiles.js";
 import { resolveCliBackendConfig } from "./cli-backends.js";
 import { runCliCleanup } from "./cli-runner/cleanup.js";
 import { acceptsCliLiveSession } from "./cli-runner/cli-live-session-registry.js";
@@ -64,7 +60,6 @@ import {
   attachCliMessagingDeliveryEvidence,
   getCliMessagingDeliveryEvidence,
 } from "./cli-runner/delivery-evidence.js";
-import { prepareCliSessionGeneration } from "./cli-runner/execution-target.js";
 import { createCliFailoverError } from "./cli-runner/exit-error.js";
 import { cliBackendLog, formatCliBackendOutputDigest } from "./cli-runner/log.js";
 import {
@@ -76,7 +71,6 @@ import {
   loadCliSessionHistoryMessages,
 } from "./cli-runner/session-history.js";
 import type { PreparedCliRunContext, RunCliAgentParams } from "./cli-runner/types.js";
-import { claudeCliSessionTranscriptHasContent as claudeCliSessionTranscriptHasContentImpl } from "./command/attempt-execution.helpers.js";
 import type { EmbeddedAgentRunResult } from "./embedded-agent-runner.js";
 import { bootstrapHarnessContextEngine } from "./harness/context-engine-lifecycle.js";
 import { buildAgentHookContext } from "./harness/hook-context.js";
@@ -89,6 +83,7 @@ import { resolveReplyExpectation } from "./reply-completion.js";
 
 const log = createSubsystemLogger("agents/cli-runner");
 const cliRunnerDeps = cliRunSettlementDeps;
+const defaultCliRunnerDeps = { ...cliRunnerDeps };
 
 /** Overrides top-level CLI runner dependencies for tests. */
 export function setCliRunnerTestDeps(overrides: Partial<typeof cliRunnerDeps>): void {
@@ -97,15 +92,7 @@ export function setCliRunnerTestDeps(overrides: Partial<typeof cliRunnerDeps>): 
 
 /** Restores default top-level CLI runner dependencies after tests. */
 export function restoreCliRunnerTestDeps(): void {
-  cliRunnerDeps.claudeCliSessionTranscriptHasContent = claudeCliSessionTranscriptHasContentImpl;
-  cliRunnerDeps.delay = async (delayMs: number) => {
-    await new Promise((resolve) => {
-      setTimeout(resolve, delayMs);
-    });
-  };
-  cliRunnerDeps.loadAuthProfileStoreForRuntime = loadAuthProfileStoreForRuntime;
-  cliRunnerDeps.markAuthProfileFailure = markAuthProfileFailure;
-  cliRunnerDeps.markAuthProfileSuccess = markAuthProfileSuccess;
+  Object.assign(cliRunnerDeps, defaultCliRunnerDeps);
 }
 
 /** Checks whether a Claude CLI session binding has reached its transcript file. */
@@ -238,9 +225,19 @@ async function runCliAgentInternal(
     params.mapOperatorAuthorizationError,
   );
   const assertCallerCurrent = params.assertCurrent;
-  let generation: Awaited<ReturnType<typeof prepareCliSessionGeneration>>;
+  let generation: Awaited<ReturnType<typeof prepareCronRootSessionGeneration>>;
   try {
-    generation = await prepareCliSessionGeneration(params);
+    const target = params.sessionTarget;
+    generation =
+      target && !params.sessionManager && !params.isolatedCompletion
+        ? await prepareCronRootSessionGeneration({
+            ...target,
+            sessionKey: params.sessionKey ?? target.sessionKey,
+            sessionId: params.sessionId,
+            lifecycleRevision:
+              params.expectedLifecycleRevision ?? params.sessionEntry?.lifecycleRevision,
+          })
+        : undefined;
     const runParams =
       modelExecution || generation
         ? {
@@ -351,15 +348,14 @@ async function runPreparedCliAgentOwned(
     }),
   } as const;
 
-  const buildAgentEndMessages = (lastAssistant?: unknown): unknown[] => [
-    ...buildAgentHookConversationMessages({
+  const buildAgentEndMessages = (lastAssistant?: unknown): unknown[] =>
+    buildAgentHookConversationMessages({
       historyMessages,
       currentTurnMessages: [
         buildCliHookUserMessage(promptForHooks),
         ...(lastAssistant ? [lastAssistant] : []),
       ],
-    }),
-  ];
+    });
 
   const finishFailedAgentEndHook = (error: unknown) =>
     runCliAgentEndHook(params, {

@@ -1,11 +1,10 @@
 /** Prepares the admitted writer context and teardown tracker for one attempt. */
-import { prepareSessionGenerationFacts } from "../../../config/sessions/session-delivery-generation.js";
+import { prepareCronRootSessionGeneration } from "../../../config/sessions/session-delivery-generation.js";
 import {
   getOwnedSessionTranscriptInitialWriter,
   type OwnedSessionTranscriptWriteContext,
   withOwnedSessionTranscriptWrites,
 } from "../../../config/sessions/transcript-write-context.js";
-import { isCronRunSessionKey, isCronSessionKey } from "../../../sessions/session-key-utils.js";
 import { resolveAdmittedRunActiveAssertion } from "../../admitted-run-context.js";
 import { resolveAgentRunSessionTarget } from "../../run-session-target.js";
 import { resolveCompactionTimeoutMs } from "../compaction-safety-timeout.js";
@@ -32,6 +31,7 @@ export async function prepareEmbeddedAttemptTranscriptLifecycle(input: {
   };
 }): Promise<{
   compactionTimeoutMs: number;
+  assertCronRootCurrent?: () => void;
   ownedTranscriptWriteContext: OwnedSessionTranscriptWriteContext;
   transcriptLifecycle: ReturnType<typeof createEmbeddedAttemptTranscriptLifecycle>;
   withOwnedTranscriptWrite: WithOwnedTranscriptWrite;
@@ -59,17 +59,13 @@ export async function prepareEmbeddedAttemptTranscriptLifecycle(input: {
     expectedLifecycleRevision: attempt.sessionTarget?.expectedLifecycleRevision,
     expectedWriterRunId: attempt.sessionTarget?.expectedWriterRunId,
   };
-  const addressedKey = attempt.sessionKey ?? sessionTarget.sessionKey;
   // The stable cron root can rotate while its exact run remains stored. Retain
   // its admitted generation only for this attempt, before compaction adoption.
-  const generation =
-    isCronSessionKey(addressedKey) && !isCronRunSessionKey(addressedKey)
-      ? await prepareSessionGenerationFacts({
-          ...sessionTarget,
-          sessionKey: addressedKey,
-          lifecycleRevision: fencedSessionTarget.expectedLifecycleRevision ?? null,
-        })
-      : undefined;
+  const generation = await prepareCronRootSessionGeneration({
+    ...sessionTarget,
+    sessionKey: attempt.sessionKey ?? sessionTarget.sessionKey,
+    lifecycleRevision: fencedSessionTarget.expectedLifecycleRevision,
+  });
   const lifecycle = createEmbeddedAttemptTranscriptLifecycle({
     runId: attempt.runId,
     sessionId: attempt.sessionId,
@@ -118,6 +114,7 @@ export async function prepareEmbeddedAttemptTranscriptLifecycle(input: {
 
   return {
     compactionTimeoutMs: resolveCompactionTimeoutMs(attempt.config),
+    assertCronRootCurrent: generation ? ownedTranscriptWriteContext.assertCommitAllowed : undefined,
     ownedTranscriptWriteContext,
     transcriptLifecycle,
     withOwnedTranscriptWrite,

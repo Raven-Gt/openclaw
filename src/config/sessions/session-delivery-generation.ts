@@ -2,6 +2,7 @@ import path from "node:path";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { readDatabasePathIdentitySync } from "../../infra/sqlite-worker-identity.js";
 import { isIncognitoSessionKey } from "../../routing/session-key.js";
+import { isCronRunSessionKey, isCronSessionKey } from "../../sessions/session-key-utils.js";
 import { isSessionLifecycleMutationActive } from "../../sessions/session-lifecycle-admission.js";
 import {
   isSessionStoreTopologyChange,
@@ -349,6 +350,19 @@ async function prepareSessionGenerationLease(input: SessionGenerationFacts): Pro
 export async function prepareSessionGenerationFacts(input: SessionGenerationFacts) {
   const { assertCurrent, release } = await prepareSessionGenerationLease(input);
   return { assertCurrent, release };
+}
+
+/** Stable cron roots retain their admitted run; exact-run keys already name one generation. */
+export async function prepareCronRootSessionGeneration(
+  input: Omit<SessionDeliveryGeneration, "lifecycleRevision"> & { lifecycleRevision?: string },
+) {
+  if (!isCronSessionKey(input.sessionKey) || isCronRunSessionKey(input.sessionKey)) {
+    return undefined;
+  }
+  return await prepareSessionGenerationFacts({
+    ...input,
+    lifecycleRevision: input.lifecycleRevision ?? null,
+  });
 }
 
 /** Delivery remains unavailable while any lifecycle mutation owns the session. */

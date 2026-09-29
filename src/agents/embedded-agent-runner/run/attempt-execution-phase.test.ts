@@ -9,6 +9,7 @@ import {
   replaceSessionEntrySync,
 } from "../../../config/sessions/session-accessor.js";
 import { fetchWithSsrFGuard } from "../../../infra/net/fetch-guard.js";
+import { captureGuardedFetchRequestAuthority } from "../../../infra/net/fetch-request-authority.js";
 import { createDiagnosticEmbeddedRunOwner } from "../../../logging/diagnostic-run-activity.js";
 import { runAgentLoop } from "../../../plugin-sdk/agent-core.js";
 import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
@@ -299,14 +300,30 @@ beforeEach(() => {
 });
 
 describe("runEmbeddedAttemptExecutionPhase", () => {
-  it.each(["current", "rotated", "reset"] as const)(
-    "checks the cron root after writer admission and transport preparation (%s)",
-    async (change) => {
+  it.each([
+    { kind: "cron root", key: "agent:main:cron:provider-fence", change: "current", guarded: true },
+    { kind: "cron root", key: "agent:main:cron:provider-fence", change: "rotated", guarded: true },
+    { kind: "cron root", key: "agent:main:cron:provider-fence", change: "reset", guarded: true },
+    {
+      kind: "ordinary",
+      key: "agent:main:dashboard:provider-fence",
+      change: "current",
+      guarded: false,
+    },
+    {
+      kind: "exact cron run",
+      key: "agent:main:cron:provider-fence:run:cron-run-1",
+      change: "current",
+      guarded: false,
+    },
+  ] as const)(
+    "scopes the provider generation guard after writer admission ($kind, $change)",
+    async ({ key, change, guarded }) => {
       await withOpenClawTestState({ label: "cron-root-provider-fence" }, async (testState) => {
         const fixture = await createFixture({ exerciseTerminalMerges: false });
         const target = {
           agentId: "main",
-          sessionKey: "agent:main:cron:provider-fence",
+          sessionKey: key,
           sessionId: "cron-run-1",
           storePath: path.join(testState.agentDir(), "openclaw-agent.sqlite"),
         };
@@ -338,6 +355,12 @@ describe("runEmbeddedAttemptExecutionPhase", () => {
         const manager = SessionManager.open({ ...target, ...writer });
         const fetchImpl = vi.fn(async () => new Response("ok"));
         fixture.activeSession.prompt.mockImplementation(async () => {
+          const requestAuthority = captureGuardedFetchRequestAuthority();
+          if (guarded) {
+            expect(requestAuthority).toBeTypeOf("function");
+          } else {
+            expect(requestAuthority).toBeUndefined();
+          }
           const response = await fetchWithSsrFGuard({
             url: "https://public.example/provider",
             fetchImpl,
