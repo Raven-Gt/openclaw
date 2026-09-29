@@ -84,7 +84,7 @@ export async function getOAuthApiKey(
   providerId: OAuthProviderId,
   credentials: Record<string, OAuthCredentials>,
 ): Promise<{ newCredentials: OAuthCredentials; apiKey: string } | null> {
-  const provider = BUILT_IN_OAUTH_PROVIDERS.find((provider) => provider.id === providerId);
+  const provider = BUILT_IN_OAUTH_PROVIDERS.find((entry) => entry.id === providerId);
   if (!provider) {
     throw new Error(`Unknown OAuth provider: ${providerId}`);
   }

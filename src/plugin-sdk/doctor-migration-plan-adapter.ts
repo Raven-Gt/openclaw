@@ -35,11 +35,15 @@ export function definePluginDoctorMigrationFromPlans(params: {
         stateDir: input.stateDir,
         oauthDir: input.oauthDir,
       })) ?? [];
-    return plans.map((plan) =>
-      plan.kind === "plugin-state-import" && !plan.stateDir
-        ? { ...plan, stateDir: input.stateDir }
-        : plan,
-    );
+    const resolvedPlans: ChannelLegacyStateMigrationPlan[] = [];
+    for (const plan of plans) {
+      resolvedPlans.push(
+        plan.kind === "plugin-state-import" && !plan.stateDir
+          ? { ...plan, stateDir: input.stateDir }
+          : plan,
+      );
+    }
+    return resolvedPlans;
   };
 
   return {

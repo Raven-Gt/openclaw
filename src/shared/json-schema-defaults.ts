@@ -109,10 +109,10 @@ function validateTypeKeyword(type: unknown, path: string): string | undefined {
     return jsonSchemaTypes.has(type) ? undefined : `${path}.type: unsupported JSON Schema type`;
   }
   if (Array.isArray(type) && type.length > 0) {
-    if (
-      type.findIndex((entry) => typeof entry !== "string" || !jsonSchemaTypes.has(entry)) !== -1
-    ) {
-      return `${path}.type: unsupported JSON Schema type`;
+    for (const entry of type) {
+      if (typeof entry !== "string" || !jsonSchemaTypes.has(entry)) {
+        return `${path}.type: unsupported JSON Schema type`;
+      }
     }
     return new Set(type).size === type.length
       ? undefined
