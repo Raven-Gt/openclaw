@@ -1,10 +1,17 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { createAssistantMessageEventStream, type Message } from "openclaw/plugin-sdk/llm";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
+import {
+  loadTranscriptEventsSync,
+  replaceSessionEntrySync,
+} from "../../../config/sessions/session-accessor.js";
+import { fetchWithSsrFGuard } from "../../../infra/net/fetch-guard.js";
 import { createDiagnosticEmbeddedRunOwner } from "../../../logging/diagnostic-run-activity.js";
 import { runAgentLoop } from "../../../plugin-sdk/agent-core.js";
+import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
 import { prepareSystemAgentRunAdmission } from "../../admitted-run-context.js";
 import {
   applyAgentAutoCompactionGuard,
@@ -62,7 +69,9 @@ vi.mock("./attempt-timeout-prepare.js", () => ({
 
 import { agentSessionSetContextReplacementHook } from "../../sessions/agent-session-compaction.js";
 import { runEmbeddedAttemptExecutionPhase } from "./attempt-execution-phase.js";
+import { prepareEmbeddedAttemptTranscriptLifecycle } from "./attempt-transcript-lifecycle-prepare.js";
 import type { EmbeddedContextAccountingEvent } from "./internal-params.js";
+import { claimAgentSessionWriter } from "./session-bootstrap.js";
 
 type ExecutionInput = Parameters<typeof runEmbeddedAttemptExecutionPhase>[0];
 
@@ -290,6 +299,96 @@ beforeEach(() => {
 });
 
 describe("runEmbeddedAttemptExecutionPhase", () => {
+  it.each(["current", "rotated", "reset"] as const)(
+    "checks the cron root after writer admission and transport preparation (%s)",
+    async (change) => {
+      await withOpenClawTestState({ label: "cron-root-provider-fence" }, async (testState) => {
+        const fixture = await createFixture({ exerciseTerminalMerges: false });
+        const target = {
+          agentId: "main",
+          sessionKey: "agent:main:cron:provider-fence",
+          sessionId: "cron-run-1",
+          storePath: path.join(testState.agentDir(), "openclaw-agent.sqlite"),
+        };
+        const original = {
+          sessionId: target.sessionId,
+          lifecycleRevision: "generation-1",
+          updatedAt: 1,
+        };
+        replaceSessionEntrySync(target, original);
+        Object.assign(fixture.input.attempt, {
+          ...target,
+          sessionTarget: target,
+          sessionFile: target.sessionKey,
+        });
+        const writer = await claimAgentSessionWriter({
+          ...target,
+          sessionTarget: target,
+          runId: fixture.input.attempt.runId,
+          workspaceDir: testState.workspaceDir,
+          prompt: "reply",
+          timeoutMs: 30_000,
+        });
+        fixture.input.attempt.sessionTarget = { ...target, ...writer };
+        const transcript = await prepareEmbeddedAttemptTranscriptLifecycle({
+          attempt: fixture.input.attempt,
+          externalAbortController: { arm: () => {}, throwIfFiredAfterPrepCleanup: async () => {} },
+        });
+        fixture.input.sessionLock = transcript;
+        const manager = SessionManager.open({ ...target, ...writer });
+        const fetchImpl = vi.fn(async () => new Response("ok"));
+        fixture.activeSession.prompt.mockImplementation(async () => {
+          const response = await fetchWithSsrFGuard({
+            url: "https://public.example/provider",
+            fetchImpl,
+            lookupFn: async () => {
+              if (change !== "current") {
+                replaceSessionEntrySync(target, {
+                  ...original,
+                  sessionId: change === "rotated" ? "cron-run-2" : target.sessionId,
+                  lifecycleRevision: "generation-2",
+                });
+              }
+              return [{ address: "93.184.216.34", family: 4 }];
+            },
+          });
+          await response.release();
+        });
+        mocks.runSettledPhase.mockImplementation(async (settled) => {
+          await settled.preparedStreamRuntime.promptActiveSession("reply");
+          return fixture.result;
+        });
+        try {
+          const execution = runEmbeddedAttemptExecutionPhase(fixture.input);
+          if (change === "current") {
+            await execution;
+            expect(fetchImpl).toHaveBeenCalledOnce();
+            await transcript.withOwnedTranscriptWrite(() =>
+              manager.appendMessage({ role: "user", content: "allowed", timestamp: 1 }),
+            );
+            expect(loadTranscriptEventsSync(target)).toMatchObject([
+              { type: "session" },
+              { type: "message", message: { role: "user", content: "allowed" } },
+            ]);
+          } else {
+            await expect(execution).rejects.toThrow(
+              "original session generation no longer accepts",
+            );
+            expect(fetchImpl).not.toHaveBeenCalled();
+            await expect(
+              transcript.withOwnedTranscriptWrite(() =>
+                manager.appendMessage({ role: "user", content: "stale", timestamp: 1 }),
+              ),
+            ).rejects.toThrow();
+            expect(loadTranscriptEventsSync(target)).toEqual([]);
+          }
+        } finally {
+          await transcript.transcriptLifecycle.dispose();
+        }
+      });
+    },
+  );
+
   it.each([
     ["stop", 10_000, "event"],
     ["stop", 0, "event"],

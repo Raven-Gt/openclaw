@@ -64,6 +64,7 @@ import {
   attachCliMessagingDeliveryEvidence,
   getCliMessagingDeliveryEvidence,
 } from "./cli-runner/delivery-evidence.js";
+import { prepareCliSessionGeneration } from "./cli-runner/execution-target.js";
 import { createCliFailoverError } from "./cli-runner/exit-error.js";
 import { cliBackendLog, formatCliBackendOutputDigest } from "./cli-runner/log.js";
 import {
@@ -237,19 +238,25 @@ async function runCliAgentInternal(
     params.mapOperatorAuthorizationError,
   );
   const assertCallerCurrent = params.assertCurrent;
+  let generation: Awaited<ReturnType<typeof prepareCliSessionGeneration>>;
   try {
-    const runParams = modelExecution
-      ? {
-          ...params,
-          abortSignal: params.abortSignal
-            ? AbortSignal.any([params.abortSignal, modelExecution.signal])
-            : modelExecution.signal,
-          assertCurrent: () => {
-            assertCallerCurrent?.();
-            modelExecution.assertCurrent();
-          },
-        }
-      : params;
+    generation = await prepareCliSessionGeneration(params);
+    const runParams =
+      modelExecution || generation
+        ? {
+            ...params,
+            abortSignal: modelExecution
+              ? params.abortSignal
+                ? AbortSignal.any([params.abortSignal, modelExecution.signal])
+                : modelExecution.signal
+              : params.abortSignal,
+            assertCurrent: () => {
+              assertCallerCurrent?.();
+              modelExecution?.assertCurrent();
+              generation?.assertCurrent();
+            },
+          }
+        : params;
     const { prepareCliRunContext } = await import("./cli-runner/prepare.runtime.js");
     let context: PreparedCliRunContext;
     try {
@@ -269,6 +276,7 @@ async function runCliAgentInternal(
     modelExecution?.assertCurrent();
     return result;
   } finally {
+    generation?.release();
     modelExecution?.release();
   }
 }

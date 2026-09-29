@@ -1,10 +1,35 @@
+import { prepareSessionGenerationFacts } from "../../config/sessions/session-delivery-generation.js";
 import { createAbortError } from "../../infra/abort-signal.js";
 import type { CliBackendExecute } from "../../plugins/cli-backend.types.js";
 import { getPluginValueInstance } from "../../plugins/plugin-instance-scope.js";
 import type { PluginInstanceConsumer } from "../../plugins/plugin-instance.types.js";
+import { isCronRunSessionKey, isCronSessionKey } from "../../sessions/session-key-utils.js";
 import { resolveAdmittedRunActiveAssertion } from "../admitted-run-context.js";
 import { resolveReplyExpectation } from "../reply-completion.js";
 import type { CliExecutionTarget, PreparedCliRunContext, RunCliAgentParams } from "./types.js";
+
+/** Stable cron roots must retain their admitted identity through CLI preparation. */
+export async function prepareCliSessionGeneration(params: RunCliAgentParams) {
+  const target = params.sessionTarget;
+  const addressedKey = params.sessionKey ?? target?.sessionKey;
+  if (
+    !target ||
+    !addressedKey ||
+    params.sessionManager ||
+    params.isolatedCompletion ||
+    !isCronSessionKey(addressedKey) ||
+    isCronRunSessionKey(addressedKey)
+  ) {
+    return undefined;
+  }
+  return await prepareSessionGenerationFacts({
+    ...target,
+    sessionKey: addressedKey,
+    sessionId: params.sessionId,
+    lifecycleRevision:
+      params.expectedLifecycleRevision ?? params.sessionEntry?.lifecycleRevision ?? null,
+  });
+}
 
 /** Keep all CLI transports bound to the same reply-operation identity and terminal contract. */
 export function attachCliReplyBackend(params: RunCliAgentParams, cancel: () => void) {
