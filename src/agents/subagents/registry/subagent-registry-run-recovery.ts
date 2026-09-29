@@ -116,6 +116,17 @@ export class SubagentRecoveryManager extends SubagentWaitManager {
       wake: RequesterSettleWakeState,
     ): RequesterSettleWakeState => ({
       ...wake,
+      ...(wake === sourceRequesterSettleWake && wake.pauseNotice
+        ? {
+            pauseNotice: undefined,
+            status: "pending" as const,
+            attemptCount: 0,
+            replayCount: undefined,
+            nextAttemptAt: undefined,
+            deferralCount: undefined,
+            lastError: undefined,
+          }
+        : {}),
       ...(wake.batchRunIds
         ? {
             batchRunIds: wake.batchRunIds

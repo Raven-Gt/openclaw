@@ -1,7 +1,75 @@
+import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { clearDeliveryState, ensureCompletionState } from "./subagent-delivery-state.js";
 import { SUBAGENT_ENDED_REASON_KILLED } from "./subagent-lifecycle-events.js";
 import { shouldSuppressSubagentRecoverySessionEffects } from "./subagent-recovery-state.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
+
+/** Capture the accepted tool intent before the runtime publishes its yielded terminal. */
+export function markSubagentMessageWaitInRuns(params: {
+  runId: string;
+  sessionKey: string;
+  acknowledgment?: string;
+  runs: Map<string, SubagentRunRecord>;
+  persistOrThrow(...runIds: string[]): void;
+}): void {
+  const entry = params.runs.get(params.runId);
+  if (
+    !entry ||
+    entry.childSessionKey !== params.sessionKey ||
+    entry.expectsCompletionMessage !== true ||
+    entry.collect ||
+    entry.execution.status !== "running" ||
+    entry.killIntent ||
+    entry.killReconciliation ||
+    entry.suppressCompletionDelivery ||
+    entry.requesterSettleWake?.pauseNotice
+  ) {
+    return;
+  }
+  const previous = entry.requesterSettleWake;
+  entry.requesterSettleWake = {
+    ...previous,
+    batchRunIds: previous?.batchRunIds ?? [entry.runId],
+    status: "pending",
+    attemptCount: 0,
+    replayCount: undefined,
+    nextAttemptAt: undefined,
+    deferralCount: undefined,
+    lastError: undefined,
+    pauseNotice: {
+      // Match the announce completion delivery's retained-text bound.
+      acknowledgment: truncateUtf16Safe(
+        params.acknowledgment?.trim() || "Paused awaiting continuation.",
+        12_000,
+      ),
+    },
+  };
+  try {
+    params.persistOrThrow(entry.runId);
+  } catch (error) {
+    entry.requesterSettleWake = previous;
+    throw error;
+  }
+}
+
+/** A pause uses the existing retry owner, but never consumes the completion cohort. */
+export function consumeSubagentPauseNotice(entry: SubagentRunRecord): boolean {
+  const wake = entry.requesterSettleWake;
+  if (entry.pauseReason !== "sessions_yield" || !wake?.pauseNotice) {
+    return false;
+  }
+  const { pauseNotice: _notice, ...completionWake } = wake;
+  entry.requesterSettleWake = {
+    ...completionWake,
+    status: "pending",
+    attemptCount: 0,
+    replayCount: undefined,
+    nextAttemptAt: undefined,
+    deferralCount: undefined,
+    lastError: undefined,
+  };
+  return true;
+}
 
 export function markSubagentRunPausedAfterYield(params: {
   entry: SubagentRunRecord;

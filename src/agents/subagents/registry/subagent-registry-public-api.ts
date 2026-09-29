@@ -15,6 +15,7 @@ import {
   listUnsettledRequesterChildrenInRuns,
   markRequesterTurnYieldedInRuns,
 } from "./subagent-registry-requester-yield.js";
+import { markSubagentMessageWaitInRuns } from "./subagent-registry-run-pause.js";
 import {
   getSubagentRunsSnapshotForRead,
   prepareSubagentRunsSnapshotForRunIds,
@@ -226,6 +227,14 @@ export function createSubagentRegistryPublicApi(config: {
   }
 
   return {
+    markSubagentMessageWait: (params: {
+      runId: string;
+      sessionKey: string;
+      acknowledgment?: string;
+    }) => {
+      restoreOnce();
+      markSubagentMessageWaitInRuns({ ...params, runs, persistOrThrow });
+    },
     leasePendingAgentSteeringItems,
     ackPendingAgentSteeringItems,
     releasePendingAgentSteeringItems,

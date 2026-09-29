@@ -82,6 +82,15 @@ const transitionRequesterSettleWakeBatch = (
   if (!isCurrentRequesterSettleWakeBatch(context, entries, state.rearmGeneration)) {
     return false;
   }
+  if (
+    entries.some(
+      (entry) =>
+        entry.pauseReason === "sessions_yield" &&
+        Boolean(entry.requesterSettleWake?.pauseNotice) !== Boolean(state.pauseNotice),
+    )
+  ) {
+    return false;
+  }
   const previousStates = entries.map((entry) => entry.requesterSettleWake);
   for (const entry of entries) {
     entry.requesterSettleWake = {
@@ -431,7 +440,11 @@ export function scheduleRequesterSettleWake(
     scheduleRequesterSettleWakeRetry(context, runId, entry);
     return;
   }
-  const admittedBatch = (admittedWake?.batchRunIds ?? [runId]).flatMap((id) => {
+  const admittedBatch = (
+    entry.pauseReason === "sessions_yield" && admittedWake.pauseNotice
+      ? [runId]
+      : (admittedWake.batchRunIds ?? [runId])
+  ).flatMap((id) => {
     const member = params.runs.get(id);
     return member ? [member] : [];
   });
@@ -474,6 +487,12 @@ export function scheduleRequesterSettleWake(
                 batch,
                 rearmGeneration,
                 async (members) => {
+                  if (
+                    Boolean(admittedWake.pauseNotice) !==
+                    Boolean(entry.requesterSettleWake?.pauseNotice)
+                  ) {
+                    return false;
+                  }
                   const committed = await completeRequesterSettleWakeBatch(
                     context,
                     members,

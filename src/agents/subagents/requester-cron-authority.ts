@@ -324,6 +324,14 @@ export function revokeRequesterCronAuthorityBatch(
   for (const entry of batch) {
     const authority = state.byEntry.get(entry);
     if (authority?.kind === "yield" && authority.rearmGeneration === rearmGeneration) {
+      if (
+        authority.runs.get(entry.runId) === entry &&
+        entry.pauseReason === "sessions_yield" &&
+        entry.requesterSettleWake?.rearmGeneration === rearmGeneration &&
+        isCurrent(authority)
+      ) {
+        continue;
+      }
       discard(authority);
     }
   }
@@ -334,6 +342,7 @@ type RequesterCronAuthorityDispatch = {
   runId: string;
   isCurrent: () => boolean;
   consumed: boolean;
+  pause?: { entry: SubagentRunRecord; scope?: CronCreatorAuthorityCapability; released?: true };
 };
 const activeDispatch = new AsyncLocalStorage<RequesterCronAuthorityDispatch>();
 
@@ -350,6 +359,11 @@ export async function withRequesterCronAuthority<T>(
   run: () => Promise<T>,
 ): Promise<T> {
   const authority = params.batch[0] && state.byEntry.get(params.batch[0]);
+  const child = params.batch.length === 1 ? params.batch[0] : undefined;
+  const pause: RequesterCronAuthorityDispatch["pause"] =
+    child?.pauseReason === "sessions_yield" && child.requesterSettleWake?.pauseNotice
+      ? { entry: child }
+      : undefined;
   if (
     !authority ||
     authority.kind !== "yield" ||
@@ -358,7 +372,7 @@ export async function withRequesterCronAuthority<T>(
     authority.requesterAgentId !== params.requesterAgentId ||
     authority.rearmGeneration === undefined ||
     authority.rearmGeneration !== params.rearmGeneration ||
-    !sameBatch(authority.batch, params.batch)
+    !(pause ? authority.batch.includes(pause.entry) : sameBatch(authority.batch, params.batch))
   ) {
     if (authority?.operatorAuthority) {
       throw new Error("Requester operator authority does not own this continuation");
@@ -366,7 +380,15 @@ export async function withRequesterCronAuthority<T>(
     return await run();
   }
   const current = () =>
-    isCurrent(authority) && (authority.runScopeBound === true || params.isCurrent());
+    isCurrent(authority) &&
+    (pause
+      ? !pause.released &&
+        (pause.scope
+          ? pause.scope.active && !pause.scope.signal.aborted
+          : pause.entry.pauseReason === "sessions_yield" &&
+            Boolean(pause.entry.requesterSettleWake?.pauseNotice) &&
+            params.isCurrent())
+      : authority.runScopeBound === true || params.isCurrent());
   if (!current()) {
     discard(authority);
     if (authority.operatorAuthority) {
@@ -379,6 +401,7 @@ export async function withRequesterCronAuthority<T>(
     runId: params.runId,
     isCurrent: current,
     consumed: false,
+    pause,
   };
   try {
     if (!authority.operatorAuthority) {
@@ -501,19 +524,30 @@ export function consumeRequesterCronAuthorityAdmission(params: {
     return undefined;
   }
   dispatch.consumed = true;
-  dispatch.authority.admittedRunId = params.runId;
+  if (!dispatch.pause) {
+    dispatch.authority.admittedRunId = params.runId;
+  }
   return {
     runId: params.runId,
     callerOrigin: { kind: "unknown" },
     managementEntitlement: dispatch.authority.managementEntitlement,
     requesterOwner: dispatch.authority.requesterOwner,
     isCurrent: dispatch.isCurrent,
-    ...(dispatch.authority.kind === "followup"
-      ? { release: () => discard(dispatch.authority) }
-      : {}),
+    ...(dispatch.pause
+      ? {
+          release: () => {
+            if (dispatch.pause) {
+              dispatch.pause.released = true;
+            }
+          },
+        }
+      : dispatch.authority.kind === "followup"
+        ? { release: () => discard(dispatch.authority) }
+        : {}),
     bindRunScope: (scope) => {
       if (
         dispatch.authority.runScopeBound ||
+        dispatch.pause?.scope ||
         !dispatch.isCurrent() ||
         scope.runId !== params.runId ||
         scope.isCurrent !== dispatch.isCurrent ||
@@ -524,6 +558,11 @@ export function consumeRequesterCronAuthorityAdmission(params: {
         scope.signal.aborted
       ) {
         throw new Error("Requester automation authority no longer owns this run scope");
+      }
+      if (dispatch.pause) {
+        // Admission owns this turn even after notice consumption; final custody stays with the cohort.
+        dispatch.pause.scope = scope;
+        return;
       }
       // Queue acceptance can retire the child outbox before the parent finishes.
       // Its fresh run scope now owns the entitlement and all per-operation grants.

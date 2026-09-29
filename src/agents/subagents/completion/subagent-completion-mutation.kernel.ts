@@ -19,6 +19,7 @@ import {
   markRequesterSettleWakePending,
 } from "../registry/subagent-delivery-state.js";
 import { SUBAGENT_ENDED_REASON_KILLED } from "../registry/subagent-lifecycle-events.js";
+import { consumeSubagentPauseNotice } from "../registry/subagent-registry-run-pause.js";
 import {
   bindSubagentRunRecord,
   rowToSubagentRunRecord,
@@ -273,6 +274,17 @@ function settleRequesterBatch(
       bindSubagentRunRecord(subagent).payload_json !== bindSubagentRunRecord(expected).payload_json
     ) {
       throw changedOwner();
+    }
+    if (consumeSubagentPauseNotice(subagent)) {
+      // A notice is one paused member's input, not settlement of its frozen cohort.
+      if (
+        params.outcome.storeReplaced ||
+        params.outcome.disposition === "intentional_non_delivery"
+      ) {
+        subagent.requesterSettleWake = undefined;
+      }
+      subagent.cleanupHandled = expected.cleanupHandled;
+      return { subagent };
     }
     // A caller may omit retired rows, never a surviving member of the same frozen wave.
     for (const id of subagent.requesterSettleWake?.batchRunIds ?? []) {

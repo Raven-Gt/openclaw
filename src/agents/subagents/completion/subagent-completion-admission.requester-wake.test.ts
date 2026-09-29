@@ -632,6 +632,54 @@ describe("persisted subagent requester wakes", () => {
     },
   );
 
+  it.each([false, true])(
+    "settles a pause notice across reopen (store replaced=%s)",
+    async (storeReplaced) => {
+      const paused = records();
+      const sibling = records();
+      sibling.subagent.runId = "running-sibling";
+      sibling.subagent.childSessionKey = "agent:main:subagent:sibling";
+      sibling.subagent.execution = { status: "running", startedAt: Date.now() };
+      const batchRunIds = [paused.subagent.runId, sibling.subagent.runId];
+      for (const input of [paused, sibling]) {
+        armRequesterWake(input, batchRunIds);
+      }
+      paused.subagent.pauseReason = "sessions_yield";
+      paused.subagent.execution.outcome = undefined;
+      paused.subagent.completion = { required: true };
+      paused.subagent.delivery = { status: "pending" };
+      paused.subagent.cleanupHandled = false;
+      paused.subagent.cleanupCompletedAt = undefined;
+      const completionWake = structuredClone(paused.subagent.requesterSettleWake);
+      paused.subagent.requesterSettleWake!.pauseNotice = { acknowledgment: "Need a continuation." };
+      for (const input of [paused, sibling]) {
+        persistOwner(input);
+      }
+      const siblingBefore = structuredClone(sibling.subagent);
+
+      await settleRequesterCompletionBatch({
+        entries: [{ subagent: paused.subagent }],
+        outcome: {
+          delivered: !storeReplaced,
+          path: "direct",
+          ...(storeReplaced
+            ? { storeReplaced: true, disposition: "intentional_non_delivery" as const }
+            : {}),
+        },
+        isCurrent: () => true,
+        databaseOptions: { database },
+      });
+      await reopenOwners();
+      const restored = subagentRuns.get(paused.subagent.runId)!;
+      expect(restored.requesterSettleWake).toEqual(storeReplaced ? undefined : completionWake);
+      expect(restored.pauseReason).toBe("sessions_yield");
+      expect(restored.execution.outcome).toBeUndefined();
+      expect(restored.delivery).toEqual({ status: "pending" });
+      expect(subagentRuns.get(sibling.subagent.runId)).toEqual(siblingBefore);
+      expect(systemEvents()).toEqual([]);
+    },
+  );
+
   it.each([
     { delivered: false, retireAfterSettle: false },
     { delivered: false, retireAfterSettle: true },

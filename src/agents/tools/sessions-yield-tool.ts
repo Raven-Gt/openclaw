@@ -11,7 +11,7 @@ export type SessionsYieldClaimResult =
   | boolean
   | { error: string }
   | { pendingChildren: readonly UnsettledRequesterChild[] };
-export type SessionsYieldIntent = { waitFor?: "message" };
+export type SessionsYieldIntent = { waitFor?: "message"; acknowledgment?: string };
 
 function describePendingChild(child: UnsettledRequesterChild): string {
   const name = child.label ? `${child.label} (${child.childSessionKey})` : child.childSessionKey;
@@ -51,7 +51,7 @@ const SessionsYieldToolSchema = Type.Object({
   waitFor: Type.Optional(
     Type.Literal("message", {
       description:
-        "Explicitly pause an unfinished subagent until an incoming continuation message. Does not schedule a message or submit the final result.",
+        "Explicitly pause an unfinished subagent until an incoming continuation message. An announcing child notifies its requester that it needs sessions_send; this does not send the continuation or submit a final result.",
     }),
   ),
   message: Type.Optional(
@@ -59,7 +59,8 @@ const SessionsYieldToolSchema = Type.Object({
   ),
   acknowledgment: Type.Optional(
     Type.String({
-      description: "Optional waiting reply for an otherwise-silent interactive parent turn.",
+      description:
+        "Optional waiting reply for an otherwise-silent interactive parent turn, or pause notice text sent to an announcing child's requester with waitFor:message (trimmed, at most 12,000 characters).",
     }),
   ),
 });
@@ -78,7 +79,7 @@ export function createSessionsYieldTool(opts?: {
     // tool must stay visible even when tool search compacts the catalog.
     catalogMode: "direct-only",
     description:
-      'End this turn for pending child completion events; this is not a final-result submission. Return completed work normally. An unfinished subagent waiting for an incoming continuation must set waitFor:"message". Collector runs require explicit collection instead. acknowledgment can send a waiting reply for an otherwise-silent interactive parent.',
+      'End this turn for pending child completion events; this is not a final-result submission. Return completed work normally. An unfinished subagent waiting for an incoming continuation must set waitFor:"message". An announcing child wakes its requester once with a paused notice and acknowledgment; only sessions_send to the child resumes it. Collector runs require explicit collection instead. acknowledgment can send a waiting reply for an otherwise-silent interactive parent.',
     parameters: SessionsYieldToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -101,7 +102,9 @@ export function createSessionsYieldTool(opts?: {
             "Earlier async tool results are still being delivered. Finish this response to receive them, then yield again only if external work still requires waiting.",
         });
       }
-      const claim = await opts.claimYield?.(waitFor ? { waitFor } : undefined);
+      const claim = await opts.claimYield?.(
+        waitFor ? { waitFor, ...(acknowledgment ? { acknowledgment } : {}) } : undefined,
+      );
       if (typeof claim === "object" && "pendingChildren" in claim) {
         // Not an error: the session already waits for these children through
         // durable registry state, so the model only needs to end the turn.
