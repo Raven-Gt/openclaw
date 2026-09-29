@@ -6,6 +6,7 @@ import { cloneEnvWithPlatformSemantics } from "../config/config-env-vars.js";
 import { assertSessionEntryCurrentAdmission } from "../config/sessions/session-entry-current-admission.js";
 import type { SessionEntryCurrentCheck } from "../config/sessions/session-entry-current.types.js";
 import type { SqliteWorkerCommand } from "../infra/sqlite-worker-contract.js";
+import { assertExistingDatabaseIdentity } from "../infra/sqlite-worker-identity.js";
 import {
   createSqliteWorkerOperationAdmission,
   type SqliteWorkerOperationAdmission,
@@ -111,6 +112,7 @@ export function createSessionRepositoryWorkspaceStore(
     let publication: ReturnType<typeof stageRepositoryWorkspacePublication> | undefined;
     let publicationSettled: Promise<void> | undefined;
     let granted = false;
+    let cleanupSourceIdentity: string | undefined;
     let finalized = afterCommit === undefined;
     const check = () => {
       captured.admission.assertCurrent();
@@ -136,8 +138,17 @@ export function createSessionRepositoryWorkspaceStore(
           }
           await publicationSettled;
           if (afterCommit) {
-            // Keep original physical custody through filesystem settlement; close must join it.
-            captured.admission.assertCurrent();
+            if (
+              !granted ||
+              !cleanupSourceIdentity ||
+              !prepared ||
+              !admission?.committed ||
+              !isDeepStrictEqual(admission.committed.facts, prepared)
+            ) {
+              throw new Error("Repository workspace cleanup has no committed source");
+            }
+            // The committed delete owns this retained tail; closing fresh reads must join it.
+            assertExistingDatabaseIdentity(databasePath, cleanupSourceIdentity);
             await afterCommit();
             finalized = true;
           }
@@ -164,6 +175,11 @@ export function createSessionRepositoryWorkspaceStore(
               }
               stage = "complete";
               prepared = admitted.facts;
+              if (afterCommit) {
+                const identity = captured.admission.identity;
+                assertExistingDatabaseIdentity(databasePath, identity.key);
+                cleanupSourceIdentity = identity.key;
+              }
               publication = stageRepositoryWorkspacePublication(captured.admission, prepared);
               granted = grant();
             });

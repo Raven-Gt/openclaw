@@ -1,9 +1,11 @@
+import { renameSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import * as operationAdmission from "../infra/sqlite-worker-operation-admission.js";
 import { sessionChanges } from "../sessions/session-row-changes.js";
+import { createDeferredCore } from "../shared/deferred.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { closeOpenClawStateDatabaseByPathAsync } from "./openclaw-state-db-cache.js";
 import { ensureRepositoryWorkspacePendingResultSchema } from "./openclaw-state-db-schema-additive.js";
@@ -285,27 +287,89 @@ it("reopens the accepted owner and deletes only its own artifacts", async () => 
   expect((await fs.stat(reopened.artifactPath(sibling.workspaceId))).isDirectory()).toBe(true);
 });
 
-it("retains artifacts when the database owner closes after committed row deletion", async () => {
+it("finishes artifact cleanup under its accepted operation while database close waits", async () => {
   const { database, store } = await fixture();
   const workspace = await store.create(source);
   const artifact = store.artifactPath(workspace.workspaceId);
   await fs.mkdir(artifact, { recursive: true });
+  const removing = createDeferredCore();
+  const releaseRemoval = createDeferredCore();
+  const remove = fs.rm;
+  const removal = vi.spyOn(fs, "rm").mockImplementation(async (target, options) => {
+    if (target === artifact) {
+      removing.resolve();
+      await releaseRemoval.promise;
+    }
+    await remove(target, options);
+  });
   let closing: ReturnType<typeof closeOpenClawStateDatabaseByPathAsync> | undefined;
+  let closed = false;
   const unsubscribe = sessionChanges.subscribe((change) => {
     if ("sessionKey" in change && change.sessionKey === source.sessionKey) {
+      closing = closeOpenClawStateDatabaseByPathAsync(database.path);
+      void closing.then(() => {
+        closed = true;
+      });
+    }
+  });
+  const outcome = store.delete({ workspaceId: workspace.workspaceId, assertCurrent }).then(
+    () => ({ ok: true }),
+    (error: unknown) => ({ ok: false, error }),
+  );
+  try {
+    expect(
+      await Promise.race([removing.promise.then(() => "removing"), outcome.then(() => "settled")]),
+    ).toBe("removing");
+    expect(closing).toBeDefined();
+    expect(closed).toBe(false);
+    expect(database.db.isOpen).toBe(true);
+    releaseRemoval.resolve();
+    expect(await outcome).toEqual({ ok: true });
+    await closing;
+    expect(closed).toBe(true);
+    await expect(fs.stat(artifact)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await store.get(workspace.workspaceId)).toBeUndefined();
+  } finally {
+    releaseRemoval.resolve();
+    await outcome;
+    unsubscribe();
+    await closing;
+    removal.mockRestore();
+  }
+});
+
+it("refuses artifact cleanup against a replaced physical database after committed deletion", async () => {
+  const { database, store } = await fixture();
+  const workspace = await store.create(source);
+  await fs.mkdir(store.artifactPath(workspace.workspaceId), { recursive: true });
+  const replacement = await fixture();
+  const successor = await replacement.store.create({
+    ...source,
+    sessionKey: "agent:main:replacement",
+  });
+  await fs.mkdir(replacement.store.artifactPath(workspace.workspaceId), { recursive: true });
+  await closeOpenClawStateDatabaseByPathAsync(replacement.database.path);
+  const root = path.dirname(database.path);
+  const retired = `${root}-retired`;
+  roots.push(retired);
+  let closing: ReturnType<typeof closeOpenClawStateDatabaseByPathAsync> | undefined;
+  let replaced = false;
+  const unsubscribe = sessionChanges.subscribe((change) => {
+    if ("sessionKey" in change && change.sessionKey === source.sessionKey) {
+      renameSync(root, retired);
+      renameSync(path.dirname(replacement.database.path), root);
+      replaced = true;
       closing = closeOpenClawStateDatabaseByPathAsync(database.path);
     }
   });
   try {
-    const error = await store.delete({ workspaceId: workspace.workspaceId, assertCurrent }).then(
-      () => undefined,
-      (failure: unknown) => failure,
-    );
-    expect(closing).toBeDefined();
+    await expect(
+      store.delete({ workspaceId: workspace.workspaceId, assertCurrent }),
+    ).rejects.toThrow("SQLite database file identity changed");
+    expect(replaced).toBe(true);
     await closing;
-    expect(error).toMatchObject({ code: "STATE_DATABASE_READ_ADMISSION_INVALIDATED" });
-    expect((await fs.stat(artifact)).isDirectory()).toBe(true);
-    expect(await store.get(workspace.workspaceId)).toBeUndefined();
+    expect((await fs.stat(store.artifactPath(workspace.workspaceId))).isDirectory()).toBe(true);
+    expect(await store.get(successor.workspaceId)).toEqual(successor);
   } finally {
     unsubscribe();
     await closing;
