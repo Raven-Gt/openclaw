@@ -73,51 +73,6 @@ export function prepareWorkerSessionToolRequest(
   return undefined;
 }
 
-async function applyToolPolicy(
-  request: WorkerSessionToolRequest,
-  source: ExactSource,
-): Promise<
-  { request: WorkerSessionToolRequest } | { result: ReturnType<typeof buildBlockedToolResult> }
-> {
-  const toolCallId = request.request.toolCallId;
-  const runId = request.identity.runId ?? undefined;
-  const outcome = await runBeforeToolCallHook({
-    toolName: request.toolName,
-    params: workerSessionToolArguments(request),
-    toolCallId,
-    ctx: {
-      agentId: source.agentId,
-      config: getRuntimeConfig(),
-      sessionKey: source.sessionKey,
-      sessionId: source.sessionId,
-      runId,
-    },
-    signal: request.signal,
-    approvalMode: "deny",
-  });
-  if (!outcome.blocked) {
-    const adjusted = prepareWorkerSessionToolRequest(
-      request,
-      request.toolName,
-      toolCallId,
-      outcome.params,
-    );
-    if (adjusted) {
-      return { request: adjusted };
-    }
-  }
-  return {
-    result: buildBlockedToolResult({
-      reason: outcome.blocked
-        ? outcome.reason
-        : `Tool call blocked because before_tool_call returned invalid ${request.toolName} input.`,
-      deniedReason: outcome.blocked ? outcome.deniedReason : undefined,
-      toolCallId,
-      runId,
-    }),
-  };
-}
-
 export type WorkerSessionToolAuthority = {
   assertSource: () => void;
   collectExecutionIdentity: boolean;
@@ -225,7 +180,28 @@ export function createWorkerSessionToolSourceRunner(params: {
               let result: AgentToolResult<unknown> | undefined;
               let errorMessage: string | undefined;
               try {
-                const policy = await applyToolPolicy(request, operation.source);
+                const outcome = await runBeforeToolCallHook({
+                  toolName: request.toolName,
+                  params: workerSessionToolArguments(request),
+                  toolCallId: request.request.toolCallId,
+                  ctx: {
+                    agentId: operation.source.agentId,
+                    config: getRuntimeConfig(),
+                    sessionKey: operation.source.sessionKey,
+                    sessionId: operation.source.sessionId,
+                    runId: request.identity.runId ?? undefined,
+                  },
+                  signal: request.signal,
+                  approvalMode: "deny",
+                });
+                const adjusted = outcome.blocked
+                  ? undefined
+                  : prepareWorkerSessionToolRequest(
+                      request,
+                      request.toolName,
+                      request.request.toolCallId,
+                      outcome.params,
+                    );
                 assertSource();
                 if (
                   !params.placements.isWorkerTurnToolAuthorized(
@@ -235,10 +211,8 @@ export function createWorkerSessionToolSourceRunner(params: {
                 ) {
                   throw new Error("Worker session tool authority changed");
                 }
-                if ("result" in policy) {
-                  result = policy.result;
-                } else {
-                  request = policy.request;
+                if (adjusted) {
+                  request = adjusted;
                   result = await run(
                     {
                       assertSource,
@@ -247,6 +221,15 @@ export function createWorkerSessionToolSourceRunner(params: {
                     },
                     request,
                   );
+                } else {
+                  result = buildBlockedToolResult({
+                    reason: outcome.blocked
+                      ? outcome.reason
+                      : `Tool call blocked because before_tool_call returned invalid ${request.toolName} input.`,
+                    deniedReason: outcome.blocked ? outcome.deniedReason : undefined,
+                    toolCallId: request.request.toolCallId,
+                    runId: request.identity.runId ?? undefined,
+                  });
                 }
                 return result;
               } catch (error) {

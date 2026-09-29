@@ -12,7 +12,7 @@ import {
   buildEffectiveToolInventory,
   type RuntimeCompatibleToolInventoryParams,
 } from "./tools-effective-inventory-shared.js";
-import type { EffectiveToolSource } from "./tools-effective-inventory.types.js";
+import type { EffectiveToolInventoryEntry } from "./tools-effective-inventory.types.js";
 import type { AnyAgentTool } from "./tools/common.js";
 
 // Tool metadata may be attached to the normalized tool or the raw fallback
@@ -20,11 +20,7 @@ import type { AnyAgentTool } from "./tools/common.js";
 function resolveEffectiveToolSource(
   tool: AnyAgentTool,
   fallbackTool?: AnyAgentTool,
-): {
-  source: EffectiveToolSource;
-  pluginId?: string;
-  channelId?: string;
-} {
+): Pick<EffectiveToolInventoryEntry, "source" | "pluginId" | "channelId"> {
   const pluginMeta =
     getPluginToolMeta(tool) ?? (fallbackTool ? getPluginToolMeta(fallbackTool) : undefined);
   if (pluginMeta) {

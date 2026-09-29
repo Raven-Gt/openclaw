@@ -7,13 +7,10 @@ import {
   type WorkerSessionTurnClaim,
 } from "./placement-record.js";
 import { find, getRequired, query } from "./placement-row-codec.js";
-import type { WorkerSessionToolOperationStart } from "./placement-session-tool-operations.receipt.js";
+import type { WorkerSessionToolOperationStart } from "./placement-session-tool-operations.worker-contract.js";
 import { publishPlacementTurnToolState } from "./placement-turn-authority.js";
 
-type WorkerTurnToolStateIdentity = {
-  sessionId: string;
-  claimId: string;
-};
+type WorkerTurnToolStateIdentity = Pick<WorkerSessionTurnClaim, "sessionId" | "claimId">;
 
 type WorkerSessionToolOperationIdentity = {
   sourceSessionId: string;
@@ -96,17 +93,15 @@ export function createPlacementSessionToolOperationKernel(runtime: {
       db,
       query(db)
         .selectFrom("worker_turn_tool_authorities")
-        .selectAll()
-        .where("session_id", "=", claim.sessionId),
+        .select("tool_names_json")
+        .where("session_id", "=", claim.sessionId)
+        .where("environment_id", "=", claim.owner.environmentId)
+        .where("owner_epoch", "=", claim.owner.ownerEpoch)
+        .where("placement_generation", "=", claim.placementGeneration)
+        .where("claim_id", "=", claim.claimId)
+        .where("run_id", "=", claim.runId),
     ).rows[0];
-    if (
-      !authority ||
-      authority.environment_id !== claim.owner.environmentId ||
-      authority.owner_epoch !== claim.owner.ownerEpoch ||
-      authority.placement_generation !== claim.placementGeneration ||
-      authority.claim_id !== claim.claimId ||
-      authority.run_id !== claim.runId
-    ) {
+    if (!authority) {
       return false;
     }
     try {
@@ -147,11 +142,10 @@ export function createPlacementSessionToolOperationKernel(runtime: {
       if (claim.owner.kind !== "worker") {
         throw new Error(`Session ${claim.sessionId} turn is not worker-owned`);
       }
-      const owner = claim.owner;
       exactWorkerClaim(claim);
       const values = {
-        environment_id: owner.environmentId,
-        owner_epoch: owner.ownerEpoch,
+        environment_id: claim.owner.environmentId,
+        owner_epoch: claim.owner.ownerEpoch,
         placement_generation: claim.placementGeneration,
         claim_id: claim.claimId,
         run_id: claim.runId,
@@ -173,10 +167,7 @@ export function createPlacementSessionToolOperationKernel(runtime: {
         return;
       }
       exactWorkerClaim(claim);
-      closeWorkerTurnToolAdmission(db, {
-        sessionId: claim.sessionId,
-        claimId: claim.claimId,
-      });
+      closeWorkerTurnToolAdmission(db, claim);
     },
 
     clear(claim: WorkerSessionTurnClaim): boolean {
@@ -223,16 +214,13 @@ export function createPlacementSessionToolOperationKernel(runtime: {
         ) {
           return { kind: "completed", resultJson: existing.result_json };
         }
-        if (existing.status === "unknown") {
-          return { kind: "unknown" };
-        }
-        if (existing.gateway_instance_id === instanceId) {
-          return { kind: "in-progress" };
-        }
-        // A second store can observe the row in tests and unsupported
-        // multi-Gateway embeddings. Observation must not revoke the live
-        // executor's fence; exclusive Gateway startup owns crash recovery.
-        return { kind: "unknown" };
+        // Only exclusive Gateway startup may recover another instance's unfinished operation.
+        return {
+          kind:
+            existing.status !== "unknown" && existing.gateway_instance_id === instanceId
+              ? "in-progress"
+              : "unknown",
+        };
       }
       const runningCount = executeSqliteQuerySync(db, runningOperations(db, params.claim)).rows
         .length;

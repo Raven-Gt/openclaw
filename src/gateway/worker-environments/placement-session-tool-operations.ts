@@ -1,5 +1,6 @@
 import { Value } from "typebox/value";
 import type { SqliteWorkerCommand } from "../../infra/sqlite-worker-contract.js";
+import { createDeferredCore, type Deferred } from "../../shared/deferred.js";
 import { resolveGlobalMap } from "../../shared/global-singleton.js";
 import { registerOpenClawStateDatabaseLifecycleListener } from "../../state/openclaw-state-db-cache.js";
 import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-worker-context.js";
@@ -8,8 +9,8 @@ import type { createPlacementSessionToolOperationKernel } from "./placement-sess
 import {
   PlacementSessionToolReceiptSchema,
   type PlacementSessionToolReceipt,
-} from "./placement-session-tool-operations.receipt.js";
-import type { PlacementSessionToolWorkerOperations } from "./placement-session-tool-operations.worker-contract.js";
+  type PlacementSessionToolWorkerOperations,
+} from "./placement-session-tool-operations.worker-contract.js";
 import {
   isPlacementTurnToolAuthorized,
   stagePlacementTurnToolWorkerPublication,
@@ -18,16 +19,18 @@ import { createPlacementWorkerMutation } from "./placement-worker-mutation.js";
 
 export { MAX_RUNNING_WORKER_SESSION_TOOL_OPERATIONS } from "./placement-session-tool-operations.kernel.js";
 type Kernel = ReturnType<typeof createPlacementSessionToolOperationKernel>;
-type Waiter = (error?: Error) => void;
-type Waiting = { path: string; listeners: Set<Waiter>; error?: Error };
+type Waiting = {
+  path: string;
+  changed: Deferred<Error | undefined>;
+  subscribers: number;
+  error?: Error;
+};
 const waiters = resolveGlobalMap<string, Waiting>(
   Symbol.for("openclaw.workerSessionToolOperationWaiters"),
   (registered) => {
     const error = new Error("Gateway lifecycle ended while waiting for worker session operations");
-    for (const { listeners } of registered.values()) {
-      for (const listener of listeners) {
-        listener(error);
-      }
+    for (const waiting of registered.values()) {
+      waiting.changed.resolve(error);
     }
     registered.clear();
   },
@@ -43,9 +46,7 @@ registerOpenClawStateDatabaseLifecycleListener((event) => {
     waiters.delete(id);
     const error = new Error("Worker session operation database owner retired");
     waiting.error = error;
-    for (const listener of waiting.listeners) {
-      listener(error);
-    }
+    waiting.changed.resolve(error);
   }
 });
 function isReceipt(value: unknown): value is PlacementSessionToolReceipt {
@@ -60,21 +61,24 @@ export function createPlacementSessionToolOperationOps(runtime: {
   const context = captureOpenClawStateWorkerContext({ path: runtime.path });
   const key = (sessionId: string, claimId: string) =>
     `${context.admission.identity.key}\0${sessionId}\0${claimId}`;
+  const waitingFor = (id: string): Waiting =>
+    waiters.get(id) ?? {
+      path: context.admission.identity.canonicalPath,
+      changed: createDeferredCore<Error | undefined>(),
+      subscribers: 0,
+    };
+  const stageTools = (claim: WorkerSessionTurnClaim, toolNames: readonly string[] | null = null) =>
+    stagePlacementTurnToolWorkerPublication(context.admission.identity, { claim, toolNames });
   const signal = (sessionId: string, claimId: string, error?: Error) => {
     const id = key(sessionId, claimId);
-    const waiting: Waiting = waiters.get(id) ?? {
-      path: context.admission.identity.canonicalPath,
-      listeners: new Set<Waiter>(),
-    };
+    const waiting = waitingFor(id);
     if (error) {
       waiting.error = error;
       waiters.set(id, waiting);
     } else if (!waiting.error) {
       waiters.delete(id);
     }
-    for (const listener of waiting.listeners) {
-      listener(waiting.error);
-    }
+    waiting.changed.resolve(waiting.error);
   };
   async function execute(
     inputCommand: SqliteWorkerCommand<PlacementSessionToolWorkerOperations>,
@@ -102,10 +106,7 @@ export function createPlacementSessionToolOperationOps(runtime: {
         ) {
           throw new Error("Worker session receipt has unexpected tool authority");
         }
-        return stagePlacementTurnToolWorkerPublication(context.admission.identity, {
-          claim: command.input.args[0],
-          toolNames: facts.toolNames,
-        });
+        return stageTools(command.input.args[0], facts.toolNames);
       },
       publish(receipt) {
         if (
@@ -124,33 +125,23 @@ export function createPlacementSessionToolOperationOps(runtime: {
           throw error;
         }
         // Never retry uncertain writes or keep teardown waiting for a lost terminal receipt.
+        const recoveryError = new Error(
+          command.type === "placementTools.begin"
+            ? "Worker session operation admission outcome is unknown; restart recovery is required"
+            : "Worker session operation outcome is unknown; restart recovery is required",
+          { cause: error },
+        );
         if (
           command.type === "placementTools.complete" ||
           command.type === "placementTools.abandon" ||
           command.type === "placementTools.bindChild"
         ) {
           const operation = command.input.args[0];
-          signal(
-            operation.sourceSessionId,
-            operation.sourceClaimId,
-            new Error("Worker session operation outcome is unknown; restart recovery is required", {
-              cause: error,
-            }),
-          );
+          signal(operation.sourceSessionId, operation.sourceClaimId, recoveryError);
         } else if (command.type === "placementTools.begin") {
           const { claim } = command.input.args[0];
-          stagePlacementTurnToolWorkerPublication(context.admission.identity, {
-            claim,
-            toolNames: null,
-          }).invalidate();
-          signal(
-            claim.sessionId,
-            claim.claimId,
-            new Error(
-              "Worker session operation admission outcome is unknown; restart recovery is required",
-              { cause: error },
-            ),
-          );
+          stageTools(claim).invalidate();
+          signal(claim.sessionId, claim.claimId, recoveryError);
         }
         return undefined;
       },
@@ -166,15 +157,12 @@ export function createPlacementSessionToolOperationOps(runtime: {
     instanceId: runtime.instanceId,
     nowMs: runtime.now?.(),
   });
-  const closeAdmission = (claim: WorkerSessionTurnClaim) => {
+  const closeAdmission = async (claim: WorkerSessionTurnClaim): Promise<void> => {
     context.admission.assertCurrent();
-    return execute(
+    await execute(
       { type: "placementTools.seal", input: input([claim]) },
       undefined,
-      stagePlacementTurnToolWorkerPublication(context.admission.identity, {
-        claim,
-        toolNames: null,
-      }),
+      stageTools(claim),
     );
   };
   return {
@@ -196,24 +184,14 @@ export function createPlacementSessionToolOperationOps(runtime: {
       }
       return isPlacementTurnToolAuthorized(context.admission.identity, claim, name);
     },
-    async closeWorkerTurnToolAdmission(claim: WorkerSessionTurnClaim): Promise<void> {
-      await closeAdmission(claim);
-    },
+    closeWorkerTurnToolAdmission: closeAdmission,
     async closeWorkerTurnToolState(claim: WorkerSessionTurnClaim): Promise<void> {
       await closeAdmission(claim);
       for (;;) {
         const id = key(claim.sessionId, claim.claimId);
-        const waiting: Waiting = waiters.get(id) ?? {
-          path: context.admission.identity.canonicalPath,
-          listeners: new Set<Waiter>(),
-        };
-        const { listeners } = waiting;
+        const waiting = waitingFor(id);
+        waiting.subscribers++;
         waiters.set(id, waiting);
-        let finish: Waiter = () => {};
-        const changed = new Promise<Error | undefined>((resolve) => {
-          finish = resolve;
-          listeners.add(finish);
-        });
         try {
           // Subscribe before checking, so a terminal commit cannot race the teardown waiter.
           const cleared = await execute({ type: "placementTools.clear", input: input([claim]) });
@@ -224,13 +202,13 @@ export function createPlacementSessionToolOperationOps(runtime: {
           if (waiting.error) {
             throw waiting.error;
           }
-          const error = await changed;
+          const error = await waiting.changed.promise;
           if (error) {
             throw error;
           }
         } finally {
-          listeners.delete(finish);
-          if (!waiting.error && listeners.size === 0 && waiters.get(id) === waiting) {
+          waiting.subscribers--;
+          if (!waiting.error && waiting.subscribers === 0 && waiters.get(id) === waiting) {
             waiters.delete(id);
           }
         }

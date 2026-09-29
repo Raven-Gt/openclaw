@@ -24,8 +24,10 @@ import {
   type EmbeddedAgentQueueMessageOutcome,
   formatEmbeddedAgentQueueFailureSummary,
   queueEmbeddedAgentMessageWithOutcomeAsync,
+  queueGuardedEmbeddedAgentMessageWithOutcomeAsync,
 } from "../embedded-agent-runner/runs.js";
 import { jsonResult } from "./common.js";
+import { captureGatewayToolCallerAssertion } from "./gateway-caller-context.js";
 import {
   callInProcessGatewayToolWithCreation,
   hasInProcessGatewayToolContext,
@@ -97,6 +99,7 @@ export async function startSessionsSendAgentRun(params: {
     }
   | { ok: false; result: ReturnType<typeof jsonResult> }
 > {
+  const assertCaller = captureGatewayToolCallerAssertion();
   try {
     let fallbackSessionKey: string | undefined;
     const activeRunSessionId =
@@ -149,19 +152,24 @@ export async function startSessionsSendAgentRun(params: {
           },
         }),
       };
-      let queueOutcome = await queueEmbeddedAgentMessageWithOutcomeAsync(
-        activeRunSessionId,
-        messageText,
-        queueOptions,
-      );
+      // Direct steering bypasses Gateway RPC, so carry its source owner to the final enqueue.
+      const queue = (options: EmbeddedAgentQueueMessageOptions) =>
+        assertCaller
+          ? queueGuardedEmbeddedAgentMessageWithOutcomeAsync(
+              activeRunSessionId,
+              messageText,
+              options,
+              () => {
+                assertCaller();
+                return true;
+              },
+            )
+          : queueEmbeddedAgentMessageWithOutcomeAsync(activeRunSessionId, messageText, options);
+      let queueOutcome = await queue(queueOptions);
       if (!queueOutcome.queued && queueOutcome.reason === "transcript_commit_wait_unsupported") {
         const bestEffortQueueOptions = { ...queueOptions };
         delete bestEffortQueueOptions.waitForTranscriptCommit;
-        queueOutcome = await queueEmbeddedAgentMessageWithOutcomeAsync(
-          activeRunSessionId,
-          messageText,
-          bestEffortQueueOptions,
-        );
+        queueOutcome = await queue(bestEffortQueueOptions);
       }
       if (queueOutcome.queued) {
         return { ok: true, runId: params.runId, targetDisposition: "steered" };

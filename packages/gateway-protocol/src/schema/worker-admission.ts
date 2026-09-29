@@ -26,6 +26,7 @@ import {
   workerResponseSchema,
 } from "./worker-protocol-primitives.js";
 
+export * from "./worker-session-tools.js";
 export {
   WORKER_PUBLIC_INGRESS_PATH,
   WORKER_PROTOCOL_MAX_FRAME_ID_LENGTH,

@@ -121,6 +121,12 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
   const inlineWidgetClientAvailable = options?.clientCaps?.includes("inline-widgets") === true;
   const sessionKey = normalizeOptionalString(options?.runSessionKey ?? options?.agentSessionKey);
   const gatewayCallerAccountId = options?.gatewayCallerAccountId ?? options?.agentAccountId;
+  const deliveryContext = {
+    channel: options?.agentChannel,
+    to: options?.currentChannelId ?? options?.agentTo,
+    accountId: options?.agentAccountId,
+    threadId: options?.currentThreadTs ?? options?.agentThreadId,
+  };
   const runtimeWebTools = getActiveRuntimeWebToolsMetadataFromState();
   const sandbox =
     options?.sandboxRoot && options?.sandboxFsBridge
@@ -323,17 +329,11 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
             agentSessionKey: options?.runSessionKey ?? options?.agentSessionKey,
             agentId: sessionAgentId,
             agentAccountId: gatewayCallerAccountId,
-            currentDeliveryContext: {
-              channel: options?.agentChannel,
-              to: options?.currentChannelId ?? options?.agentTo,
-              accountId: options?.agentAccountId,
-              threadId: options?.currentThreadTs ?? options?.agentThreadId,
-            },
+            currentDeliveryContext: deliveryContext,
             creatorToolAllowlist: options?.cronCreatorToolAllowlist,
             creatorToolAllowlistCaptureRef: options?.cronCreatorToolAllowlistCaptureRef,
             resolveCreatorToolAuthority: options?.resolveCronCreatorToolAuthority,
             creatorAuthorityUnavailableReason: options?.cronCreatorAuthorityUnavailableReason,
-            runId: options?.runId,
             selfRemoveOnlyJobId: options?.cronSelfRemoveOnlyJobId,
           }),
           createSessionsTool({
@@ -525,12 +525,7 @@ export function createOpenClawTools(options?: OpenClawToolsOptions): AnyAgentToo
       activeModelProvider: options?.modelProvider,
       activeModelId: options?.modelId,
       metadataSnapshot: options?.preparedModelRuntime?.metadataSnapshot,
-      activeDeliveryContext: {
-        channel: options?.agentChannel,
-        to: options?.currentChannelId ?? options?.agentTo,
-        accountId: options?.agentAccountId,
-        threadId: options?.currentThreadTs ?? options?.agentThreadId,
-      },
+      activeDeliveryContext: deliveryContext,
     }),
     webSearchTool,
     webFetchTool,

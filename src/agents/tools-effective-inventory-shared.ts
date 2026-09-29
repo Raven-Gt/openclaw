@@ -2,8 +2,6 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
-import type { ProviderRuntimeModel } from "../plugins/provider-runtime-model.types.js";
 import { normalizeAgentRuntimeTools } from "./runtime-plan/tools.js";
 import { summarizeToolDescriptionText } from "./tool-description-summary.js";
 import { resolveToolDisplay } from "./tool-display.js";
@@ -14,6 +12,7 @@ import {
 import type {
   EffectiveToolInventoryEntry,
   EffectiveToolInventoryNotice,
+  ResolveEffectiveToolInventoryParams,
 } from "./tools-effective-inventory.types.js";
 import type { AnyAgentTool } from "./tools/common.js";
 
@@ -28,21 +27,11 @@ function resolveEffectiveToolLabel(tool: AnyAgentTool): string {
   return resolveToolDisplay({ name: tool.name }).title;
 }
 
-function summarizeEffectiveToolDescription(tool: AnyAgentTool): string {
-  return summarizeToolDescriptionText({
-    rawDescription: normalizeOptionalString(tool.description),
-    displaySummary: tool.displaySummary,
-  });
-}
-
-export type RuntimeCompatibleToolInventoryParams = {
+export type RuntimeCompatibleToolInventoryParams = Pick<
+  ResolveEffectiveToolInventoryParams,
+  "cfg" | "workspaceDir" | "modelProvider" | "modelId" | "modelApi" | "runtimeModel"
+> & {
   tools: readonly AnyAgentTool[];
-  cfg: OpenClawConfig;
-  workspaceDir?: string;
-  modelProvider?: string;
-  modelId?: string;
-  modelApi?: string | null;
-  runtimeModel?: ProviderRuntimeModel;
 };
 
 type ToolInventoryProjection = Omit<
@@ -78,11 +67,15 @@ export function buildEffectiveToolInventory(
   const compatible = filterRuntimeCompatibleTools(normalizedTools);
   diagnostics.push(...compatible.diagnostics);
   const projectTool = projection.createToolProjection();
-  const entries: EffectiveToolInventoryEntry[] = [];
-  for (const tool of compatible.tools) {
+  const entries: EffectiveToolInventoryEntry[] = compatible.tools.map((tool) => {
     const projected = projectTool(tool);
-    const description = projected.description ?? summarizeEffectiveToolDescription(tool);
-    entries.push({
+    const description =
+      projected.description ??
+      summarizeToolDescriptionText({
+        rawDescription: normalizeOptionalString(tool.description),
+        displaySummary: tool.displaySummary,
+      });
+    return {
       id: tool.name,
       ...projected,
       label: projected.label ?? resolveEffectiveToolLabel(tool),
@@ -91,8 +84,8 @@ export function buildEffectiveToolInventory(
         projected.rawDescription ??
         (normalizeOptionalString(tool.description) ||
           (projection.rawDescriptionFallback === "summary" ? description : "")),
-    });
-  }
+    };
+  });
   entries.sort((a, b) => a.label.localeCompare(b.label));
   const counts = new Map<string, number>();
   for (const entry of entries) {
