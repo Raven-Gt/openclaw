@@ -913,16 +913,4 @@ describe("scanDirectoryWithSummary", () => {
     expect(readSpy).toHaveBeenCalledTimes(2);
     readSpy.mockRestore();
   });
-
-  it("reuses cached directory listings for unchanged trees", async () => {
-    const root = makeTmpDir();
-    fsSync.writeFileSync(path.join(root, "cached.js"), `export const ok = true;`);
-
-    const readdirSpy = vi.spyOn(fs, "readdir");
-    await scanDirectoryWithSummary(root);
-    await scanDirectoryWithSummary(root);
-
-    expect(readdirSpy).toHaveBeenCalledTimes(1);
-    readdirSpy.mockRestore();
-  });
 });

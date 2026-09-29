@@ -317,21 +317,16 @@ describe("shared auth store relocation", () => {
       expect(result.warnings).toEqual(
         converges ? [] : [expect.stringMatching(/conflict.*Back up/)],
       );
-      const conflictDetails: Record<string, string> = {
-        "changed credential": '"openai:shared": credential differs',
-        "source-only profile": '"openai:shared": missing from target',
-        "malformed source": '"bad": malformed credential',
-        "malformed target": "invalid credential payload",
-        "malformed target profile": '"bad": malformed credential',
-        "changed metadata": "store metadata differs",
-        "changed state": "auth_profile_state[primary] -> config_machine_state[authProfiles.state]",
-      };
       if (!converges) {
-        expect(result.warnings[0]).toContain(conflictDetails[scenario]);
-        expect(result.warnings[0]).toContain("openclaw doctor --fix");
-        expect(result.warnings[0]).toContain(JSON.stringify(sourcePath));
         expect(result.warnings[0]).toContain(
-          JSON.stringify(path.join(fixture.stateDir, "state", "openclaw.sqlite")),
+          scenario === "changed state"
+            ? "shared auth state rows conflict"
+            : "shared auth credential rows conflict",
+        );
+        expect(result.warnings[0]).toContain("openclaw doctor --fix");
+        expect(result.warnings[0]).not.toContain(sourcePath);
+        expect(result.warnings[0]).not.toContain(
+          path.join(fixture.stateDir, "state", "openclaw.sqlite"),
         );
         expect(result.warnings[0]).not.toMatch(/shared-key|extra-key|different-key|legacyMetadata/);
       }
@@ -379,13 +374,10 @@ describe("shared auth store relocation", () => {
       ).toBe(!converges);
       if (scenario === "changed credential") {
         const warning = result.warnings[0]!;
-        expect(warning).toContain(`${JSON.stringify(escapedProfileId)}: missing from target`);
-        expect(warning.indexOf(JSON.stringify(escapedProfileId))).toBeLessThan(
-          warning.indexOf('"openai:shared"'),
-        );
-        expect(warning).toContain(conflictDetails["changed state"]);
+        expect(warning).toContain("shared auth credential rows conflict");
+        expect(warning).not.toContain(escapedProfileId);
         expect(warning).not.toContain("\n");
-        // Follow the diagnostic: retain target-only profiles and reconcile both conflicting rows.
+        // Retain target-only profiles and reconcile both conflicting rows.
         target
           .prepare(
             "UPDATE config_machine_state SET value_json = ? WHERE state_key = 'authProfiles.store'",

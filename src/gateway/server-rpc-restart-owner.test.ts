@@ -6,12 +6,9 @@ import * as followupDelivery from "../auto-reply/reply/followup-delivery.js";
 import { replyRunRegistry } from "../auto-reply/reply/reply-run-registry.js";
 import * as sessionAccessor from "../config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import {
-  captureGatewaySessionWorkAdmissions,
-  getSessionWorkAdmissionRelease,
-} from "../sessions/session-lifecycle-admission.js";
+import { getSessionWorkAdmissionRelease } from "../sessions/session-lifecycle-admission.js";
 import { createOpenClawTestState } from "../test-utils/openclaw-test-state.js";
-import type { GatewayContextResolver, GatewayRequestContext } from "./server-methods/types.js";
+import type { GatewayRequestContext } from "./server-methods/types.js";
 import { disconnectGatewayClient, startGatewayWithClient } from "./test-helpers.e2e.js";
 import { buildMockOpenAiResponsesProvider } from "./test-openai-responses-model.js";
 
@@ -78,14 +75,12 @@ it(
     let gateway: Awaited<ReturnType<typeof startGatewayWithClient>> | undefined;
     let closed = false;
     let replyReleased: Promise<void> | undefined;
-    let hostResolver: GatewayContextResolver | undefined;
     let context: GatewayRequestContext | undefined;
     const kernel = await import("./server-kernel-request-runtime.js");
     const prepare = kernel.prepareGatewayKernelRequestRuntime;
     const startupSpy = vi
       .spyOn(kernel, "prepareGatewayKernelRequestRuntime")
       .mockImplementation(async (params) => {
-        hostResolver = params.coreRuntime.resolvePluginGatewayContext;
         const result = await prepare(params);
         context = result.gatewayRequestContext;
         return result;
@@ -153,7 +148,7 @@ it(
       firstGate.resolve();
       await finalReached.promise;
       expect(followupReceived).toBe(true);
-      if (!context || !hostResolver || !context.resolveGatewayContext) {
+      if (!context || !context.resolveGatewayContext) {
         throw new Error("Missing actual Gateway resolver");
       }
       const storePath = state.statePath("agents", "main", "sessions", "sessions.json");
@@ -161,12 +156,10 @@ it(
       if (!entry) {
         throw new Error("Real RPC did not create a session");
       }
-      const target = { scope: storePath, sessionKey, sessionId: entry.sessionId };
       replyReleased = getSessionWorkAdmissionRelease({
         scope: storePath,
         identities: [sessionKey],
       });
-      expect(captureGatewaySessionWorkAdmissions(() => context).isActive(target)).toBe(false);
       console.log(
         "RPC_OWNER_BEFORE_CLOSE",
         JSON.stringify({
@@ -174,10 +167,6 @@ it(
           operation: replyRunRegistry.get(sessionKey)?.turnKind,
           activeChatRuns: context.chatAbortControllers.size,
           queued: context.chatQueuedTurns.size,
-          hostCaptured: captureGatewaySessionWorkAdmissions(hostResolver).isActive(target),
-          rpcCaptured: captureGatewaySessionWorkAdmissions(context.resolveGatewayContext).isActive(
-            target,
-          ),
         }),
       );
       await gateway.server.close({

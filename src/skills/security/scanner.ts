@@ -1,10 +1,10 @@
 // Skill security scanner inspects skill files and manifests for unsafe patterns.
 import fs from "node:fs/promises";
 import path from "node:path";
-import { walkDirectory, type WalkDirectoryEntry } from "@openclaw/fs-safe/walk";
 import { expectDefined } from "@openclaw/normalization-core";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { hasErrnoCode } from "../../infra/errors.js";
+import { walkDirectory, type WalkDirectoryEntry } from "../../infra/fs-safe.js";
 import { pruneMapToMaxSize } from "../../infra/map-size.js";
 import { isPathInside } from "../../security/scan-paths.js";
 import { formatScanEvidence, LITERAL_SECRET_SKILL_CONTENT_RULE } from "./scan-evidence.js";

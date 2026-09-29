@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { closeAuthProfileReadPool } from "../agents/auth-profiles/sqlite.js";
-import { saveAuthProfileStore } from "../agents/auth-profiles/store-runtime.js";
+import { saveAuthProfileStore } from "../agents/auth-profiles/store.js";
 import { testing as cliBackendsTesting } from "../agents/cli-backends.test-support.js";
 import type { AuthProfileFailurePolicy } from "../agents/embedded-agent-runner/run/auth-profile-failure-policy.types.js";
 import {
@@ -81,7 +81,7 @@ describe("runCronIsolatedAgentTurn auth profile propagation (#20624, #90991)", (
   afterEach(() => {
     cliBackendsTesting.resetDepsForTest();
     closeAuthProfileReadPool({ kind: "root", rootPath: agentDir });
-    closeOpenClawAgentDatabasesForTest(agentDir);
+    closeOpenClawAgentDatabasesForTest();
   });
 
   it("uses transient-local auth cooldown policy for cron throttling failures", async () => {

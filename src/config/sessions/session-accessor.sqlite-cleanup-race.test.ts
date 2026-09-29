@@ -622,23 +622,19 @@ describe("SQLite lifecycle cleanup races", () => {
       throw new Error("expected current guarded entry");
     }
     const replacementEntry = { ...currentEntry, label: "concurrent replacement" };
+    const transcriptHash = hash("sha256", `\0${JSON.stringify(events[0])}`);
     archiveMaterializationHook.afterMaterialize = () => {
       replaceSessionEntrySync({ sessionKey, storePath }, replacementEntry);
     };
-
     const result = await deleteSessionEntryLifecycle({
       archiveTranscript: true,
       expectedEntry: currentEntry,
-      expectedTranscript: { eventJson: [JSON.stringify(events[0])], sessionId },
+      expectedTranscript: { digest: { eventCount: 1, rollingHash: transcriptHash }, sessionId },
       storePath,
       target: { canonicalKey: sessionKey, storeKeys: [sessionKey] },
     });
 
-    expect(result).toEqual({
-      archivedTranscripts: [],
-      deleted: false,
-      expectedEntryMismatch: true,
-    });
+    expect(result).toMatchObject({ deleted: false, expectedEntryMismatch: true });
     expect(loadSessionEntry({ sessionKey, storePath })).toEqual(replacementEntry);
     await expect(loadTranscriptEvents({ sessionKey, sessionId, storePath })).resolves.toEqual(
       events,

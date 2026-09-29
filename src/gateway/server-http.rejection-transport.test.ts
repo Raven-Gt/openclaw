@@ -23,6 +23,8 @@ describe("Gateway closing connection admission", () => {
       clients,
       controlUiEnabled: false,
       controlUiBasePath: "",
+      openAiChatCompletionsEnabled: false,
+      openResponsesEnabled: false,
       resolvedAuth,
       getRuntimeConfig: () => ({}),
       handleHooksRequest: async (_req, res) => {

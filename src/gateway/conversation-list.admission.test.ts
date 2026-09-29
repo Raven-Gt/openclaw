@@ -6,19 +6,15 @@ import {
   listConversations,
   registerConversationAddresses,
   resolveConversationRegistryScope,
+  runConversationDatabaseWrite,
 } from "../config/sessions/conversation-registry.js";
 import { listSessionEntriesCore } from "../config/sessions/session-accessor.entry.js";
-import {
-  resolveSqliteReadScope,
-  toDatabaseOptions,
-} from "../config/sessions/session-accessor.sqlite-scope.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import {
   closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "../state/openclaw-agent-db.js";
-import { runOpenClawAgentWriteAdmission } from "../state/openclaw-agent-write-admission.js";
 import { createChannelTestPluginBase } from "../test-utils/channel-plugins.js";
 import { runGatewayConversationList } from "./conversation-list.js";
 import * as routeOwnership from "./conversation-route-ownership.js";
@@ -73,10 +69,7 @@ describe("conversation directory write admission", () => {
       const fixture = createDirectory();
       let currentConfig = fixture.config;
       const release = createDeferredCore();
-      const blocker = runOpenClawAgentWriteAdmission(
-        toDatabaseOptions(resolveSqliteReadScope(fixture.scope)),
-        () => release.promise,
-      );
+      const blocker = runConversationDatabaseWrite(fixture.scope, () => release.promise);
       let settled = false;
       const result = runGatewayConversationList(
         {

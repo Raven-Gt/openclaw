@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { saveAuthProfileStore } from "../../agents/auth-profiles/store-runtime.js";
+import { saveAuthProfileStore } from "../../agents/auth-profiles/store.js";
 import type { AuthProfileCredential } from "../../agents/auth-profiles/types.js";
 import { testing as cliBackendsTesting } from "../../agents/cli-backends.test-support.js";
 import { closeOpenClawAgentDatabaseByPath } from "../../state/openclaw-agent-db.js";

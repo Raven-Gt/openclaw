@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { trackAsyncWork } from "../shared/async-work-scope.js";
 import { createGatewayMethodRegistry } from "./methods/registry.js";
 import type {
   GatewayRequestContext,
@@ -62,7 +61,6 @@ describe("synthetic operator scope attenuation", () => {
         respond(true, { ok: true });
       });
       const context = {
-        trackExecution: trackAsyncWork,
         dedupe: new Map(),
         getRuntimeConfig: () => ({}),
         logGateway: { error: vi.fn(), warn: vi.fn() },

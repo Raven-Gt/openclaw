@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { createDeferred } from "../../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import {
   closeOpenClawAgentDatabasesForTest,
@@ -11,9 +12,27 @@ import { migrateLegacyMainSessionKeys } from "./legacy-main-session-migration.js
 import { readExactSessionEntryRowForCanonicalRepair } from "./session-accessor.sqlite-canonical-repair.js";
 import { writeSessionEntry } from "./session-accessor.sqlite-entry-store.js";
 import { readTranscriptEventRows } from "./session-accessor.sqlite-read.js";
+import { runExclusiveSqliteSessionWrite } from "./session-accessor.sqlite-scope.js";
 import { appendTranscriptEventInTransaction } from "./session-accessor.sqlite-transcript-store.js";
 
-const race = vi.hoisted(() => ({ beforeDelete: undefined as (() => void) | undefined }));
+const race = vi.hoisted(() => ({
+  beforeDelete: undefined as (() => void) | undefined,
+  queued: undefined as ((pathname: string | undefined) => void) | undefined,
+}));
+
+vi.mock("./session-accessor.sqlite-scope.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./session-accessor.sqlite-scope.js")>();
+  return {
+    ...actual,
+    runExclusiveSqliteSessionWrite: (
+      ...args: Parameters<typeof actual.runExclusiveSqliteSessionWrite>
+    ) => {
+      const pending = actual.runExclusiveSqliteSessionWrite(...args);
+      race.queued?.(args[0].path);
+      return pending;
+    },
+  };
+});
 
 vi.mock("./session-accessor.sqlite-lifecycle.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./session-accessor.sqlite-lifecycle.js")>();
@@ -98,14 +117,10 @@ async function runCleanupRace(
     race.beforeDelete = () => mutateSource(mainPath);
   } else {
     const entered = createDeferred();
-    blocker = runExclusiveSqliteSessionWrite(
-      { agentId: "ops", path: opsPath, env },
-      async () => {
-        entered.resolve();
-        await resume.promise;
-      },
-      "session.import.batch",
-    );
+    blocker = runExclusiveSqliteSessionWrite({ agentId: "ops", path: opsPath, env }, async () => {
+      entered.resolve();
+      await resume.promise;
+    });
     await entered.promise;
     race.queued = (pathname) => {
       if (pathname === opsPath) {

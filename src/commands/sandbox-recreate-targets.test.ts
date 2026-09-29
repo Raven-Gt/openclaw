@@ -11,10 +11,7 @@ import {
   updateRegistry,
 } from "../agents/sandbox/registry.js";
 import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../config/config.js";
-import {
-  closeOpenClawStateDatabaseAsync,
-  closeOpenClawStateDatabaseForTest,
-} from "../state/openclaw-state-db.js";
+import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { sandboxListCommand, sandboxRecreateCommand } from "./sandbox.js";
 
 const { spawnCommand } = vi.hoisted(() => ({ spawnCommand: vi.fn() }));
@@ -25,7 +22,6 @@ vi.mock("../process/exec.js", async (importOriginal) => ({
 
 let stateDir: string | undefined;
 afterEach(async () => {
-  await closeOpenClawStateDatabaseAsync();
   closeOpenClawStateDatabaseForTest();
   clearRuntimeConfigSnapshot();
   vi.unstubAllEnvs();

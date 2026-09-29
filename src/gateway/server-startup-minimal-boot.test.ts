@@ -9,6 +9,7 @@ import { readLoggingConfig } from "../logging/config.js";
 import { resetLogger } from "../logging/logger.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { clearPluginMetadataLifecycleCaches } from "../plugins/plugin-metadata-lifecycle.js";
+import { getSkillsSnapshotVersion } from "../skills/runtime/refresh-state.js";
 import { createOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { getFreePort } from "../test-utils/ports.js";
 

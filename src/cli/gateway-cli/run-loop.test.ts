@@ -2,10 +2,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../../test/helpers/promise.js";
 import { createTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import type { GatewayServer } from "../../gateway/server-public.js";
 import type { GatewayBonjourBeacon } from "../../infra/bonjour-discovery.js";
 import type { GatewayActiveWorkSnapshot } from "../../infra/gateway-active-work.js";
+import type { GatewayBootLifecycleCompletion } from "../../infra/gateway-boot-lifecycle.js";
 import type { GatewayRestartIntent } from "../../infra/restart-intent.js";
 import { SUPERVISOR_HINT_ENV_VARS } from "../../infra/supervisor-markers.js";
 import { resolveGlobalMap } from "../../shared/global-singleton.js";
@@ -416,6 +418,7 @@ async function runLoopWithStart(params: {
   lockPort?: number;
   healthHost?: string;
   waitForHealthyChild?: (port: number, pid?: number, host?: string) => Promise<boolean>;
+  completeBoot?: (completion: GatewayBootLifecycleCompletion) => void;
 }) {
   vi.resetModules();
   const { runGatewayLoop } = await import("./run-loop.js");
@@ -426,6 +429,7 @@ async function runLoopWithStart(params: {
     lockPort: params.lockPort,
     healthHost: params.healthHost,
     waitForHealthyChild: params.waitForHealthyChild,
+    completeBoot: params.completeBoot,
   });
   return { loopPromise };
 }

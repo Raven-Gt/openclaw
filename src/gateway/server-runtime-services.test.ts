@@ -115,8 +115,8 @@ vi.mock("./channel-health-monitor.js", () => ({
 
 import {
   bindGatewayContextResolver,
+  getGatewayContextResolver,
   getPluginRuntimeGatewayRequestScope,
-  hasGatewayContextOwner,
   withPluginRuntimeGatewayRequestScope,
 } from "../plugins/runtime/gateway-request-scope.js";
 
@@ -421,8 +421,9 @@ describe("server-runtime-services", () => {
 
     expect(observed).toBe(gatewayContext);
     expect(observedClient).toBeUndefined();
-    expect(hasGatewayContextOwner(admittedOwner, resolveGatewayContext)).toBe(true);
-    expect(hasGatewayContextOwner(admittedOwner, () => gatewayContext)).toBe(false);
+    const scheduledOwner = getGatewayContextResolver(admittedOwner);
+    expect(scheduledOwner).toBeTypeOf("function");
+    expect(getGatewayContextResolver(scheduledOwner!)).toBe(resolveGatewayContext);
     services.heartbeatRunner.stop();
   });
 
