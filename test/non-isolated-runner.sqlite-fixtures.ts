@@ -40,6 +40,9 @@ async function useReadPool() {
 }
 `;
   return {
+    ...sharedStateOwnerFixtureFiles(),
+    ...scheduledCloseFixtureFiles(),
+    ...subagentRetirementFixtureFiles(),
     ...stateReadPoolFixtureFiles(),
     ...failedDrainFixtureFiles(readPoolFixture),
     "11-a-sqlite-owner.test.ts": `
@@ -206,6 +209,79 @@ it("retains installed-schema repair ownership through retired agent lease cleanu
   await useReadPool();
   await closeOpenClawStateDatabaseAsync();
   expect(readPool.close).toHaveBeenCalledOnce();
+});
+`,
+  };
+}
+
+function scheduledCloseFixtureFiles(): Record<string, string> {
+  return {
+    "10-a-scheduled-close.test.ts": `
+import { afterEach, expect, it } from "vitest";
+import { closeOpenClawAgentDatabasesForTest } from ${JSON.stringify(import.meta.resolve("../src/state/openclaw-agent-db.ts"))};
+import { hasOpenClawAgentDatabaseAsyncResources, registerOpenClawAgentDatabaseAsyncResource } from ${JSON.stringify(import.meta.resolve("../src/state/openclaw-agent-db-resources.ts"))};
+const events: string[] = [];
+// The synchronous test closer only schedules asynchronous Worker retirement.
+afterEach(() => closeOpenClawAgentDatabasesForTest());
+function registerClose(agentId: string) {
+  registerOpenClawAgentDatabaseAsyncResource({
+    agentId,
+    path: "/synthetic/" + agentId + ".sqlite",
+    revoke() {},
+    // Worker retirement crosses threads, so it settles on a later event-loop turn. The
+    // path from one test's teardown to the next test's start is promise-only, so without
+    // the runner's join this close is still pending when the next test begins.
+    close: () => new Promise<void>((resolve) => setImmediate(() => {
+      events.push(agentId + " close settled");
+      resolve();
+    })),
+  });
+}
+it("schedules a Worker close that its teardown does not await", () => {
+  registerClose("scheduled");
+});
+it("starts only after that close settled", () => {
+  events.push("next test started");
+  expect(events).toEqual(["scheduled close settled", "next test started"]);
+  expect(hasOpenClawAgentDatabaseAsyncResources()).toBe(false);
+});
+it("schedules a Worker close and then skips itself", (context) => {
+  registerClose("skipped");
+  context.skip();
+});
+it("starts only after the skipped test's close settled", () => {
+  events.push("test after skip started");
+  expect(events.slice(2)).toEqual(["skipped close settled", "test after skip started"]);
+  expect(hasOpenClawAgentDatabaseAsyncResources()).toBe(false);
+});
+`,
+    "10-b-around-each-close.test.ts": `
+import { aroundEach, expect, it } from "vitest";
+import { closeOpenClawAgentDatabasesForTest } from ${JSON.stringify(import.meta.resolve("../src/state/openclaw-agent-db.ts"))};
+import { hasOpenClawAgentDatabaseAsyncResources, registerOpenClawAgentDatabaseAsyncResource } from ${JSON.stringify(import.meta.resolve("../src/state/openclaw-agent-db-resources.ts"))};
+const events: string[] = [];
+// aroundEach setup and teardown both run outside the runner's per-attempt hook.
+aroundEach(async (runTest) => {
+  events.push(hasOpenClawAgentDatabaseAsyncResources() ? "setup saw a pending close" : "setup");
+  await runTest();
+  closeOpenClawAgentDatabasesForTest();
+});
+it("schedules a Worker close from aroundEach teardown", () => {
+  registerOpenClawAgentDatabaseAsyncResource({
+    agentId: "around",
+    path: "/synthetic/around.sqlite",
+    revoke() {},
+    // Settles on a later event-loop turn, like the scheduled close in 10-a.
+    close: () => new Promise<void>((resolve) => setImmediate(() => {
+      events.push("around close settled");
+      resolve();
+    })),
+  });
+});
+it("starts only after the aroundEach close settled", () => {
+  events.push("next test started");
+  expect(events).toEqual(["setup", "around close settled", "setup", "next test started"]);
+  expect(hasOpenClawAgentDatabaseAsyncResources()).toBe(false);
 });
 `,
   };
@@ -379,4 +455,110 @@ afterAll(() => {
 `,
     ]),
   );
+}
+
+function sharedStateOwnerFixtureFiles(): Record<string, string> {
+  return Object.fromEntries(
+    ["a", "b"].map((generation) => [
+      `09-${generation}-shared-state-owner.test.ts`,
+      `
+import fs from "node:fs";
+import path from "node:path";
+import { expect, it, vi } from "vitest";
+import { closeOpenClawStateDatabaseAsync } from ${JSON.stringify(import.meta.resolve("../src/state/openclaw-state-db-cache.ts"))};
+import { captureOpenClawStateWorkerContext } from ${JSON.stringify(import.meta.resolve("../src/state/openclaw-state-worker-context.ts"))};
+import { getOpenClawStateWorkerOwner } from ${JSON.stringify(import.meta.resolve("../src/state/openclaw-state-worker-owner.ts"))};
+
+const generation = ${JSON.stringify(generation)};
+const probeKey = Symbol.for("fixture.sharedStateOwnerGenerations");
+const probe = Reflect.get(globalThis, probeKey) ?? { closes: [] as string[] };
+Reflect.set(globalThis, probeKey, probe);
+const edge = vi.hoisted(() => ({ open: vi.fn(), close: vi.fn(async () => {}) }));
+vi.mock(${JSON.stringify(import.meta.resolve("../src/infra/sqlite-worker-store.ts"))}, () => ({
+  openSharedStateSqliteWorkerStore: edge.open,
+  closeUnclaimedSharedStateSqliteWorkers: async () => {},
+  hasUnclaimedSharedStateSqliteCleanup: () => false,
+  isSqliteWorkerStoreAvailable: () => true,
+  getSqliteWorkerActorIdentity: (store) => store.actor,
+  retireSqliteWorkerActor: async () => {},
+  runSqliteWorkerStoreOperation: async (store, run) => run(store),
+}));
+edge.close.mockImplementation(async () => { probe.closes.push(generation); });
+edge.open.mockImplementation(async (options, context) => ({
+  close: edge.close,
+  actor: { databasePath: options.databasePath, key: context.admission.identity.key },
+}));
+
+it("binds shared-state retirement to the current file's database lifecycle " + generation, async () => {
+  const pathname = path.join(import.meta.dirname, "shared-" + generation + ".sqlite");
+  // Only the transport is controlled; the real owner retains file identity and close custody.
+  fs.writeFileSync(pathname, "synthetic shared-state source");
+  const context = captureOpenClawStateWorkerContext({
+    path: pathname, env: { OPENCLAW_STATE_DIR: import.meta.dirname },
+  });
+  const owner = getOpenClawStateWorkerOwner();
+  try {
+    expect(await owner.open(context)).toBeDefined();
+    if (generation === "a") {
+      expect(probe.closes).toEqual([]);
+      // The file drain retires this resource before the next file is evaluated.
+    } else {
+      expect(probe.closes).toEqual(["a"]);
+      await closeOpenClawStateDatabaseAsync();
+      expect(probe.closes).toEqual(["a", "b"]);
+    }
+  } finally {
+    if (generation === "b") {
+      // A failed regression must still release the old owner's retained resource.
+      await owner.close();
+      Reflect.deleteProperty(globalThis, probeKey);
+    }
+  }
+});
+`,
+    ]),
+  );
+}
+
+function subagentRetirementFixtureFiles(): Record<string, string> {
+  return {
+    "10-c-subagent-registry.test.ts": `
+import { expect, it, vi } from "vitest";
+vi.mock(${JSON.stringify(import.meta.resolve("../src/infra/runtime-worker-url.ts"))}, () => ({
+  resolveRuntimeWorkerUrl: () => new URL("file:///synthetic/shared-state.worker.js"),
+}));
+import ${JSON.stringify(import.meta.resolve("../src/agents/subagents/registry/subagent-registry.ts"))};
+import { subagentRuns } from ${JSON.stringify(import.meta.resolve("../src/agents/subagents/registry/subagent-registry-memory.ts"))};
+import { createSubagentRunRecord } from ${JSON.stringify(import.meta.resolve("../src/agents/subagent-test-fixtures.test-helpers.ts"))};
+it("leaves a retired-store delivery in its original registry generation", () => {
+  const entry = createSubagentRunRecord({
+    runId: "retired-registry-delivery", endedAt: 1, outcome: { status: "ok" },
+    delivery: { status: "pending" },
+  });
+  subagentRuns.set(entry.runId, entry);
+  subagentRuns.retireCompletionAuthority(entry);
+  const api = Reflect.get(globalThis, Symbol.for("openclaw.subagentRegistryTestApi"));
+  Reflect.set(globalThis, Symbol.for("fixture.retiredSubagentRegistry"), {
+    runs: subagentRuns, tick: api.testing.runSweeperTickForTests,
+  });
+  expect(subagentRuns.size).toBe(1);
+});
+`,
+    "10-d-subagent-registry-observer.test.ts": `
+import { expect, it } from "vitest";
+import ${JSON.stringify(import.meta.resolve("../src/state/openclaw-state-db-cache.ts"))};
+it("prevents an old registry tick from recreating a worker against a retired cache", async () => {
+  const key = Symbol.for("fixture.retiredSubagentRegistry");
+  const previous = Reflect.get(globalThis, key);
+  try {
+    await previous.tick();
+    expect(Reflect.has(globalThis, Symbol.for("openclaw.sharedStateWorkerOwner")),
+      "retired registry recreated a shared-state worker owner").toBe(false);
+    expect(previous.runs.size).toBe(0);
+  } finally {
+    Reflect.deleteProperty(globalThis, key);
+  }
+});
+`,
+  };
 }

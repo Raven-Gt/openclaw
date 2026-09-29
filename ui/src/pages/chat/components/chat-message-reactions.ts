@@ -403,7 +403,7 @@ class MessageReactionPicker extends OpenClawLitElement {
   }
 
   private renderCustom() {
-    const shortcut = sessionEmojiPickerShortcut();
+    const shortcut = sessionEmojiPickerShortcut()?.join("");
     return html`<div class="custom">
       <div class="custom-row">
         <button
