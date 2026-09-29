@@ -213,7 +213,24 @@ describe("runGatewayCronFailureRepair", () => {
     ]);
   });
 
-  it.each([...authorityLosses, { name: "removed", change: () => undefined }])(
+  it.each([
+    ...authorityLosses,
+    { name: "removed", change: () => undefined },
+    {
+      name: "given a narrower tool cap",
+      change: (live: CronStoredJob) => ({
+        ...live,
+        payload: { kind: "agentTurn" as const, message: "sync", toolsAllow: [] },
+      }),
+    },
+    {
+      name: "given a different scheduled tool policy",
+      change: (live: CronStoredJob) => ({
+        ...live,
+        scheduledToolPolicy: { version: 1 as const, mode: "trusted" as const },
+      }),
+    },
+  ])(
     "aborts the running repair turn before its next tool when the job is $name",
     async ({ change }) => {
       let current: CronStoredJob | undefined = job;

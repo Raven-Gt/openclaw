@@ -54,6 +54,19 @@ const WORKSPACE_EDIT_TOOLS = new Set([
 /** After the repaired incident ends, the turn may still reply, but only this long. */
 const CRON_FAILURE_REPAIR_FINALIZE_MS = 2 * 60_000;
 
+/** Everything that decides which tools the job's runs get, compared across job changes. */
+function serializeToolAuthority(job: CronStoredJob): string {
+  return JSON.stringify([
+    "toolsAllow" in job.payload ? job.payload.toolsAllow : undefined,
+    job.scheduledToolPolicy,
+    job.toolsAllowProvenance,
+    job.toolsAllowExecTarget,
+    job.toolsAllowExecTargetRequirement,
+    job.runtimeAuthority,
+    job.runtimeAuthorityRecoveryRequired,
+  ]);
+}
+
 /** The private, self-contained instructions the owner conversation's agent repairs from. */
 export function buildCronFailureRepairBrief(params: {
   job: CronStoredJob;
@@ -244,10 +257,12 @@ export async function runGatewayCronFailureRepair(params: {
           };
           // Authority contract: the whole turn, not just its automation calls, is bound to the
           // job's authority. Removing, disabling, auto-disabling, re-owning, or making the job
-          // ineligible aborts it before further tool effects. When the incident ends (resolved
-          // by the repair's own verification, replaced, or escalated), only the repair-scoped
-          // automations authority ends; the remaining tools are the job's own effective cap,
-          // and the turn gets a short finalization budget to reply before it is aborted.
+          // ineligible aborts it before further tool effects, and so does any change to the
+          // job's effective tool cap; the repair's own updates cannot change that cap. When the
+          // incident ends (resolved by the repair's own verification, replaced, or escalated),
+          // only the repair-scoped automations authority ends; the remaining tools are the
+          // job's own effective cap, and the turn gets a short finalization budget to reply.
+          const admittedToolAuthority = serializeToolAuthority(job);
           const authority = new AbortController();
           let finalization: NodeJS.Timeout | undefined;
           const unsubscribe = params.onJobChange(jobId, () => {
@@ -255,7 +270,7 @@ export async function runGatewayCronFailureRepair(params: {
               return;
             }
             const live = params.getJob(jobId);
-            if (!ownsJob(live)) {
+            if (!ownsJob(live) || serializeToolAuthority(live) !== admittedToolAuthority) {
               authority.abort(new Error("automation repair lost its job's authority"));
             } else if (!finalization && !repairsIncident(live)) {
               finalization = setTimeout(
