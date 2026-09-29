@@ -1786,7 +1786,7 @@ HOOK
     mkdirSync(bin);
     linkRequiredShellTools(bin);
     mkdirSync(join(oldRuntime, "bin"), { recursive: true });
-    symlinkSync(nodeExecutable, join(oldRuntime, "bin", "node"));
+    symlinkSync(process.execPath, join(oldRuntime, "bin", "node"));
     mkdirSync(join(prefix, "tools"), { recursive: true });
     symlinkSync(oldRuntime, join(prefix, "tools", "node"));
     if (failure === "version") {
@@ -1800,7 +1800,7 @@ HOOK
         { mode: 0o755 },
       );
     } else {
-      symlinkSync(nodeExecutable, join(bin, "node"));
+      symlinkSync(process.execPath, join(bin, "node"));
     }
     writeFileSync(join(bin, "npm"), `#!/bin/bash\nexit ${failure === "npm" ? 42 : 0}\n`, {
       mode: 0o755,
@@ -1816,7 +1816,7 @@ HOOK
       apk() { printf 'apk called\\n'; }
       ${route === "path" ? "try_link_usable_node_runtime_from_path" : "install_alpine_node"}
       `,
-      { FIXTURE_PREFIX: prefix, FIXTURE_BIN: bin, FIXTURE_NODE: nodeExecutable },
+      { FIXTURE_PREFIX: prefix, FIXTURE_BIN: bin, FIXTURE_NODE: process.execPath },
     );
     expect(result.status, result.stdout + result.stderr).toBe(1);
     if (route === "apk") {
@@ -1824,7 +1824,7 @@ HOOK
       expect(result.stdout).toContain("Alpine Node package must provide Node >=");
     }
     expect(readlinkSync(join(prefix, "tools", "node"))).toBe(oldRuntime);
-    expect(readlinkSync(join(oldRuntime, "bin", "node"))).toBe(nodeExecutable);
+    expect(readlinkSync(join(oldRuntime, "bin", "node"))).toBe(process.execPath);
     expect(existsSync(join(prefix, "tools", "node-v24.19.0"))).toBe(false);
   });
 
@@ -1841,7 +1841,7 @@ HOOK
       linkRequiredShellTools(bin);
       mkdirSync(oldBin, { recursive: true });
       for (const target of [bin, oldBin]) {
-        symlinkSync(nodeExecutable, join(target, "node"));
+        symlinkSync(process.execPath, join(target, "node"));
         writeFileSync(join(target, "npm"), "#!/bin/bash\nexit 0\n", { mode: 0o755 });
       }
       for (const tool of ["npx", "corepack"]) {
@@ -1891,7 +1891,7 @@ HOOK
         [bin, "11.19.1"],
         [fallback, "11.19.2"],
       ] as const) {
-        symlinkSync(nodeExecutable, join(target, "node"));
+        symlinkSync(process.execPath, join(target, "node"));
         writeFileSync(
           join(target, "npm"),
           `#!/usr/bin/env node\nconsole.log(${JSON.stringify(version)});\n`,

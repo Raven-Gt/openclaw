@@ -9,6 +9,8 @@ import {
   classifySessionFileEntry,
   migrateSessionFileEntryToCurrentVersion,
   normalizeLoadedFileEntry,
+  parseOpaqueLeafEntry,
+  parseParentLinkedOpaqueEntry,
   type SessionFileEntryMigrationState,
 } from "../agents/sessions/session-manager-codec.js";
 import type { FileEntry } from "../agents/sessions/session-manager-types.js";
@@ -20,10 +22,6 @@ import {
   resolveSqliteReadScope,
   toDatabaseOptions,
 } from "../config/sessions/session-accessor.sqlite-scope.js";
-import {
-  parseOpaqueLeafEntry,
-  parseParentLinkedOpaqueEntry,
-} from "../config/sessions/session-entry-codec.js";
 import type { SessionStoreTarget as ResolvedSessionStoreTarget } from "../config/sessions/targets.js";
 import { resolveAllAgentSessionStoreCandidateTargetsSync } from "../config/sessions/targets.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";

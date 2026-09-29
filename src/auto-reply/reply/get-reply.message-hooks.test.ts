@@ -1,4 +1,3 @@
-// Tests get-reply message hooks before and after agent execution.
 import path from "node:path";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveUnsuffixedSqliteTargetFromSessionStorePath } from "../../config/sessions/session-sqlite-target.js";
@@ -386,9 +385,6 @@ describe("getReplyFromConfig message hooks", () => {
       );
       expect(mocks.applyMediaUnderstanding).toHaveBeenCalledWith(
         expect.objectContaining({ processingMode: mode }),
-      );
-      expect(mocks.resolveReplyDirectives.mock.calls[0]?.[0]).toEqual(
-        expect.objectContaining({ ctx: expect.objectContaining({ agentText: preparedText }) }),
       );
     },
   );

@@ -566,15 +566,17 @@ link_node_runtime_paths() {
 }
 
 linked_node_is_usable() {
+  local candidate_node="${1-$(node_bin)}"
+  local candidate_npm="${2-$(npm_bin)}"
   local candidate_bin
   local current_version
   local required_version
 
-  if [[ ! -x "$(node_bin)" || ! -x "$(npm_bin)" ]]; then
+  if [[ ! -x "$candidate_node" || ! -x "$candidate_npm" ]]; then
     return 1
   fi
 
-  current_version="$("$(node_bin)" -v 2>/dev/null || echo "")"
+  current_version="$("$candidate_node" -v 2>/dev/null || echo "")"
   required_version="$(required_node_version)"
   if ! node_release_version_is_supported "$current_version"; then
     return 1
@@ -582,12 +584,12 @@ linked_node_is_usable() {
   if ! semver_at_least "$NODE_RELEASE_VERSION_CORE" "$required_version"; then
     return 1
   fi
-  candidate_bin="$(node_dir)/bin"
-  if ! PATH="${candidate_bin}:${PATH}" "$(npm_bin)" --version >/dev/null 2>&1; then
+  candidate_bin="${candidate_node%/*}"
+  if ! PATH="${candidate_bin}:${PATH}" "$candidate_npm" --version >/dev/null 2>&1; then
     return 1
   fi
 
-  "$(node_bin)" -e '
+  "$candidate_node" -e '
     const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(":memory:");
     try {

@@ -401,7 +401,10 @@ export async function buildDiscordMessageProcessContext(params: {
     contextVisibility: contextVisibilityMode,
     accountId: route.accountId,
     messageId: canonicalMessageId ?? message.id,
-    messageIdFull: canonicalMessageId && canonicalMessageId !== message.id ? message.id : undefined,
+    messageIdFull:
+      canonicalMessageId && canonicalMessageId !== message.id
+        ? (ctx.sourceMessageIds?.at(-1) ?? message.id)
+        : undefined,
     timestamp: resolveTimestampMs(message.timestamp),
     from: effectiveFrom,
     sender: {

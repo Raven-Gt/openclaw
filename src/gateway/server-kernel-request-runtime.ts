@@ -267,20 +267,6 @@ export async function prepareGatewayKernelRequestRuntime(params: {
     gatewayRequestContext.resolveGatewayContext,
     runtime.resolvePluginGatewayContext,
   );
-  const hostLifecycle = params.hostLifecycle;
-  if (hostLifecycle) {
-    gatewayRequestContext.hostLifecycle = {
-      request: (action, assertCaller) =>
-        hostLifecycle.request(action, () => {
-          if (!gatewayInstanceRuntime.isAvailable()) {
-            throw new Error(
-              "Gateway lifecycle is unavailable for this closed instance. Reconnect and retry.",
-            );
-          }
-          assertCaller();
-        }),
-    };
-  }
   gatewayRequestContext.approvalEvents = gatewayInstanceRuntime.approvalEvents;
   gatewayRequestContext.recoveryRuntime = gatewayInstanceRuntime.recovery;
   gatewayRequestContext.createAgentTurnFacade = gatewayInstanceRuntime.createAgentTurnFacade;

@@ -1,5 +1,3 @@
-// SQLite row mapping for device pairing and bootstrap-token snapshots.
-// Immediate transactions preserve last-writer-wins semantics across Gateway and CLI processes.
 import type { DatabaseSync } from "node:sqlite";
 import {
   resolvePairingSetupAccess,
@@ -59,10 +57,7 @@ const DEVICE_BOOTSTRAP_TOKEN_COLUMNS_WITHOUT_SETUP = [
   "ts",
 ] as const satisfies readonly (keyof DeviceBootstrapTokens)[];
 
-type DevicePairingStoreValidityToken = {
-  dataVersion: number;
-  totalChanges: number;
-};
+type DevicePairingStoreValidityToken = { dataVersion: number; totalChanges: number };
 
 type DevicePairingStoreCache = {
   connection: DatabaseSync;
@@ -71,10 +66,7 @@ type DevicePairingStoreCache = {
   validityToken: DevicePairingStoreValidityToken;
 };
 
-type DevicePairingStoreMutation<T> = {
-  mutated: boolean;
-  value: T;
-};
+type DevicePairingStoreMutation<T> = { mutated: boolean; value: T };
 
 type PairedDeviceNodeSurfaceUpdate<T> =
   | { value: T; persist: false }
@@ -153,11 +145,7 @@ function runDevicePairingStoreMutation<T>(
   return result.value;
 }
 
-// Read-back allowlist for the approved_via column. The Record type forces
-// every PairedDeviceApprovalKind to appear here at compile time: omit one and
-// this object is a type error, instead of the stored provenance silently
-// dropping to undefined on load (which mergeApprovalKind treats as a legacy
-// record). Keep this in sync when adding an approval kind.
+// Keep every persisted approval kind explicit so unknown provenance fails closed.
 const APPROVAL_KIND_MEMBERS = {
   owner: true,
   silent: true,
@@ -262,9 +250,7 @@ function fromApprovedViaColumn(value: string | null): PairedDeviceApprovalKind |
   return value !== null && APPROVAL_KINDS.has(value) ? (value as PairedDeviceApprovalKind) : null;
 }
 
-// Same compile-time exhaustiveness contract as APPROVAL_KIND_MEMBERS: the
-// completion access level is presented to the operator, so an unrecognized
-// stored value must fall back to the least-privilege label, never leak through.
+// Unknown stored completion access falls back to the least-privilege label.
 const PAIRING_SETUP_ACCESS_MEMBERS = {
   full: true,
   limited: true,

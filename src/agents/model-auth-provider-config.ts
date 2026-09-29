@@ -1,6 +1,3 @@
-/**
- * Provider-entry configuration and stored-profile binding for model auth.
- */
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import { resolveMergedModelProviderEntry } from "../config/model-provider-config.js";
 import {
@@ -136,10 +133,7 @@ export function getCustomProviderApiKey(
   return NON_ENV_SECRETREF_MARKER;
 }
 
-type ResolvedCustomProviderApiKey = {
-  apiKey: string;
-  source: string;
-};
+type ResolvedCustomProviderApiKey = { apiKey: string; source: string };
 
 /** Resolves custom provider API keys that are usable without mutating secret stores. */
 export function resolveUsableCustomProviderApiKey(params: {

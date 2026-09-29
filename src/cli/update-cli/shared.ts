@@ -398,10 +398,9 @@ export async function resolveGlobalManager(params: {
       diagnostics,
     );
     if (!detected) {
-      const reason = resolveUnmanagedUpdateInstallReason();
       throw new UpdatePreMutationError(
-        reason,
-        `${UPDATE_INSTALL_SKIP_GUIDANCE[reason]} Inspected: ${diagnostics.join("; ")}.`,
+        "unmanaged_install",
+        `Could not determine which package manager owns this OpenClaw installation. Reinstall it with npm, pnpm, or Bun, then retry. Inspected: ${diagnostics.join("; ")}.`,
       );
     }
     return detected;

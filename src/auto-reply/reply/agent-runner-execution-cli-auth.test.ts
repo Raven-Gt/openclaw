@@ -14,7 +14,7 @@ import {
   type FallbackRunnerParams,
 } from "./agent-runner-execution.test-support.js";
 
-const state = await setupAgentRunnerExecutionTestState();
+const state = setupAgentRunnerExecutionTestState();
 const managedProfile = "claude-cli:managed";
 const canonicalProfile = "anthropic:managed";
 const primaryProfile = "openai:primary";

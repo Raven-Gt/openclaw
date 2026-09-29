@@ -696,8 +696,6 @@ export class ModelRegistry {
           cost: modelDef.cost ?? defaultCost,
           contextWindow: modelDef.contextWindow ?? 128000,
           contextTokens: modelDef.contextTokens,
-          contextWindows: modelDef.contextWindows,
-          contextWindowDefault: modelDef.contextWindowDefault,
           maxTokens: modelDef.maxTokens ?? 16384,
           ...(modelDef.maxTokens !== undefined ? { maxTokensSource } : {}),
           params: modelDef.params,
@@ -1020,8 +1018,6 @@ export class ModelRegistry {
           cost: modelDef.cost,
           contextWindow: modelDef.contextWindow,
           contextTokens: modelDef.contextTokens,
-          contextWindows: modelDef.contextWindows,
-          contextWindowDefault: modelDef.contextWindowDefault,
           maxTokens: modelDef.maxTokens,
           params: modelDef.params,
           headers: undefined,
@@ -1069,8 +1065,6 @@ export interface ProviderConfigInput {
     cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
     contextWindow: number;
     contextTokens?: number;
-    contextWindows?: ModelCatalogContextWindowOption[];
-    contextWindowDefault?: string;
     maxTokens: number;
     params?: Record<string, unknown>;
     headers?: Record<string, string>;

@@ -16,8 +16,8 @@ import {
   fetchNpmPackageTargetStatus,
   type NpmMetadataCommandRunner,
 } from "./update-check-package-target.js";
-import { resolveGitRoot } from "./update-install-root.js";
 import { detectGlobalInstallManagerForRoot } from "./update-global.js";
+import { resolveGitRoot } from "./update-install-root.js";
 
 type PackageManager = "pnpm" | "bun" | "npm" | "unknown";
 
@@ -587,6 +587,7 @@ export function compareSemverStrings(a: string | null, b: string | null): number
 
 export async function checkUpdateStatus(params: {
   root: string | null;
+  signal?: AbortSignal;
   timeoutMs?: number;
   fetchGit?: boolean;
   useDetachedDevUpstream?: boolean;

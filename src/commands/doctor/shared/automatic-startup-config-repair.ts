@@ -140,7 +140,7 @@ export function isStartupConfigRepairResult(
           prepareConfigWriteTopology({
             snapshot: before,
             nextConfig: plan.config,
-            options: { persistCanonicalAgentRoster: true },
+            options: {},
             unsetPaths,
             env: process.env,
           }).nextConfig,
@@ -172,9 +172,6 @@ export async function commitAutomaticConfigRepair(
       auditOrigin: "doctor",
       skipOutputLogs: true,
       skipRuntimeSnapshotRefresh: true,
-      // The reader retired legacy markers; persist their canonical owners in this write.
-      // Startup verification above uses the same writer topology preparation.
-      persistCanonicalAgentRoster: true,
     },
   });
 }

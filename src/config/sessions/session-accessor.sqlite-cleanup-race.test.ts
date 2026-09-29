@@ -31,8 +31,7 @@ const archivePublicationHook = vi.hoisted(() => ({
   failNext: undefined as Error | undefined,
 }));
 
-// Place test mutations after the real Worker finishes but before cleanup opens
-// its final transaction, without relying on cross-isolate filesystem timing.
+// Place mutations after the Worker finishes but before cleanup's final transaction.
 vi.mock("./session-accessor.sqlite-archive.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./session-accessor.sqlite-archive.js")>();
   return {
@@ -1057,7 +1056,6 @@ describe("SQLite lifecycle cleanup races", () => {
       },
     });
 
-    expect(deleted.deleted).toBe(true);
     expect(deleted.archivedTranscripts).toEqual([]);
     await expect(
       loadTranscriptEvents({ sessionKey: survivorKey, sessionId: retainedSessionId, storePath }),

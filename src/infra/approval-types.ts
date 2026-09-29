@@ -2,7 +2,7 @@
 import type { ExecApprovalRequest } from "./exec-approvals.js";
 import type { PluginApprovalRequest } from "./plugin-approvals.js";
 
-export type ChannelApprovalKind = "exec" | "plugin";
+export type ChannelApprovalKind = "exec" | "plugin" | "system-agent";
 export type ApprovalRequestChannelRouteClass = "bound-or-explicit" | "unbound";
 
 /** Backward-compatible request shape accepted from Gateway events and replay. */

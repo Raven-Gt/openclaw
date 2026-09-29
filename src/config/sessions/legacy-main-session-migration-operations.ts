@@ -187,7 +187,6 @@ async function copyClaimCrossStore(params: {
   const sourceChanged = new Error("legacy session source changed before import");
   try {
     await importSqliteSessionRows({
-      beforePersistentApply: params.beforePersistentApply,
       agentId: params.destination.databaseAgentId,
       defaultAgentId: params.destination.databaseAgentId,
       env: params.env,

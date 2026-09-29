@@ -71,7 +71,7 @@ Docs: https://docs.openclaw.ai
 - Retain route ownership while discovering conversations (#146927)
 - **Install:** Preserve runtime links when Node validation fails (#147221)
 - Doctor reports missing OAuth dir for channel config with no installed plugin (#147888)
-- **Doctor:** Stopped private inputs replay after session repair (#148625)
+- **Doctor:** Stop private pending inputs replaying after session repair (#148625)
 - **Channels:** Settle task-scoped context leases once (#148922)
 - **Push:** Normalize malformed proxy auth errors (#149112)
 - **Cron:** Reject invalid stagger before silent schedule changes (#151740)
@@ -134,7 +134,7 @@ Docs: https://docs.openclaw.ai
 
 ### Complete contribution record
 
-This release contains 111 physical backport commits representing 113 approved units: 60 exact source commits, 25 material adaptations, 27 narrow slices extracted from large or mixed-purpose pull requests, and one 2026.7.35 plugin-inventory parity repair. Two proposed units were already covered by the 2026.8.33 architecture and are recorded as evidence-backed inclusions rather than duplicate code.
+This release represents 113 approved units: 60 exact source commits, 25 material adaptations, 27 narrow slices extracted from large or mixed-purpose pull requests, and one 2026.7.35 plugin-inventory parity repair. Units already covered by the 2026.8.33 architecture, or whose newer storage contract does not exist on this release line, are recorded as evidence-backed inclusions rather than duplicate or speculative code.
 
 ## 2026.8.33
 
