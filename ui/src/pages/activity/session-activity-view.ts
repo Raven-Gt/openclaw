@@ -38,11 +38,11 @@ import { renderSessionActivityPulse } from "./session-activity-pulse.ts";
 import { renderSessionActivitySummary } from "./session-activity-summary.ts";
 import {
   ACTIVITY_TIME_FILTERS,
+  TIME_LABELS,
   projectSessionActivity,
   resolveViewingNow,
   sessionActivityOwner,
   sessionActivityTimestamp,
-  type ActivityTimeFilter,
   type SessionActivityFilters,
 } from "./session-activity.ts";
 
@@ -61,13 +61,6 @@ type SessionActivityViewProps = {
   onSummaryRetry?: (row: GatewaySessionRow) => void;
 };
 
-const TIME_LABELS: Record<ActivityTimeFilter, string> = {
-  "24h": "activityFeed.time24h",
-  "7d": "activityFeed.time7d",
-  "30d": "activityFeed.time30d",
-  all: "activityFeed.timeAll",
-};
-
 type ActivityPerson = PresenceViewer & { count: number };
 
 function isUnresolvedPerson(person: PresenceViewer): boolean {
@@ -80,13 +73,17 @@ function compactPersonLabel(person: PresenceViewer): string {
     : presenceViewerLabel(person);
 }
 
+function renderUnknownPersonAvatar() {
+  return html`<span
+    class="viewer-avatar viewer-avatar--overflow activity-feed__unknown-avatar"
+    aria-hidden="true"
+    >${icons.users}</span
+  >`;
+}
+
 function renderPersonAvatar(person: PresenceViewer, showPresence = false) {
   if (isUnresolvedPerson(person)) {
-    return html`<span
-      class="viewer-avatar viewer-avatar--overflow activity-feed__unknown-avatar"
-      aria-hidden="true"
-      >${icons.users}</span
-    >`;
+    return renderUnknownPersonAvatar();
   }
   return html`<span class="activity-feed__person-avatar">
     <openclaw-viewer-avatar
@@ -167,10 +164,7 @@ function renderPeopleControl(
               ${
                 visible.length > 0
                   ? visible.map((person) => renderPersonAvatar(person))
-                  : html`<span
-                      class="viewer-avatar viewer-avatar--overflow activity-feed__unknown-avatar"
-                      >${icons.users}</span
-                    >`
+                  : renderUnknownPersonAvatar()
               }
               ${
                 overflow > 0
@@ -210,11 +204,7 @@ function renderPeopleControl(
           aria-pressed=${String(props.filters.personId === null)}
           @click=${(event: Event) => selectPerson(event, props, null)}
         >
-          <span
-            class="viewer-avatar viewer-avatar--overflow activity-feed__unknown-avatar"
-            aria-hidden="true"
-            >${icons.users}</span
-          >
+          ${renderUnknownPersonAvatar()}
           <span class="activity-feed__people-copy">
             <span class="activity-feed__people-name">${t("activityFeed.everyone")}</span>
           </span>
@@ -596,7 +586,7 @@ export function renderSessionActivityView(props: SessionActivityViewProps) {
         ${props.loading && !props.result ? renderActivityLoading() : nothing}
         ${
           props.result?.activityPulse
-            ? renderSessionActivityPulse(props.result.activityPulse, Date.now(), {
+            ? renderSessionActivityPulse(props.result.activityPulse, props.filters.time, {
                 peopleIncomplete: props.result.peopleIncomplete,
               })
             : nothing

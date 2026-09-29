@@ -264,6 +264,18 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
     if (!assertValidParams(params, validateSessionsListParams, "sessions.list", respond)) {
       return;
     }
+    const boundaries = params.activityPulseBoundaries ?? [];
+    if (boundaries.some((boundary, index) => index > 0 && boundary <= boundaries[index - 1]!)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "activityPulseBoundaries must be strictly ascending",
+        ),
+      );
+      return;
+    }
     const projection = getSessionRowProjection(context);
     if (!projection) {
       throw new Error("Session projection is unavailable before Gateway startup completes");

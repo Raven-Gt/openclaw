@@ -1797,16 +1797,13 @@ async function createChatPickerScenario(
   );
   const activityTime = Date.now();
   const activityDate = new Date(activityTime);
-  const activitySince = new Date(
-    activityDate.getFullYear(),
-    activityDate.getMonth(),
-    activityDate.getDate(),
-  ).getTime();
-  const activityUntil = new Date(
-    activityDate.getFullYear(),
-    activityDate.getMonth(),
-    activityDate.getDate() + 1,
-  ).getTime();
+  const activityHour =
+    activityTime -
+    activityDate.getMinutes() * 60_000 -
+    activityDate.getSeconds() * 1_000 -
+    activityDate.getMilliseconds();
+  const activitySince = activityHour - 24 * 3_600_000;
+  const activityUntil = activityHour + 3_600_000;
   const activitySessions = buildActivitySessionRows(activityTime);
   const dashboardGallerySessions =
     fixture === "dashboards"
@@ -3226,14 +3223,8 @@ async function createChatPickerScenario(
               activityPulse: {
                 since: activitySince,
                 until: activityUntil,
-                hours: Array.from(
-                  { length: Math.ceil((activityUntil - activitySince) / 3_600_000) },
-                  (_, hour) =>
-                    hour === 10
-                      ? 12
-                      : hour === Math.floor((activityTime - activitySince) / 3_600_000)
-                        ? 4
-                        : 0,
+                buckets: Array.from({ length: 25 }, (_, bucket) =>
+                  bucket === 10 ? 12 : bucket === 24 ? 4 : 0,
                 ),
                 sessions: 38,
                 started: 12,
