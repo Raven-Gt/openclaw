@@ -232,16 +232,17 @@ export function resolveModelDirectiveSelection(params: {
     }
 
     const scored = candidates
-      .map((candidate) => ({
-        candidate,
-        ...scoreFuzzyMatch({
-          ...candidate,
+      .map((candidate) => {
+        const details = scoreFuzzyMatch({
+          provider: candidate.provider,
+          model: candidate.model,
           fragment,
           aliasIndex,
           defaultProvider,
           defaultModel,
-        }),
-      }))
+        });
+        return Object.assign({ candidate }, details);
+      })
       .toSorted((a, b) => {
         // Tie-break deterministically so repeated prompts pick the same model.
         return (

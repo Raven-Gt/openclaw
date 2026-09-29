@@ -1,8 +1,11 @@
-import type { MsgContext } from "../templating.js";
+import type { MsgContext, TemplateContext } from "../templating.js";
 import type { HandleCommandsParams } from "./commands-types.js";
 
 /** Keep every inbound-text projection aligned when command sugar becomes a normal agent turn. */
-export function applyCommandTextToContext(ctx: MsgContext, text: string): void {
+export function applyCommandTextToContext(
+  ctx: MsgContext & Pick<TemplateContext, "BodyStripped">,
+  text: string,
+): void {
   ctx.commandText = text;
   ctx.agentText = text;
   ctx.rawText = text;
