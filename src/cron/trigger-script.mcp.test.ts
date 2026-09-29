@@ -1,12 +1,15 @@
 import fs from "node:fs";
+import net, { type AddressInfo } from "node:net";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createDeferred } from "../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import {
   disposeAllSessionMcpRuntimes,
   getSessionMcpRuntimeManagerForTesting,
   setSessionMcpRuntimeScheduler,
 } from "../agents/agent-bundle-mcp-manager-api.js";
+import { testing as mcpRuntimeTesting } from "../agents/agent-bundle-mcp-runtime.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { GatewayScheduler } from "../infra/gateway-scheduler.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
@@ -40,6 +43,15 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
   ] });
   if (message.method === "tools/call") reply(message.id, { structuredContent: { pid: process.pid, tool: message.params.name, since: message.params.arguments?.since ?? null, sources: [] }, content: [{ type: "text", text: "listed" }] });
 }
+`;
+
+// Never answers initialize and ignores SIGTERM and stdin EOF, so only a forced kill retires it.
+const HUNG_SERVER = `
+import net from "node:net";
+process.on("SIGTERM", () => {});
+process.stdin.on("data", () => {});
+process.stdin.on("end", () => {});
+net.connect(Number(process.argv[2]), "127.0.0.1");
 `;
 
 function createMcpFixture(extra?: Partial<OpenClawConfig>) {
@@ -186,4 +198,84 @@ describe("cron script MCP namespace", () => {
       expect(getSessionMcpRuntimeManagerForTesting().listRuntimeKeys()).toEqual([]);
     },
   );
+
+  it("returns ended evaluations while hung MCP servers keep retiring in the background", async () => {
+    // Forced shutdown takes 3 s; ended evaluations may wait only the 1 s cleanup grace.
+    mcpRuntimeTesting.setBundleMcpDisposeTimeoutMsForTest(3_000);
+    // Each fixture holds its socket until the process dies, so every close proves retirement.
+    const serverExits: Promise<void>[] = [];
+    const allStarted = createDeferred<void>();
+    const listener = net.createServer((socket) => {
+      serverExits.push(
+        new Promise<void>((resolve) => {
+          socket.once("close", () => resolve());
+        }),
+      );
+      if (serverExits.length === 3) {
+        allStarted.resolve();
+      }
+    });
+    await new Promise<void>((resolve) => {
+      listener.listen(0, "127.0.0.1", resolve);
+    });
+    try {
+      const root = tempDirs.make("openclaw-cron-mcp-hung-");
+      const serverPath = path.join(root, "hung.mjs");
+      fs.writeFileSync(serverPath, HUNG_SERVER);
+      const port = (listener.address() as AddressInfo).port;
+      const runtime = createCronScriptRuntime({
+        config: {
+          agents: { defaults: { workspace: path.join(root, "workspace") } },
+          plugins: { enabled: false },
+          mcp: {
+            // Distinct servers: startup is single-flight per server, and each job fills a slot.
+            servers: Object.fromEntries(
+              [0, 1, 2].map((index) => [
+                `hung${index}`,
+                { command: process.execPath, args: [serverPath, `${port}`] },
+              ]),
+            ),
+          },
+        },
+      });
+      const controllers = [0, 1, 2].map(() => new AbortController());
+      // Three hung connects fill every trigger-evaluation slot.
+      const evaluations = controllers.map((controller, index) =>
+        runtime.evaluateTrigger({
+          jobId: `mcp-hung-${index}`,
+          script: `await MCP.hung${index}.ping({}); return { fire: false };`,
+          state: null,
+          toolsAllow: [`hung${index}__*`],
+          abortSignal: controller.signal,
+        }),
+      );
+      await allStarted.promise;
+
+      const abortedAt = performance.now();
+      for (const controller of controllers) {
+        controller.abort();
+      }
+      const results = await Promise.all(evaluations);
+      const returnedAfterMs = performance.now() - abortedAt;
+
+      expect(
+        results.map((result) => (result.kind === "error" ? result.code : result.kind)),
+      ).toEqual(["aborted", "aborted", "aborted"]);
+      expect(returnedAfterMs).toBeLessThan(2_500);
+      await expect(
+        runtime.evaluateTrigger({
+          jobId: "mcp-after-hung",
+          script: "return { fire: false };",
+          state: null,
+          toolsAllow: [],
+        }),
+      ).resolves.toEqual({ kind: "evaluated", fire: false });
+      await Promise.all(serverExits);
+    } finally {
+      mcpRuntimeTesting.setBundleMcpDisposeTimeoutMsForTest();
+      await new Promise<void>((resolve) => {
+        listener.close(() => resolve());
+      });
+    }
+  });
 });

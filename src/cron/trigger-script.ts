@@ -43,6 +43,7 @@ import {
   applyEmbeddedAttemptToolsAllow,
   resolveEmbeddedAttemptToolConstructionPlan,
 } from "../agents/embedded-agent-runner/run/attempt-tool-construction-plan.js";
+import { runAgentCleanupStep } from "../agents/run-cleanup-timeout.js";
 import { loadAgentRuntimePluginRegistryHandle } from "../agents/runtime-plugins.js";
 import { resolveSandboxContext } from "../agents/sandbox.js";
 import {
@@ -105,6 +106,8 @@ const MAX_CONCURRENT_TRIGGER_EVALS = 3;
 const MAX_CACHED_TRIGGER_RUNTIMES = 128;
 const HEADLESS_TRIGGER_WALL_CLOCK_MS = 30_000;
 const HEADLESS_TRIGGER_TOOL_BUDGET = 5;
+// Bounds MCP teardown after an ended evaluation; retirement itself continues as tracked work.
+const CRON_SCRIPT_MCP_CLEANUP_GRACE_MS = 1_000;
 
 let activeTriggerEvaluations = 0;
 
@@ -433,6 +436,7 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
       params.label,
     );
     const catalogRef = createToolSearchCatalogRef();
+    const runId = `cron-trigger:${params.job.id}:${crypto.randomUUID()}`;
     let admission: PreparedAgentRunAdmission | undefined;
     let mcp: CronScriptMcpTools | undefined;
     try {
@@ -448,7 +452,6 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
         }),
         execTarget: params.job.toolsAllowExecTarget,
       };
-      const runId = `cron-trigger:${params.job.id}:${crypto.randomUUID()}`;
       let runtime: CachedTriggerRuntime | undefined;
       let tools: AnyAgentTool[];
       let admitted: AdmittedRunContext | undefined;
@@ -612,15 +615,28 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
             : "internal_error",
       );
     } finally {
+      // Read before cleanup() aborts the scope: an ended evaluation gets only the grace period.
+      const mcpCleanupMs = Math.max(
+        CRON_SCRIPT_MCP_CLEANUP_GRACE_MS,
+        evaluationScope.signal.aborted
+          ? 0
+          : Math.ceil(evaluationScope.deadline - performance.now()),
+      );
       admission?.close();
       clearToolSearchCatalog({ catalogRef });
       evaluationScope.cleanup();
-      // The run owns its MCP runtime: retire it before the result reaches the scheduler.
-      await mcp
-        ?.dispose()
-        .catch((error: unknown) =>
-          logWarn(`cron: script MCP cleanup failed: ${formatErrorMessageWithCode(error)}`),
-        );
+      if (mcp) {
+        // Retirement normally finishes inside the deadline. A hung connect or shutdown keeps
+        // retiring as tracked work instead of holding the result, admission, and trigger slot.
+        await runAgentCleanupStep({
+          runId,
+          sessionId: runId,
+          step: "cron-script-mcp-retire",
+          timeoutMs: mcpCleanupMs,
+          log: { warn: logWarn },
+          cleanup: mcp.dispose,
+        });
+      }
     }
   };
 }
