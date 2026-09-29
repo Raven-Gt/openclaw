@@ -605,7 +605,21 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
     );
     if (!state.nativeSpawnAdmissionInstalled) {
       // A prior backend attempt may already have accepted another participant.
-      params.hostCapabilities.assertNativeSubagentSpawnAllowed?.();
+      try {
+        params.hostCapabilities.assertNativeSubagentSpawnAllowed?.();
+      } catch (cause) {
+        // Revocation and ended-turn failures retain their own recovery guidance.
+        if (
+          !(cause instanceof Error) ||
+          !cause.message.startsWith("Several people have steered this turn:")
+        ) {
+          throw cause;
+        }
+        throw new Error(
+          "Several people have steered this turn, and this Codex setup cannot run native sub-agents safely for more than one person without native hook admission. Send the request again as a new message so it runs as its own turn.",
+          { cause },
+        );
+      }
     }
     return {
       configPatch: state.nativeHookRelay

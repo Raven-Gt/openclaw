@@ -101,10 +101,13 @@ describe("Codex participant native admission", () => {
           }),
         });
       }
-      let ambiguous = false;
+      const ambiguity = new Error(
+        "Several people have steered this turn: Alice (user: alice), Bob (user: bob). Pass the requester's requester_profile.id as user, or ask them if unclear.",
+      );
+      let spawnFailure: Error | undefined;
       params.hostCapabilities = participantHostCapabilities(() => {
-        if (ambiguous) {
-          throw new Error("Several people have steered this turn");
+        if (spawnFailure) {
+          throw spawnFailure;
         }
       });
       const harness = await createLeasedCodexLifecycleHarness({
@@ -161,8 +164,26 @@ describe("Codex participant native admission", () => {
                 buildFinalConfigPatch: resources.buildNativeHookRelayFinalConfigPatch,
               });
             if (participants === "multiple") {
-              ambiguous = true;
-              await expect(startThread()).rejects.toThrow("Several people have steered this turn");
+              for (const message of [
+                "Alice's access changed; ask them again",
+                "This turn has ended; ask again in a new turn.",
+              ]) {
+                spawnFailure = new Error(message);
+                await expect(
+                  resources.buildNativeHookRelayFinalConfigPatch({ action: "start" }),
+                ).rejects.toBe(spawnFailure);
+              }
+              spawnFailure = ambiguity;
+              await expect(startThread()).rejects.toMatchObject({
+                message:
+                  "Several people have steered this turn, and this Codex setup cannot run native sub-agents safely for more than one person without native hook admission. Send the request again as a new message so it runs as its own turn.",
+                cause: ambiguity,
+              });
+              expect(
+                harness.request.mock.calls.filter(([method]) =>
+                  ["thread/start", "thread/resume", "turn/start"].includes(method),
+                ),
+              ).toEqual([]);
               return;
             }
             const binding = await startThread();
@@ -214,7 +235,7 @@ describe("Codex participant native admission", () => {
                 stdout: "",
                 exitCode: 0,
               });
-              ambiguous = true;
+              spawnFailure = ambiguity;
               const response = await spawn("several-people");
               expect(response.stdout).toContain(
                 "Use sessions_spawn with the requester's requester_profile.id as user",
