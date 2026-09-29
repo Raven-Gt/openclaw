@@ -38,6 +38,7 @@ import {
   POST_CORE_UPDATE_CHANNEL_ENV,
   POST_CORE_UPDATE_ENV,
 } from "../../infra/update-post-core-context.js";
+import type { UpdateRecoveryBaselineRef } from "../../infra/update-recovery-baseline-capture.js";
 import {
   createManagedUpdateRequesterAuthority,
   resolveManagedUpdateRequester,
@@ -242,6 +243,7 @@ export async function admitUpdateCommandRun(params: {
   initialization?: {
     env: NodeJS.ProcessEnv;
     runId: string;
+    originalRecoveryCapture?: UpdateRecoveryBaselineRef;
     databasePath: string;
     configPath: string;
     target: {
@@ -341,6 +343,8 @@ export async function admitUpdateCommandRun(params: {
       : undefined;
   const run = {
     runId: record.runId,
+    originalRecoveryCapture:
+      params.initialization?.originalRecoveryCapture ?? params.opts.run?.originalRecoveryCapture,
     defaultStepTimeoutMs: record.trigger === "campaign" ? AUTO_UPDATE_STEP_TIMEOUT_MS : undefined,
     env,
     ...(record.trigger !== "cli" &&

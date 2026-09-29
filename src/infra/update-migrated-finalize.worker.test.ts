@@ -27,6 +27,7 @@ vi.mock("../cli/runtime-cleanup-scope.js", () => ({
   withCliProcessScope: async (run: () => Promise<void>) => run(),
 }));
 vi.mock("../cli/update-cli/update-command-executor.js", () => ({
+  captureUpdateCommandExecutorAuthority: () => ({ installKey: "/synthetic" }),
   withDelegatedUpdateCommandExecutor: async (
     _executor: unknown,
     _runId: string,
@@ -642,7 +643,7 @@ it.each([
     vi.doUnmock("../flows/doctor-health.js");
   }
 
-  expect(doctor).toHaveBeenCalledOnce();
+  expect(doctor, stderr.join("\n")).toHaveBeenCalledOnce();
   expect(doctor).toHaveBeenCalledWith(
     expect.anything(),
     expect.anything(),

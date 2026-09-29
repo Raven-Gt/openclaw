@@ -4,6 +4,7 @@ import { hasNodeErrorCode } from "../../infra/path-guards.js";
 import { SQLITE_SIDECAR_SUFFIXES } from "../../infra/sqlite-files.js";
 import type { UpdateCandidateAdmissionResult } from "../../infra/update-candidate-admission.js";
 import { compareSemverStrings } from "../../infra/update-check.js";
+import type { UpdateRecoveryBaselineRef } from "../../infra/update-recovery-baseline-capture.js";
 import { assertUpdateRecoveryAdmission } from "../../infra/update-run-recovery-admission.js";
 import { isFailedUpdateStep } from "../../infra/update-run-step.js";
 import type { OpenClawSchemaVersions } from "../../state/openclaw-schema-versions.js";
@@ -24,6 +25,7 @@ import type { resolveUpdateCommandTarget } from "./update-command-target.js";
 export type InitializedUpdate = {
   env: NodeJS.ProcessEnv;
   runId: string;
+  originalRecoveryCapture?: UpdateRecoveryBaselineRef;
   executor: UpdateCommandExecutor;
   registerRun: (run: NonNullable<UpdateCommandOptions["run"]>) => Promise<void>;
   target: NonNullable<Awaited<ReturnType<typeof resolveUpdateCommandTarget>>>;

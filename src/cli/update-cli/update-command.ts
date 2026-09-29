@@ -1,10 +1,12 @@
 import { theme } from "../../../packages/terminal-core/src/theme.js";
 import { withGatewayServiceUpdateAuthority } from "../../daemon/service-update-authority.js";
 import { tryProcessCwd } from "../../infra/safe-cwd.js";
+import { UPDATE_RUN_ID_ENV } from "../../infra/update-control-plane-sentinel.js";
 import { resolveUpdateFinalizationTimeoutMs } from "../../infra/update-finalization-budget.js";
 import type { RetainUpdateRuntime } from "../../infra/update-retained-runtime.js";
 import { finishUpdateRun, recordUpdateRunPhase } from "../../infra/update-run-ledger.js";
 import { DEFAULT_UPDATE_STEP_TIMEOUT_MS } from "../../infra/update-run-timeouts.js";
+import { withDeferredDebugProxyCapture } from "../../proxy-capture/runtime-deferral.js";
 import { defaultRuntime } from "../../runtime.js";
 import { VERSION } from "../../version.js";
 import { createUpdateProgress } from "./progress.js";
@@ -59,10 +61,12 @@ export async function updateCommand(
   inputOpts: UpdateCommandOptions,
   executorOptions?: UpdateCommandExecutorOptions,
 ): Promise<void> {
-  const { withRetainedUpdateRuntime } = await import("../../infra/update-retained-runtime.js");
-  return await withRetainedUpdateRuntime(import.meta.url, (retainRuntime) =>
-    updateCommandWithRuntime(inputOpts, retainRuntime, executorOptions),
-  );
+  return await withDeferredDebugProxyCapture(async () => {
+    const { withRetainedUpdateRuntime } = await import("../../infra/update-retained-runtime.js");
+    return await withRetainedUpdateRuntime(import.meta.url, (retainRuntime) =>
+      updateCommandWithRuntime(inputOpts, retainRuntime, executorOptions),
+    );
+  });
 }
 
 async function updateCommandWithRuntime(
@@ -103,6 +107,13 @@ async function updateCommandWithRuntime(
     const { updateStateNeedsInitialization } = await import("./update-command-initialization.js");
     assertUpdatePackageActivationAdmission(root, { serviceRoot });
     const needsInitialization = await updateStateNeedsInitialization(env);
+    const captureOriginal =
+      !inputOpts.dryRun &&
+      !inputOpts.run &&
+      !inputOpts.recovery &&
+      !executorOptions &&
+      !env[UPDATE_RUN_ID_ENV]?.trim() &&
+      env.OPENCLAW_UPDATE_RUN_HANDOFF !== "1";
     const execute = (initialization?: InitializedUpdate) =>
       runAdmittedUpdate(
         inputOpts,
@@ -113,7 +124,7 @@ async function updateCommandWithRuntime(
         initialization,
         executorOptions,
       );
-    if (needsInitialization) {
+    if (needsInitialization || captureOriginal) {
       const { initializeAndRunUpdate } = await import("./update-command-initialization-run.js");
       return await initializeAndRunUpdate(
         inputOpts,
@@ -122,6 +133,7 @@ async function updateCommandWithRuntime(
         invocationCwd,
         env,
         execute,
+        { needsInitialization, captureOriginal },
         executorOptions,
       );
     }

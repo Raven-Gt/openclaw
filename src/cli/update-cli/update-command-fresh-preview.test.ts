@@ -3,15 +3,17 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Command } from "commander";
 import { assert, describe, expect, it, vi } from "vitest";
+import { parseUpdateRecoveryBackupManifest } from "../../commands/backup-verify-manifest.js";
 import { withTriageTerminal } from "../../commands/triage.test-support.js";
 import * as tempRoot from "../../infra/tmp-openclaw-dir.js";
 import * as packageMetadata from "../../infra/update-check-package-target.js";
 import * as updateCheck from "../../infra/update-check.js";
 import { createManagedHandoffLeaseStore } from "../../infra/update-managed-service-handoff-lease.js";
-import { finishUpdateRun, getUpdateRun } from "../../infra/update-run-ledger.js";
+import { createUpdateRun, finishUpdateRun, getUpdateRun } from "../../infra/update-run-ledger.js";
 import type { UpdateRecoveryFence } from "../../infra/update-run-recovery.js";
 import { DEFAULT_UPDATE_STEP_TIMEOUT_MS } from "../../infra/update-run-timeouts.js";
 import { defaultRuntime, ExitError } from "../../runtime.js";
+import { closeOpenClawStateDatabaseAsync } from "../../state/openclaw-state-db-cache.js";
 import { OPENCLAW_STATE_SCHEMA_VERSION } from "../../state/openclaw-state-db-contract.js";
 import {
   closeOpenClawStateDatabaseForTest,
@@ -845,9 +847,28 @@ it("requires confirmation for an inspected older artifact without a TTY", async 
   expect(fs.existsSync(fixture.databasePath)).toBe(false);
 });
 
-it.each([OPENCLAW_STATE_SCHEMA_VERSION, OPENCLAW_STATE_SCHEMA_VERSION + 1])(
-  "admits compatible parent history before artifact schema %s migration",
-  async (schema) => {
+it.each([
+  { schema: OPENCLAW_STATE_SCHEMA_VERSION, existing: false },
+  { schema: OPENCLAW_STATE_SCHEMA_VERSION + 1, existing: false },
+  { schema: OPENCLAW_STATE_SCHEMA_VERSION, existing: true },
+])(
+  "captures original state before parent history and artifact schema $schema migration (existing=$existing)",
+  async ({ schema, existing }) => {
+    const previousRunId = existing ? createUpdateRun({ trigger: "cli" }).runId : undefined;
+    if (previousRunId) {
+      finishUpdateRun(previousRunId, { status: "succeeded" });
+      await closeOpenClawStateDatabaseAsync();
+      const original = new DatabaseSync(fixture.databasePath);
+      try {
+        original
+          .prepare(
+            "INSERT INTO config_machine_state (state_key, value_json, updated_at_ms) VALUES (?, ?, ?)",
+          )
+          .run("fixture.original", '{"message":"acknowledged before update"}', 1);
+      } finally {
+        original.close();
+      }
+    }
     const candidate = dirs.make("artifact-forward-");
     fs.writeFileSync(
       path.join(candidate, "package.json"),
@@ -888,6 +909,42 @@ it.each([OPENCLAW_STATE_SCHEMA_VERSION, OPENCLAW_STATE_SCHEMA_VERSION + 1])(
           db.close();
         }
         expect(getUpdateRun(run.runId, { env: run.env })?.status).toBe("running");
+        const ref = run.originalRecoveryCapture;
+        assert(ref);
+        const manifest = parseUpdateRecoveryBackupManifest(
+          fs.readFileSync(ref.manifestPath, "utf8"),
+        );
+        expect(manifest.runId).toBe(run.runId);
+        expect(manifest.generation).toEqual({ kind: "baseline" });
+        const databasePath = fs.realpathSync(fixture.databasePath);
+        expect(manifest.databases).toContainEqual({ role: "global", path: databasePath });
+        const captured = manifest.entries.find((entry) => entry.sourcePath === databasePath);
+        if (existing) {
+          assert(captured?.kind === "file");
+          expect(captured.sqlite).toBe(true);
+          const original = new DatabaseSync(path.join(ref.directory, captured.archivePath), {
+            readOnly: true,
+          });
+          try {
+            expect(
+              original
+                .prepare("SELECT value_json FROM config_machine_state WHERE state_key = ?")
+                .get("fixture.original"),
+            ).toEqual({ value_json: '{"message":"acknowledged before update"}' });
+            expect(
+              original.prepare("SELECT run_id FROM update_runs ORDER BY run_id").all(),
+            ).toEqual([{ run_id: previousRunId }]);
+          } finally {
+            original.close();
+          }
+        } else {
+          expect(captured).toEqual({
+            kind: "missing",
+            sourcePath: databasePath,
+            sqlite: true,
+            directory: false,
+          });
+        }
         finishUpdateRun(
           run.runId,
           { status: "skipped", reason: "fixture-before-forward-migration" },
