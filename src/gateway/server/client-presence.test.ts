@@ -141,8 +141,15 @@ describe("live person presence timing", () => {
     browser.socket.readyState = 3;
     browser.socket.emit("close", 1000, Buffer.alloc(0));
 
+    const readOnly = await connect("person@presence.test", "presence-person");
+    readOnly.client.internal = { authenticatedControlUi: true };
+    readOnly.client.connect.scopes = ["operator.read"];
+    expect(readOnly.handler.setClient(readOnly.client)).toBe(true);
+    expect(changes).not.toHaveBeenCalled();
+
     const verified = await connect("person@presence.test", "presence-person");
     verified.client.internal = { authenticatedControlUi: true };
+    verified.client.connect.scopes = ["operator.sessions.write"];
     expect(verified.handler.setClient(verified.client)).toBe(true);
     expect(changes).toHaveBeenLastCalledWith(true);
     verified.socket.readyState = 3;

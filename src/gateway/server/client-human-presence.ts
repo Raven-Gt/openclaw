@@ -1,4 +1,5 @@
 import { isBrowserOperatorUiClient } from "../../utils/message-channel.js";
+import { authorizeOperatorScopesForMethod } from "../method-scopes.js";
 import { WEBSOCKET_OPEN_READY_STATE } from "../server-constants.js";
 import type { GatewayClientRegistry } from "./client-registry.js";
 
@@ -9,6 +10,10 @@ function hasAuthenticatedControlUiIdentity(clients: GatewayClientRegistry): bool
       client.socket.readyState === WEBSOCKET_OPEN_READY_STATE &&
       client.internal?.authenticatedControlUi === true &&
       Boolean(client.authenticatedUserId || client.authenticatedUserProfile) &&
+      authorizeOperatorScopesForMethod(
+        "sessions.create",
+        Array.isArray(client.connect.scopes) ? client.connect.scopes : [],
+      ).allowed &&
       isBrowserOperatorUiClient(client.connect.client),
   );
 }

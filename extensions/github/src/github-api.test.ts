@@ -6,14 +6,16 @@ afterEach(() => {
 
 describe("GitHub API base URL", () => {
   it("defaults to public GitHub", async () => {
-    const { GITHUB_API_BASE_URL } = await import("./github-api.js");
+    const { GITHUB_API_BASE_URL, GITHUB_API_ORIGIN } = await import("../api.js");
     expect(GITHUB_API_BASE_URL).toBe("https://api.github.com");
+    expect(GITHUB_API_ORIGIN).toBe("https://api.github.com");
   });
 
   it("uses the configured enterprise API origin", async () => {
     const api = await import("./github-api.js");
     api.configureGitHubApi("https://api.ghe.example.test/");
     expect(api.GITHUB_API_BASE_URL).toBe("https://api.ghe.example.test");
+    expect(api.GITHUB_API_ORIGIN).toBe("https://api.github.com");
   });
 
   it("routes Enterprise Server REST and GraphQL requests to their API paths", async () => {

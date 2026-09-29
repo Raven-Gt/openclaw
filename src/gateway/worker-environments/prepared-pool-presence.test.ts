@@ -30,6 +30,7 @@ describe("authenticated human prepared-pool demand", () => {
   ) {
     let persisted = initial;
     let currentRepository = repository;
+    let sourceEnabled = true;
     const write = vi.fn<NonNullable<PoolOptions["presenceDemandStore"]>["write"]>(
       async (value, assertCurrent) => {
         assertCurrent();
@@ -61,11 +62,14 @@ describe("authenticated human prepared-pool demand", () => {
     });
     const owner = fixture.pool({
       prepareIntent,
-      resolveHumanPresenceDemand: () => ({
-        profileId: "development",
-        executionMode,
-        repository: { agentId: "main", url: repository.source.url, ref: "main" },
-      }),
+      resolveHumanPresenceDemand: () =>
+        sourceEnabled
+          ? {
+              profileId: "development",
+              executionMode,
+              repository: { agentId: "main", url: currentRepository.source.url, ref: "main" },
+            }
+          : undefined,
       presenceDemandStore: { read: async () => persisted, write },
     });
     return {
@@ -75,6 +79,9 @@ describe("authenticated human prepared-pool demand", () => {
       read: () => persisted,
       setRepository: (project: RepositoryWorkerProjectSnapshot) => {
         currentRepository = project;
+      },
+      disableSource: () => {
+        sourceEnabled = false;
       },
     };
   }
@@ -112,6 +119,53 @@ describe("authenticated human prepared-pool demand", () => {
         .filter((record) => record.state !== "destroyed")
         .every((record) => record.destroyRequestedAtMs === 901_000),
     ).toBe(true);
+  });
+
+  it("retires persisted demand from a previous GitHub host before pool reconciliation", async () => {
+    const oldReserve = await fixture.ready(
+      await fixture.seed("previous-host-reserve", {
+        reserve: true,
+        repository,
+        expiresAtMs: Number.MAX_SAFE_INTEGER,
+      }),
+    );
+    const presence = presencePool({
+      revision: 1,
+      profileId: "development",
+      requestedRef: "main",
+      preparationKey: PREPARATION_KEY,
+      project: repository,
+      lastPresentAtMs: 1_000,
+      retireAtMs: null,
+    });
+    presence.setRepository({
+      ...repository,
+      source: { ...repository.source, url: "https://ghe.example.test/acme/private-repo.git" },
+    });
+
+    await presence.owner.setHumanPresence(false);
+
+    expect(presence.write).toHaveBeenCalledWith(null, expect.any(Function));
+    expect(presence.read()).toBeUndefined();
+    expect(fixture.store.get(oldReserve.environmentId)?.destroyRequestedAtMs).toBe(1_000);
+  });
+
+  it("clears persisted demand when the configured default repository is removed", async () => {
+    const presence = presencePool({
+      revision: 1,
+      profileId: "development",
+      requestedRef: "main",
+      preparationKey: PREPARATION_KEY,
+      project: repository,
+      lastPresentAtMs: 1_000,
+      retireAtMs: null,
+    });
+    presence.disableSource();
+
+    await presence.owner.setHumanPresence(false);
+
+    expect(presence.write).toHaveBeenCalledWith(null, expect.any(Function));
+    expect(presence.read()).toBeUndefined();
   });
 
   it("closes a crash-left active marker and resolves the ref again on return", async () => {

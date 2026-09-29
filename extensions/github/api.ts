@@ -8,6 +8,7 @@ export {
   fetchGitHubJson,
   formatControlUiGitHubPreviewError,
   getConfiguredGitHubApiUrls,
+  GITHUB_API_ORIGIN,
   GITHUB_API_BASE_URL,
   GITHUB_GRAPHQL_URL,
   GITHUB_REQUEST_TIMEOUT_MS,

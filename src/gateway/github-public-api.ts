@@ -1,3 +1,4 @@
+import { resolveConfiguredGitHubHost } from "../agents/github-host.js";
 import { getRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -12,7 +13,7 @@ import {
 import type { ControlUiLinkReaderDocument } from "../shared/control-ui-link-reader.js";
 
 export const CONTROL_UI_GITHUB_CREDENTIAL_UNAVAILABLE_MESSAGE =
-  "The configured Control UI GitHub credential is unavailable. Resolve gateway.controlUi.github.token and retry.";
+  "The configured Control UI GitHub credential is unavailable. Check gateway.controlUi.github.token and its host binding, then retry.";
 
 export interface ControlUiGitHubError extends Error {
   readonly statusCode: number;
@@ -116,8 +117,21 @@ export function githubApiToken(
   env: NodeJS.ProcessEnv = process.env,
   config: OpenClawConfig | null = getRuntimeConfigSnapshot(),
 ): string | undefined {
+  const selectedHost = resolveConfiguredGitHubHost(config);
   const configured = config?.gateway?.controlUi?.github?.token;
   if (configured !== undefined) {
+    const credentialHost =
+      config?.gateway?.controlUi?.github?.host?.trim().toLowerCase() || "github.com";
+    if (credentialHost !== selectedHost) {
+      throw new SecretSurfaceUnavailableError({
+        ownerKind: "capability",
+        ownerId: "control-ui-github",
+        state: "unavailable",
+        paths: ["gateway.controlUi.github.host"],
+        refKeys: [],
+        reason: "service credential host does not match gateway.github.host",
+      });
+    }
     assertSecretOwnerAvailable("capability", "control-ui-github");
     const token = typeof configured === "string" ? configured.trim() : "";
     if (!token) {
@@ -132,7 +146,9 @@ export function githubApiToken(
     }
     return token;
   }
-  return env.GH_TOKEN?.trim() || env.GITHUB_TOKEN?.trim() || undefined;
+  return selectedHost === "github.com"
+    ? env.GH_TOKEN?.trim() || env.GITHUB_TOKEN?.trim() || undefined
+    : undefined;
 }
 
 export function hasConfiguredGitHubApiCredential(
@@ -140,8 +156,11 @@ export function hasConfiguredGitHubApiCredential(
   config: OpenClawConfig,
 ): boolean {
   return (
-    config.gateway?.controlUi?.github?.token !== undefined ||
-    Boolean(env.GH_TOKEN?.trim() || env.GITHUB_TOKEN?.trim())
+    (config.gateway?.controlUi?.github?.token !== undefined &&
+      (config.gateway.controlUi.github.host?.trim().toLowerCase() || "github.com") ===
+        resolveConfiguredGitHubHost(config)) ||
+    (resolveConfiguredGitHubHost(config) === "github.com" &&
+      Boolean(env.GH_TOKEN?.trim() || env.GITHUB_TOKEN?.trim()))
   );
 }
 
@@ -158,7 +177,10 @@ export const gitHubPublicApi = createLazyFacadeObjectValue<GitHubPublicApi>(() =
     library.configureGitHubApi(getRuntimeConfigSnapshot()?.gateway?.github?.apiBaseUrl);
   const resolveScope = (env: NodeJS.ProcessEnv = process.env) => {
     const token = githubApiToken(env);
-    return { token, cacheScope: library.githubApiCredentialCacheScope(token) };
+    return {
+      token,
+      cacheScope: `${resolveConfiguredGitHubHost(getRuntimeConfigSnapshot())}:${library.githubApiCredentialCacheScope(token)}`,
+    };
   };
   const resolveReadIdentity = (
     identity: ControlUiGitHubPreviewIdentity | undefined,

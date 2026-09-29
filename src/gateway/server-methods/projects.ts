@@ -43,7 +43,11 @@ import {
   gitHubPublicApi,
   githubApiToken,
 } from "../github-public-api.js";
-import { WRITE_SCOPE, authorizeOperatorScopesForRequiredScope } from "../method-scopes.js";
+import {
+  WRITE_SCOPE,
+  authorizeOperatorScopesForMethod,
+  authorizeOperatorScopesForRequiredScope,
+} from "../method-scopes.js";
 import { searchRemoteProjects } from "../project-github-search.js";
 import { getSessionRowProjection } from "../session-row-projection-access.js";
 import { createSessionListEntryFilter } from "../session-sharing.js";
@@ -370,6 +374,11 @@ export function createProjectsHandlers(service: ProjectWorktreeService): Gateway
             WRITE_SCOPE,
             Array.isArray(client?.connect.scopes) ? client.connect.scopes : [],
           ).allowed;
+        const canCreateSession = () =>
+          authorizeOperatorScopesForMethod(
+            "sessions.create",
+            Array.isArray(client?.connect.scopes) ? client.connect.scopes : [],
+          ).allowed;
         let store: ReturnType<typeof loadCombinedSessionStoreForGatewayCore>["store"] = {};
         let observedProjects: ProjectSummary[] | undefined;
         try {
@@ -456,7 +465,7 @@ export function createProjectsHandlers(service: ProjectWorktreeService): Gateway
             projects: projects.map(({ id, displayName, source, agentId }) =>
               agentId ? { id, displayName, source, agentId } : { id, displayName, source },
             ),
-            ...(defaultRepository ? { defaultRepository } : {}),
+            ...(defaultRepository && canCreateSession() ? { defaultRepository } : {}),
             ...(recents ? { recents: recents.filter((recent) => recent.kind === "project") } : {}),
           },
           undefined,
@@ -497,11 +506,12 @@ export function createProjectsHandlers(service: ProjectWorktreeService): Gateway
         return;
       }
       try {
+        const cfg = context.getRuntimeConfig();
         respond(
           true,
           await materializeProjectClone(
-            { cfg: context.getRuntimeConfig(), gitUrl: params.gitUrl, name: params.name },
-            { signal, token: githubApiToken() },
+            { cfg, gitUrl: params.gitUrl, name: params.name },
+            { signal, token: githubApiToken(process.env, cfg) },
           ),
           undefined,
         );

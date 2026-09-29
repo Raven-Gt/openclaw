@@ -20,8 +20,6 @@ For a Gateway worktree project with a Git commit, capture happens during provisi
 
 Private preparation needs temporary Gateway disk space for the shallow Git objects and outgoing pack. The existing 4 GiB pack limit applies to the transferred artifact; it does not cap bytes downloaded by Git before that pack is produced. Fetch uses a bounded command timeout, and temporary files are removed after the owning work settles, including cancellation.
 
-Operators can place repository workspace artifacts on disposable storage with an absolute, normalized `gateway.projects.workspaceArtifacts.root`. Set `gateway.projects.workspaceArtifacts.ephemeral: true` only when that storage may be cleared between Gateway starts; recovery then discards a checkpoint whose artifact disappeared and rebuilds from the pinned repository source. Keep the shared SQLite state at its configured durable location. Without the explicit ephemeral policy, a missing checkpoint remains an error rather than silently discarding user work.
-
 When a transferred project has no executable setup recipe, or setup was explicitly skipped, the seed transfer also completes the prepared workspace in the same remote command. Executable recipes retain a separate current-authority check before execution. Runtime installation and credential cleanup also share one remote command before project capture; snapshot creation still waits for both to finish successfully. If either step fails, dispatch stops the incomplete worker and reports the error before enrollment.
 
 Local project preparation retains the primary Git repository as its transport source, including a bare primary repository backing a linked checkout. It keeps the admitted session commit pinned, so archiving and removing the linked session checkout does not prevent reserve refill or select the primary checkout's newer `HEAD`. Session-file synchronization still uses the session checkout.
@@ -118,6 +116,12 @@ one unassigned worker per project and profile, with a Gateway-wide cap of four.
 The next matching dispatch consumes a ready worker once, then schedules refill;
 if no eligible worker is ready, dispatch uses ordinary provisioning.
 Paired-device dispatch does not use this pool.
+When an authenticated Control UI browser authorized to create sessions is connected,
+the configured default repository and its worker profile keep the profile's
+`readyWorkers` target prepared. Read-only connections do not allocate workers.
+After the last eligible browser disconnects, unused reserves retire after 15
+minutes. Changing the GitHub host or removing the default repository retires
+stale demand and unused reserves; active sessions keep their own workers.
 Repository admission, refill, and restart binding recheck current source access and visibility. Public and private repositories use separate preparation identities; a visibility change or lost access prevents reuse of earlier prepared capacity. Retention and cleanup use local ownership facts without requiring GitHub access. A changed repository instance or selected account cannot consume capacity prepared for the previous owner.
 A ready-worker hit bypasses provisioning. A foreground miss provisions a worker
 from the compatible image when available. If only the project commit changed,

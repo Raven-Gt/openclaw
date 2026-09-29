@@ -1,10 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { StatementSync } from "node:sqlite";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { observeSqliteReadSql } from "../../../test/helpers/sqlite-statement-execution-counter.js";
 import * as githubReadIdentity from "../../agents/github-read-identity.js";
 import { insertRegistryWorktree } from "../../agents/worktrees/registry.js";
+import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../../config/runtime-snapshot.js";
 import { loadCombinedSessionStoreForGatewayCore } from "../../config/sessions/combined-store-gateway.js";
 import {
   replaceSessionEntrySync,
@@ -43,9 +47,64 @@ beforeEach(() => {
   resolveRepositoryIdentity.mockClear();
 });
 
+afterEach(() => {
+  clearRuntimeConfigSnapshot();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
+
 function withProjectState(run: (state: OpenClawTestState) => Promise<void>) {
   return withOpenClawTestState({ layout: "state-only", prefix: "projects-rpc-" }, run);
 }
+
+test("projects.searchRemote sends only the selected host's service credential", async () => {
+  vi.stubEnv("GH_TOKEN", "public-host-token");
+  const fetchImpl = vi.fn<typeof fetch>().mockImplementation(
+    async () =>
+      new Response(JSON.stringify({ items: [] }), {
+        headers: { "content-type": "application/json" },
+      }),
+  );
+  vi.stubGlobal("fetch", fetchImpl);
+  const github = { host: "ghe.example.test", apiBaseUrl: "https://ghe.example.test/api/v3" };
+  const boundConfig = {
+    gateway: {
+      github,
+      controlUi: { github: { host: "ghe.example.test", token: "enterprise-service-token" } },
+    },
+  };
+  setRuntimeConfigSnapshot(boundConfig);
+
+  expect(
+    await invokeProjectMethod(
+      "projects.searchRemote",
+      { query: "enterprise-bound-request" },
+      boundConfig,
+    ),
+  ).toMatchObject({ ok: true, payload: { credential: "configured" } });
+  expect(fetchImpl).toHaveBeenCalled();
+  for (const [url, init] of fetchImpl.mock.calls) {
+    expect(url).toMatch(/^https:\/\/ghe\.example\.test\/api\/v3\//u);
+    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer enterprise-service-token");
+  }
+
+  fetchImpl.mockClear();
+  const mismatchedConfig = {
+    gateway: { github, controlUi: { github: { token: "public-service-token" } } },
+  };
+  setRuntimeConfigSnapshot(mismatchedConfig);
+  expect(
+    await invokeProjectMethod(
+      "projects.searchRemote",
+      { query: "enterprise-mismatched-request" },
+      mismatchedConfig,
+    ),
+  ).toMatchObject({
+    ok: false,
+    error: { message: expect.stringContaining("host binding") },
+  });
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
 
 test("projects.searchRemote uses the opted-in native system GitHub identity", async () => {
   const token = vi
@@ -100,6 +159,17 @@ test("projects.list exposes a normalized configured default repository", async (
       },
     },
   });
+  const readOnly = await invokeProjectMethod("projects.list", {}, config, ["operator.read"]);
+  expect(readOnly?.payload).not.toHaveProperty("defaultRepository");
+  expect(
+    await invokeProjectMethod("projects.list", {}, config, [
+      "operator.read",
+      "operator.sessions.write",
+    ]),
+  ).toMatchObject({
+    ok: true,
+    payload: { defaultRepository: { identity: "acme/private-repo" } },
+  });
 });
 
 test.each([
@@ -139,7 +209,7 @@ test.each([
         reason: "synthetic-secret",
       }),
     message:
-      "The configured Control UI GitHub credential is unavailable. Resolve gateway.controlUi.github.token and retry.",
+      "The configured Control UI GitHub credential is unavailable. Check gateway.controlUi.github.token and its host binding, then retry.",
     retryable: false,
   },
   {

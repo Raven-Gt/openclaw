@@ -141,7 +141,7 @@ suite.define(() => {
           .click();
         await expect.poll(() => checkout.getAttribute("data-worktree")).toBe("true");
         await pollLocatorText(checkout.locator(".new-session-page__trigger-label")).toBe(
-          "New worktree",
+          "New worktree from main",
         );
         const baseRef = checkoutBaseRefInput(checkoutPopover);
         expect(await baseRef.getAttribute("placeholder")).toBe("From");
@@ -161,7 +161,7 @@ suite.define(() => {
           message: "inspect the worktree",
         });
         expect(create.params).not.toHaveProperty("projectId");
-        expect(create.params).not.toHaveProperty("worktreeBaseRef");
+        expect(create.params).toHaveProperty("worktreeBaseRef", "main");
         expect(await gateway.getRequests("projects.add")).toHaveLength(0);
         expect(await gateway.getRequests("sessions.create")).toHaveLength(1);
       },

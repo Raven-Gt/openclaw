@@ -74,22 +74,6 @@ it("captures a lazy store location and retains it across environment changes and
   });
 });
 
-it("captures an explicit ephemeral artifact root without moving durable session state", async () => {
-  await withOpenClawTestState({ scenario: "empty" }, async (state) => {
-    const root = state.path("ephemeral-repository-artifacts");
-    try {
-      const config = { gateway: { projects: { workspaceArtifacts: { root } } } };
-      const store = createSessionRepositoryWorkspaceStore({ config });
-      const workspaceId = "00000000-0000-4000-8000-000000000000";
-      expect(store.artifactPath(workspaceId)).toBe(path.join(root, `${workspaceId}.git`));
-      config.gateway.projects.workspaceArtifacts.root = state.path("replacement");
-      expect(store.artifactPath(workspaceId)).toBe(path.join(root, `${workspaceId}.git`));
-    } finally {
-      vi.unstubAllEnvs();
-    }
-  });
-});
-
 it("retries rolled-back first-use pending owner DDL and preserves the committed column on reopen", async () => {
   const { database } = await fixture();
   database.db.exec(
@@ -185,17 +169,6 @@ it("pins the source base and rejects stale or closed checkpoint mutations", asyn
     checkpointRef: checkpoint.checkpointRef,
     manifestHash: checkpoint.manifestHash,
     revision: bound.revision + 1,
-  });
-  const discarded = store.discardCheckpoint({
-    workspaceId: accepted.workspaceId,
-    expectedRevision: accepted.revision,
-    assertCurrent,
-  });
-  expect(discarded).toMatchObject({
-    baseCommit,
-    baseManifestHash,
-    checkpointRef: null,
-    manifestHash: null,
   });
 });
 

@@ -188,12 +188,6 @@ export const GatewayConfigSchema = z
           })
           .optional(),
         nativeGitHubSearch: z.boolean().optional(),
-        workspaceArtifacts: z
-          .strictObject({
-            root: z.string().trim().min(1).optional(),
-            ephemeral: z.boolean().optional(),
-          })
-          .optional(),
       })
       .optional(),
     controlUi: z
@@ -229,7 +223,14 @@ export const GatewayConfigSchema = z
         newSessionModelDefaults: z.enum(["last-used", "configured"]).optional(),
         /** Optional service credential used only for Control UI GitHub previews and discovery. */
         github: z
-          .strictObject({ token: SecretInputSchema.optional().register(sensitive) })
+          .strictObject({
+            host: z
+              .string()
+              .trim()
+              .regex(/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/iu)
+              .optional(),
+            token: SecretInputSchema.optional().register(sensitive),
+          })
           .optional(),
         /** Produce utility-model session status digests for subscribed Control UI clients (default true). */
         sessionObserver: z.boolean().optional(),

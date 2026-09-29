@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../../config/runtime-snapshot.js";
+import {
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
   type OpenClawStateDatabase,
@@ -47,6 +51,7 @@ describe("prepared-pool human-presence demand storage", () => {
   });
 
   afterEach(() => {
+    clearRuntimeConfigSnapshot();
     closeOpenClawStateDatabaseForTest();
   });
 
@@ -79,6 +84,20 @@ describe("prepared-pool human-presence demand storage", () => {
       )
       .run(PRESENCE_KEY, JSON.stringify({ ...demand(), retireAtMs: 999 }), 1);
     expect(() => readPreparedPoolPresenceDemandInDatabase(database.db)).toThrow(
+      "Prepared-pool presence demand is invalid",
+    );
+  });
+
+  it("reads an existing demand after the configured GitHub host changes", () => {
+    writePreparedPoolPresenceDemandInDatabase(database.db, demand());
+    setRuntimeConfigSnapshot({
+      gateway: {
+        github: { host: "ghe.example.test", apiBaseUrl: "https://ghe.example.test/api/v3" },
+      },
+    });
+
+    expect(readPreparedPoolPresenceDemandInDatabase(database.db)).toEqual(demand());
+    expect(() => writePreparedPoolPresenceDemandInDatabase(database.db, demand())).toThrow(
       "Prepared-pool presence demand is invalid",
     );
   });

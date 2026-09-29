@@ -90,7 +90,7 @@ export function createPreparedPoolPresence(options: PreparedPoolPresenceOptions)
     }
     return demand;
   };
-  const write = async (value: PreparedPoolPresenceDemand, expectedVersion: number) => {
+  const write = async (value: PreparedPoolPresenceDemand | null, expectedVersion: number) => {
     const assertCurrent = () => {
       current();
       if (version !== expectedVersion) {
@@ -112,15 +112,23 @@ export function createPreparedPoolPresence(options: PreparedPoolPresenceOptions)
     state.requestedRef === (source.repository.ref ?? null);
 
   const maintain = async () => {
-    const source = policy();
-    if (!source) {
-      return undefined;
-    }
     const expectedVersion = version;
     let state = await read();
     current();
     if (expectedVersion !== version) {
       throw new Error("Authenticated human presence changed during prepared-pool maintenance");
+    }
+    const source = policy();
+    if (!source) {
+      if (state) {
+        await write(null, expectedVersion);
+      }
+      return undefined;
+    }
+    if (state && new URL(state.project.source.url).host !== new URL(source.repository.url).host) {
+      await write(null, expectedVersion);
+      state = undefined;
+      refResolvedAtMs = undefined;
     }
     if (!humanPresent) {
       if (state?.retireAtMs === null) {

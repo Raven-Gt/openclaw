@@ -1,4 +1,3 @@
-import path from "node:path";
 import { expect, test } from "vitest";
 import { OpenClawSchema } from "./zod-schema.js";
 
@@ -19,16 +18,23 @@ test.each([
   expect(OpenClawSchema.safeParse({ gateway: { github } }).success).toBe(false);
 });
 
-test("accepts a provider neutral repository default and explicit disposable artifact policy", () => {
+test("accepts a host-bound service credential for Enterprise discovery", () => {
+  expect(
+    OpenClawSchema.safeParse({
+      gateway: {
+        github: { host: "ghe.example.test", apiBaseUrl: "https://ghe.example.test/api/v3" },
+        controlUi: { github: { host: "ghe.example.test", token: "synthetic-service-token" } },
+      },
+    }).success,
+  ).toBe(true);
+});
+
+test("accepts a provider neutral repository default", () => {
   expect(
     OpenClawSchema.safeParse({
       gateway: {
         projects: {
           defaultRepository: { url: "https://ghe.example.test/acme/private-repo.git", ref: "main" },
-          workspaceArtifacts: {
-            root: path.resolve("openclaw-repository-artifacts"),
-            ephemeral: true,
-          },
         },
       },
       cloudWorkers: {

@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { resolveGitHubHost } from "../../agents/github-host-runtime.js";
 import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
@@ -36,7 +37,10 @@ export type PreparedPoolPresenceWorkerOperations = {
 
 type StateDatabase = Pick<DB, "config_machine_state">;
 
-function parsePresenceDemand(value: unknown): PreparedPoolPresenceDemand {
+function parsePresenceDemand(
+  value: unknown,
+  allowPreviousHost = false,
+): PreparedPoolPresenceDemand {
   if (!isRecord(value)) {
     throw new Error("Prepared-pool presence demand is invalid");
   }
@@ -49,7 +53,14 @@ function parsePresenceDemand(value: unknown): PreparedPoolPresenceDemand {
   const retireAtMs = candidate.retireAtMs;
   let project: RepositoryWorkerProjectSnapshot | undefined;
   try {
-    project = readRepositoryWorkerProjectSnapshot(candidate.project);
+    const rawProject = candidate.project;
+    const rawSource = isRecord(rawProject) ? rawProject.source : undefined;
+    const rawUrl = isRecord(rawSource) ? rawSource.url : undefined;
+    const host =
+      allowPreviousHost && typeof rawUrl === "string"
+        ? new URL(rawUrl).hostname.toLowerCase()
+        : resolveGitHubHost();
+    project = readRepositoryWorkerProjectSnapshot(rawProject, host);
   } catch {
     throw new Error("Prepared-pool presence demand is invalid");
   }
@@ -101,7 +112,7 @@ export function readPreparedPoolPresenceDemandInDatabase(
   if (row.value_json.length > 32_768) {
     throw new Error("Prepared-pool presence demand exceeds its record budget");
   }
-  return parsePresenceDemand(JSON.parse(row.value_json));
+  return parsePresenceDemand(JSON.parse(row.value_json), true);
 }
 
 export function writePreparedPoolPresenceDemandInDatabase(

@@ -12,6 +12,8 @@ import {
 export { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 const DEFAULT_GITHUB_API_BASE_URL = "https://api.github.com";
+// Shipped public constant names the default service, independent of the selected Enterprise API.
+export const GITHUB_API_ORIGIN = DEFAULT_GITHUB_API_BASE_URL;
 
 function resolveGitHubApiBaseUrl(value: string | undefined): string {
   const raw = value?.trim() || DEFAULT_GITHUB_API_BASE_URL;
