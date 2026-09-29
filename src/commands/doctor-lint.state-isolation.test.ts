@@ -319,6 +319,8 @@ describe("doctor lint state isolation", () => {
   it("restores the private view after an auth detector throws", async () => {
     await withOpenClawTestState({ prefix: "openclaw-doctor-lint-auth-throw-" }, async (state) => {
       await state.writeConfig({ memory: { search: { enabled: false } } });
+      // Materialize the source database so mixed lint must enter and restore its private snapshot.
+      writeConfigMachineState("doctorLint.synthetic.fixture", true);
       const sourceConfigPath = process.env.OPENCLAW_CONFIG_PATH;
       const observedStates: Array<string | undefined> = [];
       mocks.resolveDoctorContributionHealthChecks.mockResolvedValue([

@@ -58,6 +58,8 @@ type CommonModelResolutionOptions = {
 };
 
 type AsyncModelResolutionOptions = CommonModelResolutionOptions & {
+  /** Selected executable IDs must not pass through input aliases again. */
+  modelIdSource?: "input" | "selected";
   allowBundledStaticCatalogFallback?: boolean;
   preferBundledStaticCatalogTransport?: boolean;
   agentRuntimeId?: string;
@@ -151,7 +153,13 @@ export async function resolveModelAsync(
   const resolve = async () => {
     const workspaceDir =
       options?.workspaceDir ?? preparedModelRuntime?.workspaceDir ?? derivedWorkspaceDir;
-    const normalizedRef = normalizeProviderModelRef({ provider, modelId, cfg, workspaceDir });
+    const normalizedRef = normalizeProviderModelRef({
+      provider,
+      modelId,
+      cfg,
+      workspaceDir,
+      modelIdSource: options?.modelIdSource,
+    });
     let { authStorage, modelRegistry } = options ?? {};
     if (!authStorage || !modelRegistry) {
       const stores =
