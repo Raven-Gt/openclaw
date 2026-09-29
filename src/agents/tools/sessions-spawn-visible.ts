@@ -12,6 +12,7 @@ import { getRuntimeConfig } from "../../config/config.js";
 import { resolveControlUiSessionUrl } from "../../config/control-ui-link-base.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { ADMIN_SCOPE } from "../../gateway/method-scopes.js";
 import { resolveWorkspacePathContainment } from "../../gateway/server-methods/workspace-path-containment.js";
 import { resolveGatewaySessionStoreTargetInWorker } from "../../gateway/session-utils-store-worker.js";
@@ -30,6 +31,7 @@ import { reserveChildAdmissionSlot } from "../child-admission.js";
 import { resolveAgentIdentity } from "../identity.js";
 import { resolveSandboxRuntimeStatus } from "../sandbox/runtime-status.js";
 import { resolveSpawnedWorkspaceInheritance } from "../spawned-context.js";
+import type { SpawnedToolContext } from "../spawned-context.js";
 import {
   countActiveRunsForSession,
   registerSubagentRun,
@@ -59,7 +61,6 @@ import {
   type InProcessGatewayCaller,
 } from "./in-process-gateway.js";
 import { startVisibleCloudSession } from "./sessions-spawn-cloud.js";
-import type { SessionsSpawnToolOptions } from "./sessions-spawn-tool.js";
 import { resolveVisibleSessionOwner } from "./sessions-spawn-visible-owner.js";
 import { SessionsSpawnPlacementSchema } from "./sessions-spawn-visible.schema.js";
 
@@ -68,6 +69,31 @@ export type VisibleSessionsSpawnDeps = {
   registerRun?: typeof registerSubagentRun;
   countActiveRuns?: typeof countActiveRunsForSession;
 };
+
+export type SessionsSpawnToolOptions = {
+  agentSessionKey?: string;
+  requesterTurnRunId?: string;
+  /** Separate key used only for completion routing (registerSubagentRun requesterSessionKey). */
+  completionOwnerKey?: string;
+  agentChannel?: string;
+  agentAccountId?: string;
+  agentTo?: string;
+  agentThreadId?: string | number;
+  currentMessagingTarget?: string;
+  currentChannelId?: string;
+  currentThreadTs?: string;
+  currentMessageId?: string | number;
+  sandboxed?: boolean;
+  config?: OpenClawConfig;
+  /** Explicit agent ID override for cron/hook sessions where session key parsing may not work. */
+  requesterAgentIdOverride?: string;
+  requesterRunId?: string;
+  swarmCollector?: boolean;
+  /** Backend-derived parent incarnation; never sourced from model arguments. */
+  expectedParentSessionId?: string;
+  signal?: AbortSignal;
+} & VisibleSessionsSpawnDeps &
+  SpawnedToolContext;
 
 type VisibleSessionsSpawnOptions = SessionsSpawnToolOptions & {
   onSpawnEffectsStart?: () => void;
