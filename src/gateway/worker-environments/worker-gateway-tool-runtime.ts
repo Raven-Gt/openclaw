@@ -56,7 +56,7 @@ export function createWorkerGatewayToolRuntime(params: {
       const surface = await (prepared ??= params.prepare(identity).then(({ tools, policy }) => {
         assertCurrent();
         const handles = new Map<string, AnyAgentTool>();
-        const surface = {
+        const catalog = {
           generation,
           policy,
           tools: tools.map((tool, index) => {
@@ -77,11 +77,11 @@ export function createWorkerGatewayToolRuntime(params: {
             };
           }),
         };
-        if (!Value.Check(WorkerToolSurfaceSchema, surface)) {
+        if (!Value.Check(WorkerToolSurfaceSchema, catalog)) {
           throw new Error("Worker tool surface is invalid");
         }
         issuedTools = handles;
-        return surface;
+        return catalog;
       }));
       assertCurrent();
       return surface;
