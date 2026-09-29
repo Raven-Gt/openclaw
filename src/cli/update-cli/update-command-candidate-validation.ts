@@ -1,21 +1,19 @@
 import { resolveStateDir } from "../../config/paths.js";
 import { validateUpdateCandidateCanary } from "../../infra/update-candidate-canary.js";
-import {
-  recordUpdateRunStepAsync,
-  type UpdateRunWriteOptions,
-} from "../../infra/update-run-write.async.js";
+import { recordUpdateRunStepAsync } from "../../infra/update-run-write.async.js";
 import { defaultRuntime } from "../../runtime.js";
 import { prepareOpenClawStateReadSource } from "../../state/openclaw-state-worker-context.js";
 import type { UpdateDisplayProgress } from "./progress.js";
 import type { UpdateCommandOptions } from "./shared.js";
-import { captureUpdateCommandRunWriteOptions } from "./update-command-run-write.js";
+import type { createUpdateCommandExecutionGuards } from "./update-command-execution-guards.js";
 
 export function validateUpdateCandidateWithProgress(
   params: Pick<Parameters<typeof validateUpdateCandidateCanary>[0], "root" | "config"> & {
     env: NodeJS.ProcessEnv;
     assertCurrent: () => void;
-    writeOptions?: ReturnType<typeof captureUpdateCommandRunWriteOptions> &
-      Pick<UpdateRunWriteOptions, "requireNoRecovery" | "signal">;
+    writeOptions: ReturnType<
+      ReturnType<typeof createUpdateCommandExecutionGuards>["captureWriteOptions"]
+    >;
   },
   execution: {
     packageUpdateNodeRunner?: string;
@@ -26,9 +24,7 @@ export function validateUpdateCandidateWithProgress(
   run: UpdateCommandOptions["run"],
 ) {
   const assertCurrent = params.assertCurrent;
-  const writeOptions = run
-    ? { ...(params.writeOptions ?? captureUpdateCommandRunWriteOptions(run)) }
-    : undefined;
+  const writeOptions = run ? { ...params.writeOptions } : undefined;
   const originalContext = writeOptions?.context;
   const source = originalContext
     ? prepareOpenClawStateReadSource({
