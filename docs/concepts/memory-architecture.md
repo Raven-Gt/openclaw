@@ -1,4 +1,4 @@
-<img width="2549" height="1242" alt="image" src="https://github.com/user-attachments/assets/0eb4b599-cd0d-41fa-8e1e-3c9842c132ac" />---
+---
 summary: "End-to-end architecture of OpenClaw memory: tiers, provenance, dreaming, recall lanes, the user model, and standing intents"
 title: "Memory architecture"
 sidebarTitle: "Memory architecture"
