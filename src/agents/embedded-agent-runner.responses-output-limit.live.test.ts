@@ -164,6 +164,10 @@ describeLive("embedded Responses output-limit recovery live", () => {
         // Recovery may continue from provider state or replay the committed durable transcript.
         // The latter deliberately omits previous_response_id, so prove the receipt survived instead.
         expect(JSON.stringify(requests[2]?.input)).toContain(receipt);
+        expect(JSON.stringify(requests[2]?.input)).toContain(
+          "Split the remaining work into smaller tool calls",
+        );
+        expect(JSON.stringify(requests[2]?.input)).toContain("max_output_tokens");
         expect(result.payloads?.map((payload) => payload.text ?? "").join("\n")).toContain(receipt);
         expect(result.payloads?.some((payload) => payload.isError)).toBe(false);
         expect(
@@ -176,6 +180,9 @@ describeLive("embedded Responses output-limit recovery live", () => {
           .flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
         const failures = messages.filter(
           (message) => message.role === "assistant" && message.errorCode === "incomplete_tool_call",
+        );
+        expect(messages).toContainEqual(
+          expect.objectContaining({ role: "custom", customType: "incomplete-tool-call" }),
         );
         expect(failures).toEqual([
           expect.objectContaining({

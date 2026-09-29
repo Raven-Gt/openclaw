@@ -157,6 +157,10 @@ export function createResponsesToolCallTracker<TState extends ResponsesToolCallS
       return indexedCalls.size > 0 || unindexedCalls.size > 0;
     },
 
+    values(): TState[] {
+      return [...new Set([...indexedCalls.values(), ...unindexedCalls])];
+    },
+
     hasExactlyActive(expected: readonly TState[]): boolean {
       const active = new Set([...indexedCalls.values(), ...unindexedCalls]);
       return active.size === expected.length && expected.every((state) => active.has(state));

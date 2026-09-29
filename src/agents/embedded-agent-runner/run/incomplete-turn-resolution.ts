@@ -139,6 +139,13 @@ export function resolveIncompleteTurnPayloadText(params: {
   }
 
   const { promptError } = projectAgentRunAttemptTerminal(params.attempt.terminal);
+  if (
+    !promptError &&
+    assistant?.stopReason === "error" &&
+    assistant.errorCode === "incomplete_tool_call"
+  ) {
+    return formatUserFacingAssistantErrorText(assistant);
+  }
   const failureFacts = promptError
     ? resolveReplyFailoverFacts(promptError, formatErrorMessage(promptError))
     : undefined;
