@@ -36,6 +36,41 @@ const QA_CRON_REPAIR_TAMPERED_MESSAGE =
   "Cron failure repair QA check: tampered step after the fix.";
 const QA_CRON_REPAIR_INACTIVE_TEXT = "automation repair is no longer active";
 const QA_CRON_REPAIR_MAX_POLLS = 40;
+const QA_CRON_REPAIR_CAP_RE = /Cron failure repair QA check: broken step \(cap narrowing\)/i;
+const QA_CRON_REPAIR_CAP_MARKER_FILE = "cron-repair-cap-marker.txt";
+const QA_CRON_REPAIR_CAP_PAUSE_MS = 5_000;
+
+/**
+ * Scripts the narrowed-cap flow: the repair's first tool call is a workspace write, held long
+ * enough for the operator to remove `write` from the job's cap. The Gateway must abort the
+ * turn before that write runs; reaching the write's continuation is the bug marker.
+ */
+export function planCronFailureRepairCapTurn(params: {
+  prompt: string;
+  input: ResponsesInputItem[];
+  buildToolCall: (name: string, args: Record<string, unknown>) => StreamEvent[];
+}): { events: StreamEvent[]; pauseMs?: number } | null {
+  if (!QA_CRON_REPAIR_CAP_RE.test(params.prompt) || !QA_CRON_REPAIR_BRIEF_RE.test(params.prompt)) {
+    return null;
+  }
+  const wrote = params.input.some(
+    (item) =>
+      item.name === "write" ||
+      (item.name === "tool_call" &&
+        typeof item.arguments === "string" &&
+        /"id"\s*:\s*"write"/u.test(item.arguments)),
+  );
+  if (wrote) {
+    return { events: buildAssistantEvents("BUG-CRON-REPAIR-CAP-WROTE") };
+  }
+  return {
+    events: params.buildToolCall("write", {
+      path: QA_CRON_REPAIR_CAP_MARKER_FILE,
+      content: "Written by a repair whose tool cap was narrowed.\n",
+    }),
+    pauseMs: QA_CRON_REPAIR_CAP_PAUSE_MS,
+  };
+}
 
 /**
  * Scripts the cron failure-repair QA flow: the job's broken step fails its turn, and the

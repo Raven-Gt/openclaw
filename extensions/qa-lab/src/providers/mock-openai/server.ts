@@ -114,7 +114,10 @@ import {
   extractEmbeddingInputTexts,
   buildDeterministicEmbedding,
 } from "./mock-openai-contracts.js";
-import { planCronFailureRepairTurn } from "./mock-openai-cron-failure-repair.js";
+import {
+  planCronFailureRepairCapTurn,
+  planCronFailureRepairTurn,
+} from "./mock-openai-cron-failure-repair.js";
 import {
   extractExactReplyDirective,
   extractExactMarkerDirective,
@@ -537,6 +540,17 @@ async function buildResponsesPayload(
   }
   const compactionRetryScenarioActive =
     scenarioState.compactionRetryActive || hasCompactionRetryMarker;
+  const cronFailureRepairCapTurn = planCronFailureRepairCapTurn({
+    prompt,
+    input,
+    buildToolCall: buildToolCallEventsWithArgs,
+  });
+  if (cronFailureRepairCapTurn) {
+    if (cronFailureRepairCapTurn.pauseMs !== undefined) {
+      await sleep(cronFailureRepairCapTurn.pauseMs);
+    }
+    return cronFailureRepairCapTurn.events;
+  }
   const cronFailureRepairTurn = planCronFailureRepairTurn({
     prompt,
     input,

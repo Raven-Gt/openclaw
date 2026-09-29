@@ -21,6 +21,7 @@ scenario:
     - The repair updates the job's payload message and force-runs it; the verification run succeeds.
     - The repair's final reply lands in the owner conversation and its transcript.
     - The same failures on a job without an owner conversation still send the failure alert.
+    - Narrowing an owned job's tool cap while its repair's write call is in flight aborts the repair before the write runs; the normal alert follows.
   docsRefs:
     - docs/automation/cron-jobs/delivery.md
   codeRefs:
@@ -44,6 +45,9 @@ scenario:
       conversationId: qa-cron-failure-repair
       controlConversationId: qa-cron-failure-repair-control
       eventConversationId: qa-cron-failure-repair-event
+      capConversationId: qa-cron-failure-repair-cap
+      capBrokenMessage: "Cron failure repair QA check: broken step (cap narrowing). Reply exactly `QA-CRON-REPAIR-JOB-OK`."
+      capMarkerFile: cron-repair-cap-marker.txt
       ownerMarker: QA-CRON-REPAIR-OWNER-READY
       brokenMessage: "Cron failure repair QA check: broken step. Reply exactly `QA-CRON-REPAIR-JOB-OK`."
       fixedMessage: "Cron failure repair QA check: fixed step. Reply exactly `QA-CRON-REPAIR-JOB-OK`."
@@ -354,6 +358,114 @@ flow:
             message:
               expr: "`the repaired job alerted after its repair settled: ${JSON.stringify(state.getSnapshot().messages.filter((message) => message.text.includes(added.name)).map((message) => message.text))}`"
       detailsExpr: "`control alert=${JSON.stringify(controlAlerts.map((message) => message.text))}`"
+
+    - name: narrowing an owned job's tools stops its running repair before the next tool
+      actions:
+        - set: capCursor
+          value:
+            expr: "(await fetchJson(`${env.mock.baseUrl}/debug/request-cursor`)).cursor"
+        - call: env.gateway.call
+          saveAs: capJob
+          args:
+            - cron.add
+            - agentId: qa
+              owner:
+                agentId: qa
+                sessionKey:
+                  ref: ownerSessionKey
+              name:
+                expr: "`qa-cron-failure-repair-cap-${randomUUID()}`"
+              enabled: true
+              deleteAfterRun: false
+              schedule:
+                kind: at
+                at:
+                  expr: "new Date(Date.now() + 10 * 60 * 1000).toISOString()"
+              sessionTarget: isolated
+              wakeMode: now
+              payload:
+                kind: agentTurn
+                message:
+                  ref: config.capBrokenMessage
+                toolsAllow:
+                  - read
+                  - write
+              delivery:
+                mode: announce
+                channel: qa-channel
+                to:
+                  expr: "`group:${config.capConversationId}`"
+            - timeoutMs: 30000
+        - forEach:
+            items:
+              expr: "[1, 2]"
+            item: attempt
+            actions:
+              - set: runStartedAt
+                value:
+                  expr: "Date.now()"
+              - call: env.gateway.call
+                args:
+                  - cron.run
+                  - id:
+                      expr: capJob.id
+                    mode: force
+                  - timeoutMs: 30000
+              - call: waitForCronRunCompletion
+                saveAs: capRun
+                args:
+                  - callGateway:
+                      expr: "env.gateway.call.bind(env.gateway)"
+                    jobId:
+                      expr: capJob.id
+                    afterTs:
+                      ref: runStartedAt
+                    timeoutMs:
+                      expr: "liveTurnTimeoutMs(env, 90000)"
+              - assert:
+                  expr: "capRun.status === 'error'"
+                  message:
+                    expr: "`expected failed capped run ${attempt}, got ${JSON.stringify(capRun)}`"
+        # The repair's first tool call (a workspace write) is held at the provider; the
+        # operator removes `write` from the job's cap while that call is in flight.
+        - call: waitForCondition
+          saveAs: capBriefs
+          args:
+            - lambda:
+                expr: "(async () => { const requests = (await fetchJson(`${env.mock.baseUrl}/debug/inflight-requests`)).filter((request) => String(request.prompt ?? '').includes(config.repairBriefNeedle) && String(request.prompt ?? '').includes(capJob.id)); return requests.length > 0 ? requests.length : undefined; })()"
+            - expr: "liveTurnTimeoutMs(env, 30000)"
+            - 100
+        - call: env.gateway.call
+          args:
+            - cron.update
+            - id:
+                expr: capJob.id
+              patch:
+                payload:
+                  kind: agentTurn
+                  toolsAllow:
+                    - read
+            - timeoutMs: 30000
+        # Aborted with its incident still open, the repair falls back to the normal alert.
+        - call: waitForCondition
+          saveAs: capAlerts
+          args:
+            - lambda:
+                expr: '(() => { const matches = state.getSnapshot().messages.filter((message) => message.direction === ''outbound'' && !message.deleted && message.conversation.id === config.capConversationId && message.text.startsWith(`Automation "${capJob.name}" failed 2 times`)); return matches.length > 0 ? matches : undefined; })()'
+            - expr: "liveTurnTimeoutMs(env, 60000)"
+            - 250
+        - set: capMarkerWritten
+          value:
+            expr: "await fs.stat(path.join(env.gateway.workspaceDir, config.capMarkerFile)).then(() => true, () => false)"
+        # A turn that ran the write would send its result back to the provider.
+        - set: capContinuations
+          value:
+            expr: "(await fetchJson(`${env.mock.baseUrl}/debug/requests?after=${capCursor}`)).filter((request) => String(request.prompt ?? '').includes(capJob.id) && String(request.toolOutput ?? '').length > 0).length"
+        - assert:
+            expr: "!capMarkerWritten && capContinuations === 0 && !state.getSnapshot().messages.some((message) => message.text.includes('BUG-CRON-REPAIR-CAP'))"
+            message:
+              expr: "`the narrowed repair kept running: marker=${capMarkerWritten} continuations=${capContinuations}`"
+      detailsExpr: "`cap alert=${JSON.stringify(capAlerts.map((message) => message.text))} markerWritten=${capMarkerWritten} continuations=${capContinuations}`"
 
     - name: an owned main-session event job alerts instead of repairing
       actions:
