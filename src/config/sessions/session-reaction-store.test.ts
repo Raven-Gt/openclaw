@@ -63,10 +63,11 @@ describe("session reaction store", () => {
     vi.spyOn(Date, "now").mockReturnValue(100);
     expect(listSessionReactions(scope, { sessionId: "session-a" })).toEqual({});
     const first = setSessionReaction(scope, reaction);
-    expect(first).toEqual([
-      { emoji: "👍", count: 1, identities: [{ id: "alice", label: "Alice" }] },
-    ]);
-    expect(setSessionReaction(scope, reaction)).toEqual(first);
+    expect(first).toEqual({
+      reactions: [{ emoji: "👍", count: 1, identities: [{ id: "alice", label: "Alice" }] }],
+      changed: true,
+    });
+    expect(setSessionReaction(scope, reaction)).toEqual({ ...first, changed: false });
     vi.mocked(Date.now).mockReturnValue(200);
     setSessionReaction(scope, { ...reaction, emoji: "🎉" });
     vi.mocked(Date.now).mockReturnValue(300);
@@ -74,7 +75,7 @@ describe("session reaction store", () => {
       ...reaction,
       identityId: "bob",
       identityLabel: undefined,
-    });
+    }).reactions;
     expect(updated).toEqual([
       { emoji: "👍", count: 2, identities: [{ id: "alice", label: "Alice" }, { id: "bob" }] },
       { emoji: "🎉", count: 1, identities: [{ id: "alice", label: "Alice" }] },
@@ -84,12 +85,15 @@ describe("session reaction store", () => {
       "message-a": updated,
       "message-b": [{ emoji: "👀", count: 1, identities: [{ id: "alice", label: "Alice" }] }],
     });
-    const removed = setSessionReaction(scope, { ...reaction, remove: true });
+    const removed = setSessionReaction(scope, { ...reaction, remove: true }).reactions;
     expect(removed).toEqual([
       { emoji: "🎉", count: 1, identities: [{ id: "alice", label: "Alice" }] },
       { emoji: "👍", count: 1, identities: [{ id: "bob" }] },
     ]);
-    expect(setSessionReaction(scope, { ...reaction, remove: true })).toEqual(removed);
+    expect(setSessionReaction(scope, { ...reaction, remove: true })).toEqual({
+      reactions: removed,
+      changed: false,
+    });
     expect(listSessionReactions(scope, { sessionId: "session-b" })).toEqual({});
   });
 
@@ -126,7 +130,8 @@ describe("session reaction store", () => {
       }
     }, scope);
     const atLimit = setSessionReaction(scope, reaction);
-    expect(setSessionReaction(scope, reaction)).toEqual(atLimit);
+    expect(atLimit.changed).toBe(true);
+    expect(setSessionReaction(scope, reaction)).toEqual({ ...atLimit, changed: false });
     expect(() => setSessionReaction(scope, { ...reaction, messageId: "overflow" })).toThrow(
       SessionReactionLimitError,
     );

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { ChannelPlugin } from "../../channels/plugins/types.plugin.js";
 import { buildConversationIdentity } from "../../config/sessions/conversation-identity.js";
 import { registerConversationAddresses } from "../../config/sessions/conversation-registry.js";
@@ -6,8 +6,10 @@ import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.s
 import { loadTranscriptEventsSync } from "../../config/sessions/session-accessor.sqlite-read.js";
 import { appendTranscriptMessage } from "../../config/sessions/session-accessor.sqlite-transcript-write.js";
 import { addSessionMember } from "../../config/sessions/session-sharing-store.native.js";
+import { publishSystemEventStoreConfig } from "../../config/sessions/session-store-path.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { publishSystemEventStoreResolver } from "../../infra/system-event-ownership.js";
 import {
   drainSystemEventEntries,
   peekSystemEventEntries,
@@ -432,6 +434,11 @@ describe("session reaction handlers", () => {
       const messageId = await appendMessage();
       const transcript = loadTranscriptEventsSync(transcriptScope);
       const requestContext = context();
+      // The running Gateway publishes a physical-path resolver; the freshness
+      // guard must accept queued reactions even when the state dir is symlinked
+      // (macOS temp roots), which a resolver-less queue never exercises.
+      publishSystemEventStoreConfig({});
+      onTestFinished(() => publishSystemEventStoreResolver(undefined));
       for (const remove of [false, true]) {
         const action = remove ? "removed" : "added";
         const reactions = remove
@@ -472,6 +479,21 @@ describe("session reaction handlers", () => {
           reactions: remove ? {} : { [messageId]: reactions },
         });
       }
+      // Repeating the last removal changes nothing, so nothing is announced.
+      const broadcasts = vi.mocked(requestContext.broadcast).mock.calls.length;
+      expect(
+        await call(
+          "session.reactions.set",
+          { sessionKey: "main", messageId, emoji: "👍", remove: true },
+          client("alice", "Alice"),
+          requestContext,
+        ),
+      ).toMatchObject([
+        true,
+        { reactions: [], mirror: { status: "skipped", reason: "reaction already in that state" } },
+      ]);
+      expect(requestContext.broadcast).toHaveBeenCalledTimes(broadcasts);
+      expect(peekSystemEventEntries(sessionKey)).toEqual([]);
       expect(runMessageAction).not.toHaveBeenCalled();
       expect(loadTranscriptEventsSync(transcriptScope)).toEqual(transcript);
     });
@@ -547,6 +569,8 @@ describe("session reaction handlers", () => {
           expect.objectContaining({
             action: "react",
             agentId: "main",
+            // The dispatch guard rejects delegated same-conversation reacts outside a turn.
+            conversationReadOrigin: "direct-operator",
             params: expect.objectContaining({
               channel: "testchat",
               to: "channel:room-42",
@@ -559,6 +583,52 @@ describe("session reaction handlers", () => {
           }),
         );
       }
+    });
+  });
+
+  it("keeps one bot reaction per emoji while any reactor remains, in commit order", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      registerReactionChannel();
+      const { messageId, config } = await seedChannelMessage();
+      const requestContext = context(config);
+      let releaseFirst!: () => void;
+      const firstHeld = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      runMessageAction
+        .mockImplementationOnce(async () => {
+          await firstHeld;
+          return { kind: "action", payload: { ok: true } };
+        })
+        .mockResolvedValue({ kind: "action", payload: { ok: true } });
+      const set = (profile: string, remove: boolean) =>
+        call(
+          "session.reactions.set",
+          { sessionKey, messageId, emoji: "👍", remove },
+          client(profile, profile),
+          requestContext,
+        );
+      // Alice's add is still in flight at the channel when Bob joins and Alice leaves.
+      const aliceAdd = set("alice", false);
+      await vi.waitFor(() => expect(runMessageAction).toHaveBeenCalledTimes(1));
+      expect((await set("bob", false))[1]).toMatchObject({
+        mirror: { status: "skipped", reason: expect.stringContaining("other reactors") },
+      });
+      expect((await set("alice", true))[1]).toMatchObject({
+        mirror: { status: "skipped", reason: expect.stringContaining("other reactors") },
+      });
+      // Bob's removal empties the emoji, but must not overtake Alice's pending add.
+      const bobRemove = set("bob", true);
+      await Promise.resolve();
+      expect(runMessageAction).toHaveBeenCalledTimes(1);
+      releaseFirst();
+      expect((await aliceAdd)[1]).toMatchObject({ mirror: { status: "delivered" } });
+      expect((await bobRemove)[1]).toMatchObject({ mirror: { status: "delivered" } });
+      expect(
+        runMessageAction.mock.calls.map(
+          ([input]) => (input as { params: { remove: boolean } }).params.remove,
+        ),
+      ).toEqual([false, true]);
     });
   });
 

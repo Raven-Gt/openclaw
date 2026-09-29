@@ -7,6 +7,7 @@ import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite
 import {
   listSessionReactionsInDatabase,
   setSessionReactionInDatabase,
+  type SessionReactionWrite,
   type SetSessionReactionParams,
   type StoredMessageReactionSummary,
 } from "./session-reaction-store.kernel.js";
@@ -19,7 +20,7 @@ export {
 export function setSessionReaction(
   scope: SessionAccessScope,
   params: SetSessionReactionParams,
-): StoredMessageReactionSummary[] {
+): SessionReactionWrite {
   const resolved = resolveSqliteScope(scope);
   return runOpenClawAgentWriteTransaction(
     (database) => setSessionReactionInDatabase(database, resolved.sessionKey, params),

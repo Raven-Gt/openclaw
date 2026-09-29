@@ -54,6 +54,12 @@ function summarizeReactions(rows: SessionReactions[]): StoredMessageReactionSumm
   return [...summaries.values()];
 }
 
+/** `changed` is false for an add that already exists or a remove with nothing to remove. */
+export type SessionReactionWrite = {
+  reactions: StoredMessageReactionSummary[];
+  changed: boolean;
+};
+
 function reactionRows(database: OpenClawAgentDatabase, sessionKey: string, sessionId: string) {
   return reactionDb(database)
     .selectFrom("session_reactions")
@@ -69,7 +75,7 @@ export function setSessionReactionInDatabase(
   database: OpenClawAgentDatabase,
   sessionKey: string,
   params: SetSessionReactionParams,
-): StoredMessageReactionSummary[] {
+): SessionReactionWrite {
   if (readSessionEntryInstanceId(database, sessionKey) !== params.expectedSessionId) {
     throw new SessionWorkStartInvalidatedError("session changed before reaction mutation");
   }
@@ -87,7 +93,7 @@ export function setSessionReactionInDatabase(
   );
   if (params.remove) {
     if (!existing) {
-      return summarizeReactions(rows);
+      return { reactions: summarizeReactions(rows), changed: false };
     }
     executeSqliteQuerySync(
       database.db,
@@ -101,7 +107,7 @@ export function setSessionReactionInDatabase(
     );
   } else {
     if (existing) {
-      return summarizeReactions(rows);
+      return { reactions: summarizeReactions(rows), changed: false };
     }
     const count =
       executeSqliteQueryTakeFirstSync(
@@ -131,16 +137,19 @@ export function setSessionReactionInDatabase(
       }),
     );
   }
-  return summarizeReactions(
-    executeSqliteQuerySync(
-      database.db,
-      reactionRows(database, sessionKey, params.expectedSessionId).where(
-        "message_id",
-        "=",
-        params.messageId,
-      ),
-    ).rows,
-  );
+  return {
+    reactions: summarizeReactions(
+      executeSqliteQuerySync(
+        database.db,
+        reactionRows(database, sessionKey, params.expectedSessionId).where(
+          "message_id",
+          "=",
+          params.messageId,
+        ),
+      ).rows,
+    ),
+    changed: true,
+  };
 }
 
 export function listSessionReactionsInDatabase(
