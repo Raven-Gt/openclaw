@@ -22,10 +22,10 @@ import type {
   WorkerSessionPlacementStore,
 } from "./placement-store.js";
 import type { WorkerEnvironmentService } from "./service.js";
+import { isTerminalWorkerEnvironmentState } from "./state.js";
 import { listRetainedWorkerBundleHashes } from "./worker-bundle-retention.js";
 
 const RETAIN_COMMAND_TIMEOUT_MS = 10 * 60_000;
-const TERMINAL_ENVIRONMENT_STATES = new Set(["destroyed", "failed", "orphaned"]);
 
 export type NodeWorkerBundleRetention = {
   currentBuild: () => Promise<
@@ -59,7 +59,7 @@ function bundleStatusTargetForNode(options: NodeWorkspaceRetainCoordinatorOption
     .filter(
       (environment) =>
         environment.bootstrapReceipt !== null &&
-        !TERMINAL_ENVIRONMENT_STATES.has(environment.state),
+        !isTerminalWorkerEnvironmentState(environment.state),
     )
     .toSorted(
       (left, right) =>
@@ -99,8 +99,7 @@ function snapshotEntriesForNode(
   return nodeEnvironments(options, nodeId)
     .flatMap((environment): NodeWorkerWorkspaceRetainEntry[] => {
       if (
-        TERMINAL_ENVIRONMENT_STATES.has(environment.state) ||
-        environment.nodeDeviceId !== nodeId ||
+        isTerminalWorkerEnvironmentState(environment.state) ||
         environment.attachedSessionIds.length !== 1
       ) {
         return [];

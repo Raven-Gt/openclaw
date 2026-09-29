@@ -338,43 +338,62 @@ it("finishes artifact cleanup under its accepted operation while database close 
   }
 });
 
-it("refuses artifact cleanup against a replaced physical database after committed deletion", async () => {
-  const { database, store } = await fixture();
-  const workspace = await store.create(source);
-  await fs.mkdir(store.artifactPath(workspace.workspaceId), { recursive: true });
-  const replacement = await fixture();
-  const successor = await replacement.store.create({
-    ...source,
-    sessionKey: "agent:main:replacement",
-  });
-  await fs.mkdir(replacement.store.artifactPath(workspace.workspaceId), { recursive: true });
-  await closeOpenClawStateDatabaseByPathAsync(replacement.database.path);
-  const root = path.dirname(database.path);
-  const retired = `${root}-retired`;
-  roots.push(retired);
-  let closing: ReturnType<typeof closeOpenClawStateDatabaseByPathAsync> | undefined;
-  let replaced = false;
-  const unsubscribe = sessionChanges.subscribe((change) => {
-    if ("sessionKey" in change && change.sessionKey === source.sessionKey) {
-      renameSync(root, retired);
-      renameSync(path.dirname(replacement.database.path), root);
-      replaced = true;
-      closing = closeOpenClawStateDatabaseByPathAsync(database.path);
+// Open SQLite files prevent this directory-swap scenario on Windows.
+it.runIf(process.platform !== "win32")(
+  "refuses artifact cleanup against a replaced physical database after committed deletion",
+  async () => {
+    const { database, store } = await fixture();
+    const workspace = await store.create(source);
+    await fs.mkdir(store.artifactPath(workspace.workspaceId), { recursive: true });
+    const replacement = await fixture();
+    const successor = await replacement.store.create({
+      ...source,
+      sessionKey: "agent:main:replacement",
+    });
+    await fs.mkdir(replacement.store.artifactPath(workspace.workspaceId), { recursive: true });
+    await closeOpenClawStateDatabaseByPathAsync(replacement.database.path);
+    const replacementBytes = await fs.readFile(replacement.database.path);
+    const root = path.dirname(database.path);
+    const replacementRoot = path.dirname(replacement.database.path);
+    const retired = `${root}-retired`;
+    roots.push(retired);
+    let originalMoved = false;
+    let replacementInstalled = false;
+    const unsubscribe = sessionChanges.subscribe((change) => {
+      if ("sessionKey" in change && change.sessionKey === source.sessionKey) {
+        renameSync(root, retired);
+        originalMoved = true;
+        renameSync(replacementRoot, root);
+        replacementInstalled = true;
+      }
+    });
+    try {
+      const failure = await store
+        .delete({ workspaceId: workspace.workspaceId, assertCurrent })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      expect(replacementInstalled).toBe(true);
+      expect.soft(failure).toMatchObject({
+        message: expect.stringContaining("SQLite database file identity changed"),
+      });
+      await expect.soft(fs.stat(store.artifactPath(workspace.workspaceId))).resolves.toBeDefined();
+      expect(await fs.readFile(database.path)).toEqual(replacementBytes);
+    } finally {
+      unsubscribe();
+      if (replacementInstalled) {
+        renameSync(root, replacementRoot);
+      }
+      if (originalMoved) {
+        renameSync(retired, root);
+      }
+      await closeOpenClawStateDatabaseByPathAsync(database.path);
     }
-  });
-  try {
-    await expect(
-      store.delete({ workspaceId: workspace.workspaceId, assertCurrent }),
-    ).rejects.toThrow("SQLite database file identity changed");
-    expect(replaced).toBe(true);
-    await closing;
-    expect((await fs.stat(store.artifactPath(workspace.workspaceId))).isDirectory()).toBe(true);
-    expect(await store.get(successor.workspaceId)).toEqual(successor);
-  } finally {
-    unsubscribe();
-    await closing;
-  }
-});
+    expect(await store.get(workspace.workspaceId)).toBeUndefined();
+    expect(await replacement.store.get(successor.workspaceId)).toEqual(successor);
+  },
+);
 
 it("publishes repository row changes only after committed creation, revisions, and deletion", async () => {
   const { database, store } = await fixture();
