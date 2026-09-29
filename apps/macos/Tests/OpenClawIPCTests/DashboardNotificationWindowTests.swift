@@ -106,7 +106,8 @@ extension DashboardWindowOwnershipTests {
     }
 
     @Test func `cancelled successor hands queued commands to the document it would have replaced`() async throws {
-        let server = try await DashboardHTTPFixture.start()
+        let responses = DashboardWindowOwnershipPresentationGate(released: true)
+        let server = try await DashboardHTTPFixture.start(beforeResponse: { await responses.waitForRelease() })
         defer { server.stop() }
         let auth = DashboardWindowAuth(gatewayUrl: nil, token: nil, password: nil)
         let controller = DashboardWindowController(
@@ -116,26 +117,28 @@ extension DashboardWindowOwnershipTests {
         controller.show(url: server.url(), auth: auth)
         try await self.waitForDashboard(controller, path: "/")
 
-        // The displayed document commits, then a successor request starts before its finish arrives.
+        // The displayed document commits, then a successor starts before its finish arrives.
         controller.webView(controller.webView, didCommit: nil)
         controller.dispatchNativeCommand(.newSession)
         try #require(controller._testPendingNativeCommands == [.newSession])
+        await responses.hold()
         controller.webView.load(URLRequest(url: server.url("/successor")))
-        try #require(controller.webView.isLoading)
+        await responses.waitUntilRequested()
         controller.webView(controller.webView, didFinish: nil)
         #expect(controller._testPendingNativeCommands == [.newSession])
 
-        // The successor never commits, so the finished document survives and takes the queue.
+        // WebKit cancels the held successor, so the finished document survives and takes the queue.
         controller.webView.stopLoading()
-        try await DashboardTestWait.state("successor cancellation") { !controller.webView.isLoading }
-        controller.webView(
-            controller.webView, didFailProvisionalNavigation: nil, withError: URLError(.cancelled))
-        #expect(controller._testPendingNativeCommands.isEmpty)
+        try await DashboardTestWait.state("queued commands after successor cancellation") {
+            controller._testPendingNativeCommands.isEmpty
+        }
         #expect(controller.canDeliverNativeCommands)
+        await responses.release()
     }
 
     @Test func `cancelled restore leaves a surviving failure page waiting for a reload`() async throws {
-        let server = try await DashboardHTTPFixture.start()
+        let responses = DashboardWindowOwnershipPresentationGate(released: true)
+        let server = try await DashboardHTTPFixture.start(beforeResponse: { await responses.waitForRelease() })
         defer { server.stop() }
         let auth = DashboardWindowAuth(gatewayUrl: nil, token: nil, password: nil)
         let controller = DashboardWindowController(
@@ -149,17 +152,19 @@ extension DashboardWindowOwnershipTests {
             !controller.webView.isLoading && controller.webView.url?.absoluteString == "about:blank"
         }
 
-        // The restore starts, the failure page's finish arrives late, then the restore is cancelled.
+        // The restore starts, the failure page's finish arrives late, then WebKit cancels the restore.
+        await responses.hold()
         controller.show(url: server.url(), auth: auth)
-        try #require(controller.webView.isLoading)
+        await responses.waitUntilRequested()
         controller.dispatchNativeCommand(.newSession)
         controller.webView(controller.webView, didFinish: nil)
         controller.webView.stopLoading()
-        try await DashboardTestWait.state("restore cancellation") { !controller.webView.isLoading }
-        controller.webView(
-            controller.webView, didFailProvisionalNavigation: nil, withError: URLError(.cancelled))
+        try await DashboardTestWait.state("restore cancellation") {
+            !controller.webView.isLoading && controller.webView.url?.absoluteString == "about:blank"
+        }
         #expect(controller._testPendingNativeCommands == [.newSession])
         #expect(!controller.canDeliverNativeCommands)
+        await responses.release()
         controller.show(url: server.url(), auth: auth)
         #expect(controller.webView.isLoading)
     }
