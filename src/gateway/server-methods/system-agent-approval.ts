@@ -1,4 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { getGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller-context.js";
+import {
+  getActiveAgentRunDelegatedAuthority,
+  validateAgentRunDelegatedAuthority,
+} from "../../infra/agent-run-registry.js";
 import {
   SYSTEM_AGENT_APPROVAL_DECISIONS,
   SYSTEM_AGENT_APPROVAL_TIMEOUT_MS,
@@ -8,6 +13,7 @@ import {
 } from "../../infra/system-agent-approvals.js";
 import { runWithGatewayIndependentRootWorkContinuation } from "../../process/gateway-work-admission.js";
 import { describeSystemAgentPersistentOperation } from "../../system-agent/operations.js";
+import type { AgentRuntimeDelegatedAuthority } from "../agent-runtime-identity-token.js";
 import {
   broadcastApprovalResolvedEvent,
   buildRequestedApprovalEvent,
@@ -34,6 +40,44 @@ export function queueDelegatedApproval(params: {
   };
   proposal: NonNullable<ReturnType<SystemAgentChatSession["engine"]["getPendingOperatorProposal"]>>;
 }): string {
+  const callerIdentity = getGatewayToolCallerIdentity();
+  const approvalAuthority = callerIdentity?.operationalRunInstance
+    ? getActiveAgentRunDelegatedAuthority(callerIdentity.operationalRunInstance)
+    : undefined;
+  if (!callerIdentity || !approvalAuthority) {
+    throw new Error("delegated OpenClaw approval requires an active run authority");
+  }
+  const runtimeApprovalAuthority: AgentRuntimeDelegatedAuthority = callerIdentity.workerTurnClaim
+    ? { kind: "worker", ...approvalAuthority, turnClaim: callerIdentity.workerTurnClaim }
+    : { kind: "local", ...approvalAuthority };
+  const isAuthorityActive = () => {
+    if (
+      !validateAgentRunDelegatedAuthority(approvalAuthority) ||
+      callerIdentity.receiptAuthority?.() === false ||
+      callerIdentity.approvalSignals?.some((signal) => signal.aborted) ||
+      (callerIdentity.gatewayContextResolver && !callerIdentity.gatewayContextResolver())
+    ) {
+      return false;
+    }
+    return (
+      runtimeApprovalAuthority.kind === "local" ||
+      params.context.validateAgentRuntimeApprovalAuthority?.({
+        kind: "agentRuntime",
+        agentId: callerIdentity.agentId,
+        sessionKey: callerIdentity.sessionKey,
+        operationalRunInstance: runtimeApprovalAuthority.operationalRunInstance,
+        delegatedAuthority: runtimeApprovalAuthority,
+      }) === true
+    );
+  };
+  const assertLiveApprovalAuthority = () => {
+    if (!isAuthorityActive() || params.sessions.get(params.sessionId) !== params.session) {
+      throw new Error(
+        "OpenClaw change cancelled: system-agent approval authority is no longer active. Retry the request if it is still needed.",
+      );
+    }
+  };
+  assertLiveApprovalAuthority();
   if (params.session.pendingApproval?.proposalHash === params.proposal.hash) {
     return params.session.pendingApproval.id;
   }
@@ -51,6 +95,7 @@ export function queueDelegatedApproval(params: {
     agentId: params.delegation.agentId ?? null,
     sessionKey: params.delegation.sessionKey ?? null,
     sessionId: params.sessionId,
+    runId: callerIdentity.operationalRunInstance?.runId ?? null,
     turnSourceChannel: params.delegation.turnSourceChannel ?? null,
     turnSourceTo: params.delegation.turnSourceTo ?? null,
     turnSourceAccountId: params.delegation.turnSourceAccountId ?? null,
@@ -61,6 +106,7 @@ export function queueDelegatedApproval(params: {
     SYSTEM_AGENT_APPROVAL_TIMEOUT_MS,
     `system-agent:${randomUUID()}`,
   );
+  record.agentRuntimeDelegatedAuthority = runtimeApprovalAuthority;
   const decisionPromise = manager.register(record, SYSTEM_AGENT_APPROVAL_TIMEOUT_MS);
   params.session.pendingApproval = { id: record.id, proposalHash: params.proposal.hash };
   const requestEvent = buildRequestedApprovalEvent(record);
@@ -112,10 +158,16 @@ export function queueDelegatedApproval(params: {
               if (params.session.pendingApproval?.id === record.id) {
                 params.session.pendingApproval = undefined;
               }
-              return await params.session.engine.resolveOperatorApproval(
+              let applyAuthorized = false;
+              const approvalReply = await params.session.engine.resolveOperatorApproval(
                 decision,
                 params.proposal.hash,
+                () => {
+                  assertLiveApprovalAuthority();
+                  applyAuthorized = true;
+                },
               );
+              return decision !== "deny" && !applyAuthorized ? null : approvalReply;
             }),
           "system-agent:task",
         );

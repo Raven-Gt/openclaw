@@ -177,6 +177,7 @@ export class ChatTurnRouter {
   async resolveOperatorApproval(
     decision: "allow-once" | "allow-always" | "deny" | null,
     proposalHash: string,
+    beforePersistentApply?: () => void,
   ): Promise<SystemAgentChatReply | null> {
     return await resolveOperatorApprovalDecision({
       decision,
@@ -185,7 +186,7 @@ export class ChatTurnRouter {
       clear: () => this.clearPendingProposals(),
       apply: async (operation) => {
         this.proposalResolution = "approved";
-        return await this.applyApprovedPersistentOperation(operation);
+        return await this.applyApprovedPersistentOperation(operation, beforePersistentApply);
       },
       denied: () => {
         this.proposalResolution = "declined";
@@ -312,12 +313,13 @@ export class ChatTurnRouter {
 
   private async applyApprovedPersistentOperation(
     operation: SystemAgentOperation,
+    beforePersistentApply?: () => void,
   ): Promise<SystemAgentChatReply> {
     if (!isPersistentSystemAgentOperation(operation)) {
       throw new Error("OpenClaw host received a non-persistent approved operation.");
     }
     const capture = createCaptureRuntime();
-    const result = await this.executeOperation(operation, capture, true);
+    const result = await this.executeOperation(operation, capture, true, beforePersistentApply);
     const verify = result?.applied ? await this.callbacks.verifyConfigAfterWrite() : null;
     const followUp = this.armFollowUp(result?.followUp);
     const baseText = [capture.read() || "Applied. Audit entry written.", verify, followUp]
@@ -578,6 +580,7 @@ export class ChatTurnRouter {
     operation: SystemAgentOperation,
     capture: CaptureRuntime,
     approved: boolean,
+    assertPersistentApplyAuthority?: () => void,
   ): Promise<SystemAgentOperationResult | undefined> {
     try {
       const execute = this.dependencies.executeOperation ?? executeSystemAgentOperation;
@@ -586,6 +589,7 @@ export class ChatTurnRouter {
         deps: this.commandDeps(),
         beforePersistentApply: async () => {
           await this.callbacks.requirePersistentApplyInference(capture);
+          assertPersistentApplyAuthority?.();
         },
         onVerifiedInferenceChanged: this.callbacks.rebindVerifiedInference,
       });
