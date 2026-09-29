@@ -265,4 +265,38 @@ describe("runGatewayCronFailureRepair", () => {
     );
     expect(aborted).toBe(false);
   });
+
+  it("gives the turn a two-minute finalization budget once its incident ends", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let current: CronStoredJob = job;
+      let turnSignal: AbortSignal | undefined;
+      const finish = createDeferred();
+      const started = createDeferred();
+      runCronIsolatedAgentTurn.mockImplementationOnce(
+        async ({ abortSignal }: { abortSignal: AbortSignal }) => {
+          turnSignal = abortSignal;
+          started.resolve();
+          await finish.promise;
+          return abortSignal.aborted
+            ? { status: "error", error: String(abortSignal.reason) }
+            : { status: "ok", delivered: true };
+        },
+      );
+      const outcome = runGatewayCronFailureRepair(repairParams(job, () => current));
+      await started.promise;
+      current = { ...job, state: {} };
+      for (const listener of jobChangeListeners) {
+        listener();
+      }
+      vi.advanceTimersByTime(2 * 60_000 - 1);
+      expect(turnSignal?.aborted).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(turnSignal?.aborted).toBe(true);
+      finish.resolve();
+      await expect(outcome).resolves.toBe("failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

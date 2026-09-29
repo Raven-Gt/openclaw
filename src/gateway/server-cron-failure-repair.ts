@@ -51,6 +51,9 @@ const WORKSPACE_EDIT_TOOLS = new Set([
   "group:runtime",
 ]);
 
+/** After the repaired incident ends, the turn may still reply, but only this long. */
+const CRON_FAILURE_REPAIR_FINALIZE_MS = 2 * 60_000;
+
 /** The private, self-contained instructions the owner conversation's agent repairs from. */
 export function buildCronFailureRepairBrief(params: {
   job: CronStoredJob;
@@ -239,14 +242,27 @@ export async function runGatewayCronFailureRepair(params: {
               : {}),
             state: { nextRunAtMs: nowMs },
           };
-          // The whole turn, not just its automation calls, is bound to the job's authority:
-          // removing, disabling, auto-disabling, re-owning, or making the job ineligible aborts
-          // it before further tool effects. Resolving the incident does not; that is the
-          // repair's own verification succeeding, and only its automation calls are fenced.
+          // Authority contract: the whole turn, not just its automation calls, is bound to the
+          // job's authority. Removing, disabling, auto-disabling, re-owning, or making the job
+          // ineligible aborts it before further tool effects. When the incident ends (resolved
+          // by the repair's own verification, replaced, or escalated), only the repair-scoped
+          // automations authority ends; the remaining tools are the job's own effective cap,
+          // and the turn gets a short finalization budget to reply before it is aborted.
           const authority = new AbortController();
+          let finalization: NodeJS.Timeout | undefined;
           const unsubscribe = params.onJobChange(jobId, () => {
-            if (!authority.signal.aborted && !ownsJob(params.getJob(jobId))) {
+            if (authority.signal.aborted) {
+              return;
+            }
+            const live = params.getJob(jobId);
+            if (!ownsJob(live)) {
               authority.abort(new Error("automation repair lost its job's authority"));
+            } else if (!finalization && !repairsIncident(live)) {
+              finalization = setTimeout(
+                () => authority.abort(new Error("automation repair finalization budget ended")),
+                CRON_FAILURE_REPAIR_FINALIZE_MS,
+              );
+              finalization.unref?.();
             }
           });
           try {
@@ -273,6 +289,7 @@ export async function runGatewayCronFailureRepair(params: {
             });
           } finally {
             unsubscribe();
+            clearTimeout(finalization);
           }
         }),
       "cron:failure-repair",
