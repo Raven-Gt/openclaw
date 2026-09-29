@@ -139,7 +139,6 @@ function isAbortSignalAborted(signal: AbortSignal | undefined): boolean {
 }
 
 type ReplyTurnAdmissionParams = {
-  runId?: string;
   assertRequestCurrent?: () => void;
   providerReviewAcknowledgment?: import("../../sessions/provider-review.js").ProviderReviewAcknowledgment;
   agentId?: string;

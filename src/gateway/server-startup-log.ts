@@ -28,12 +28,8 @@ export async function logGatewayStartup(params: {
   activationSourceConfig?: OpenClawConfig;
   env: NodeJS.ProcessEnv;
   manifestRecords: readonly PluginManifestRecord[];
-  bindHost: string;
-  bindHosts?: string[];
-  port: number;
   loadedPluginIds: readonly string[];
   startupStartedAt?: number;
-  tlsEnabled?: boolean;
   log: { info: (msg: string, meta?: Record<string, unknown>) => void; warn: (msg: string) => void };
   isNixMode: boolean;
   ambientEnvTriggers?: AmbientEnvTriggerPolicy;

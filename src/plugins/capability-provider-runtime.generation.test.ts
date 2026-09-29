@@ -195,7 +195,6 @@ function loadGatewayGeneration(
     pluginIds,
     pluginMetadataSnapshot,
     baseMethods: [],
-    log,
   });
   setActivePluginRegistry(pluginRegistry);
   return pluginRegistry;
@@ -690,7 +689,6 @@ describe("capability loading from a Gateway generation", () => {
         autoEnabledReasons: {},
         workspaceDir: fixture.workspaceDir,
         baseMethods: [],
-        log,
         pluginLookUpTable: {
           ...startupSnapshot,
           pluginIds: ["fixture-seed"],

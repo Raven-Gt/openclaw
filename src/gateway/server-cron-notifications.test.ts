@@ -143,9 +143,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
         dispatchGatewayCronFinishedNotifications({
           evt: { jobId: job.id, action: "finished", status: "ok", summary: "done" },
           job,
-          deps: {} as CliDeps,
           logger: { warn: vi.fn() },
-          resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
         });
 
         await waitForFast(() => expect(mocks.fetchWithSsrFGuard).toHaveBeenCalledTimes(1));
@@ -189,9 +187,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
         dispatchGatewayCronFinishedNotifications({
           evt: { jobId: job.id, action: "finished", status: "ok", summary: "done" },
           job,
-          deps: {} as CliDeps,
           logger: { warn: vi.fn() },
-          resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
         });
         failureAlert = sendGatewayCronFailureAlert({
           deps: {} as CliDeps,
@@ -244,9 +240,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
     dispatchGatewayCronFinishedNotifications({
       evt: { jobId: job.id, action: "finished", status: "ok", summary: "done" },
       job,
-      deps: {} as CliDeps,
       logger,
-      resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
     });
 
     await waitForFast(() =>
@@ -275,9 +269,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
     dispatchGatewayCronFinishedNotifications({
       evt: { jobId: job.id, action: "finished", status: "ok", summary: "done" },
       job,
-      deps: {} as CliDeps,
       logger,
-      resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
     });
 
     await waitForFast(() =>
@@ -534,9 +526,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
         ...event,
       },
       job,
-      deps: {} as CliDeps,
       logger,
-      resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
       ssrfPolicy: webhookSsrfPolicy,
     });
 
@@ -562,9 +552,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
         completionStatus: "succeeded",
       },
       job,
-      deps: {} as CliDeps,
       logger: { warn: vi.fn() },
-      resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
     });
 
     expect(mocks.fetchWithSsrFGuard).not.toHaveBeenCalled();
@@ -576,9 +564,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
     dispatchGatewayCronFinishedNotifications({
       evt: { jobId: job.id, action: "finished", status: "ok", summary: "done" },
       job,
-      deps: {} as CliDeps,
       logger: { warn: vi.fn() },
-      resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
     });
 
     await waitForFast(() =>
@@ -735,9 +721,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
     dispatchGatewayCronFinishedNotifications({
       evt: { jobId: job.id, action: "finished", status: "ok", summary: "done" },
       job,
-      deps: {} as CliDeps,
       logger: { warn: vi.fn() },
-      resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
     });
 
     await Promise.resolve();
@@ -775,9 +759,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
     dispatchGatewayCronFinishedNotifications({
       evt: { jobId: job.id, action: "finished", status: "ok" },
       job,
-      deps: {} as CliDeps,
       logger,
-      resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
     });
 
     expect(logger.warn).toHaveBeenCalledWith(
@@ -807,9 +789,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
     dispatchGatewayCronFinishedNotifications({
       evt: { jobId: job.id, action: "finished", status: "ok" },
       job,
-      deps: {} as CliDeps,
       logger,
-      resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
     });
 
     expect(logger.warn).toHaveBeenCalledWith(
@@ -880,9 +860,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
         job,
       },
       job,
-      deps: {} as CliDeps,
       logger,
-      resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
     });
 
     await waitForFast(() => expect(mocks.fetchWithSsrFGuard).toHaveBeenCalledTimes(1));
@@ -962,9 +940,7 @@ describe("dispatchGatewayCronFinishedNotifications", () => {
         job,
       },
       job,
-      deps: {} as CliDeps,
       logger,
-      resolveCronAgent: () => ({ agentId: "main", cfg: {} }),
     });
 
     await waitForFast(() => expect(mocks.fetchWithSsrFGuard).toHaveBeenCalledTimes(1));
