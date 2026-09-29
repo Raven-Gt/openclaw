@@ -179,14 +179,6 @@ export const CODE_MODE_CONTROLLER_SOURCE = String.raw`
     if (value.kind === "function") {
       return namespaceFunction(namespaceId, Array.isArray(value.path) ? value.path.slice() : []);
     }
-    if (value.kind === "functionScope") {
-      const basePath = (Array.isArray(value.path) ? value.path : []).map((entry) => String(entry));
-      // Frozen empty target: the freeze prelude stays valid and "then" keeps await from probing calls.
-      return new Proxy(Object.freeze(Object.create(null)), {
-        get: (_target, key) =>
-          typeof key === "string" && key !== "then" ? namespaceFunction(namespaceId, [...basePath, key]) : undefined,
-      });
-    }
     if (value.kind === "array") {
       return Object.freeze((Array.isArray(value.items) ? value.items : []).map((item) => deserializeNamespaceValue(namespaceId, item)));
     }

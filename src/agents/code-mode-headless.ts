@@ -12,7 +12,6 @@ import { CodeModeOutputState, toCodeModeJsonSafe } from "./code-mode-json.js";
 import {
   createCodeModeNamespaceRuntime,
   type CodeModeNamespaceDescriptor,
-  type CodeModeUnavailableMcpServer,
   type SerializedCodeModeNamespaceValue,
 } from "./code-mode-namespaces.js";
 import {
@@ -231,8 +230,6 @@ export async function runCodeModeScriptHeadless(params: {
   wallClockMs?: number;
   maxToolCalls?: number;
   extraNamespaces?: CodeModeNamespaceDescriptor[];
-  /** Failed servers stay addressable under `MCP` so each call rejects with the startup error. */
-  unavailableMcpServers?: readonly CodeModeUnavailableMcpServer[];
   signal?: AbortSignal;
 }): Promise<CodeModeHeadlessResult> {
   const config = resolveCodeModeHeadlessConfig(params.ctx, params.overrides);
@@ -263,10 +260,7 @@ export async function runCodeModeScriptHeadless(params: {
     });
     const bridgeDispatch = { started: false };
     const namespaceCatalog = runtime.namespaceEntries();
-    const namespaceRuntime = createCodeModeNamespaceRuntime(
-      namespaceCatalog,
-      params.unavailableMcpServers,
-    );
+    const namespaceRuntime = createCodeModeNamespaceRuntime(namespaceCatalog);
     const namespaces = mergeHeadlessNamespaces(
       namespaceRuntime.descriptors,
       params.extraNamespaces ?? [],

@@ -115,25 +115,21 @@ watcher keeps its usual `once` behavior; renaming it does not reset its conditio
 
 `fire: false` persists evaluation state and counters, then reschedules without creating run history. These quiet evaluations count as completed occurrences during restart catch-up. If a fired payload run fails, the returned `state` is **not** persisted — the next evaluation sees the previous state and can fire again, so write scripts as read-only checks and keep actions in the payload. Trigger schedules have a built-in minimum interval of 30 seconds, preserved through maintenance and Gateway restarts. Each evaluation has a 30-second wall-clock budget and up to 5 tool calls.
 
-Scripts call configured MCP server tools through the same `MCP.<server>.<tool>({ ...input })` namespace that interactive Code Mode uses, for example `await MCP.wisprFlow.searchMeetings({ since: trigger.state?.cursor })`. MCP is opt-in per server: a script can reach only the servers its job's `toolsAllow` (`--tools`) names with a server prefix, either an exact tool such as `wispr-flow__search_meetings` or a server-scoped glob such as `wispr-flow__*`. A wildcard `*`, a missing `toolsAllow`, or a glob without a server prefix gives the script no `MCP` namespace and starts no server, because evaluations can run every 30 seconds. Within a named server, the owning agent's tool policy still applies, as in an interactive run. MCP calls go through the same before-tool-call hooks and approvals and return the same untrusted-content results. Each evaluation starts its own runtime for the named servers only and closes it before the result is recorded. Connecting and listing tools count toward the 30-second budget, and each MCP call counts toward the 5-call limit.
+Scripts call configured MCP server tools through the same `MCP.<server>.<tool>({ ...input })` namespace that interactive Code Mode uses. MCP is opt-in per server: a script can reach only the servers its job's `toolsAllow` (`--tools`) names with a server prefix, either an exact tool such as `wispr-flow__search_meetings` or a server-scoped glob such as `wispr-flow__*`. A wildcard `*`, a missing `toolsAllow`, or a glob without a server prefix gives the script no `MCP` namespace and starts no server, because evaluations can run every 30 seconds. Within a named server, the owning agent's tool policy still applies, as in an interactive run. MCP calls go through the same before-tool-call hooks and approvals and return the same untrusted-content results. Each evaluation starts its own runtime for the named servers only and retires it when the evaluation ends; a slow server shutdown finishes in the background after a 1-second grace. Connecting and listing tools count toward the 30-second budget, and each MCP call counts toward the 5-call limit. If a named server fails to start, the evaluation fails with `MCP server "<name>" is unavailable: <reason>` before the script runs.
 
-A named server that fails to start does not fail the evaluation. Every call under that server, such as `MCP.wisprFlow.searchMeetings(...)`, rejects with `MCP server "<name>" is unavailable: <reason>`, so the script can catch the error and return `fire: true` with a failure message. Returning `fire: false` from an MCP-backed check skips the payload, and its model call, on quiet ticks:
+Returning `fire: false` from an MCP-backed check skips the payload, and its model call, on quiet ticks:
 
 ```js
-try {
-  const { structuredContent } = await MCP.wisprFlow.searchMeetings({
-    since: trigger.state?.cursor,
-  });
-  const meetings = structuredContent?.meetings ?? [];
-  if (meetings.length === 0) return { fire: false };
-  return {
-    fire: true,
-    message: `${meetings.length} new meetings`,
-    state: { cursor: meetings.at(-1).id },
-  };
-} catch (error) {
-  return { fire: true, message: `Meeting source check failed: ${error.message}` };
-}
+const { structuredContent } = await MCP.wisprFlow.searchMeetings({
+  since: trigger.state?.cursor,
+});
+const meetings = structuredContent?.meetings ?? [];
+if (meetings.length === 0) return { fire: false };
+return {
+  fire: true,
+  message: `${meetings.length} new meetings`,
+  state: { cursor: meetings.at(-1).id },
+};
 ```
 
 Removing or disabling a job during condition evaluation cancels that evaluation before its payload can start. After a main-session payload hands work to heartbeat, that shared heartbeat retains its own lifecycle.

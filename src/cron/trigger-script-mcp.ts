@@ -5,7 +5,6 @@ import {
   wrapToolWithBeforeToolCallHook,
   type HookContext,
 } from "../agents/agent-tools.before-tool-call.js";
-import type { CodeModeUnavailableMcpServer } from "../agents/code-mode-namespaces.js";
 import type { ResolvedConversationCapabilityProfile } from "../agents/conversation-capability-profile.js";
 import { applyFinalEffectiveToolPolicy } from "../agents/embedded-agent-runner/effective-tool-policy.js";
 import { applyEmbeddedAttemptToolsAllow } from "../agents/embedded-agent-runner/run/attempt-tool-construction-plan.js";
@@ -15,14 +14,9 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { logWarn } from "../logger.js";
 import { getPluginToolMeta } from "../plugins/tool-metadata.js";
 
-type CronScriptMcpSurface = {
-  tools: AnyAgentTool[];
-  unavailableServers: CodeModeUnavailableMcpServer[];
-};
-
 export type CronScriptMcpTools = {
-  /** Settles once the named servers have connected and listed tools (or failed to). */
-  surface: Promise<CronScriptMcpSurface>;
+  /** Settles once the named servers have connected and listed tools, or names each that failed. */
+  surface: Promise<{ tools: AnyAgentTool[]; unavailable?: string }>;
   /** Retires the evaluation's MCP runtime, including servers still connecting. */
   dispose: () => Promise<void>;
 };
@@ -108,6 +102,12 @@ export function acquireCronScriptMcpTools(
     }),
   );
   const surface = materialization.then((materialized) => {
+    const unavailable = materialized.diagnostics
+      ?.map(({ serverName, message }) => `MCP server "${serverName}" is unavailable: ${message}`)
+      .join("; ");
+    if (unavailable) {
+      return { tools: [], unavailable };
+    }
     const applyPolicy = (candidates: AnyAgentTool[]) =>
       applyFinalEffectiveToolPolicy({
         bundledTools: applyEmbeddedAttemptToolsAllow(candidates, params.toolsAllow, {
@@ -124,30 +124,25 @@ export function acquireCronScriptMcpTools(
       tools: applyPolicy(materialized.tools).map((tool) =>
         wrapToolWithBeforeToolCallHook(tool, params.hookContext),
       ),
-      unavailableServers: (materialized.diagnostics ?? []).map(
-        ({ serverName, safeServerName, message }) => ({ serverName, safeServerName, message }),
-      ),
     };
   });
   void surface.catch(() => undefined);
-  let disposal: Promise<void> | undefined;
   return {
     surface,
-    dispose: () =>
-      (disposal ??= (async () => {
-        const acquired = await acquisition.catch(() => undefined);
-        if (!acquired) {
-          return;
-        }
-        // Retirement closes transports first, so a deadline-abandoned connect cannot outlive the run.
-        await acquired.mcp.retireSessionMcpRuntime({
-          sessionId: params.sessionId,
-          reason: "cron-script-complete",
-          onError: (error, sessionId) =>
-            logWarn(`cron: failed to retire script MCP runtime ${sessionId}: ${String(error)}`),
-        });
-        const materialized = await materialization.catch(() => undefined);
-        await materialized?.dispose();
-      })()),
+    dispose: async () => {
+      const acquired = await acquisition.catch(() => undefined);
+      if (!acquired) {
+        return;
+      }
+      // Retirement closes transports first, so a deadline-abandoned connect cannot outlive the run.
+      await acquired.mcp.retireSessionMcpRuntime({
+        sessionId: params.sessionId,
+        reason: "cron-script-complete",
+        onError: (error, sessionId) =>
+          logWarn(`cron: failed to retire script MCP runtime ${sessionId}: ${String(error)}`),
+      });
+      const materialized = await materialization.catch(() => undefined);
+      await materialized?.dispose();
+    },
   };
 }

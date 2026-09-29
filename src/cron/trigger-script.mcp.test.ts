@@ -29,13 +29,21 @@ afterEach(async () => {
 });
 
 // Minimal stdio MCP server: records each start, and each call reports the serving pid.
+// With a port it ignores SIGTERM and stdin EOF and holds a socket until killed; "hang" skips replies.
 const SOURCES_SERVER = `
 import fs from "node:fs";
+import net from "node:net";
 import readline from "node:readline";
-fs.appendFileSync(process.argv[2], "start\\n");
+const [startLog, port, mode] = process.argv.slice(2);
+fs.appendFileSync(startLog, "start\\n");
+if (port) {
+  process.on("SIGTERM", () => {});
+  net.connect(Number(port), "127.0.0.1");
+}
 function reply(id, result) { process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n"); }
 for await (const line of readline.createInterface({ input: process.stdin })) {
   const message = JSON.parse(line);
+  if (mode === "hang") continue;
   if (message.method === "initialize") reply(message.id, { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "sources", version: "1" } });
   if (message.method === "tools/list") reply(message.id, { tools: [
     { name: "list_sources", inputSchema: { type: "object", properties: { since: { type: "string" } } } },
@@ -45,16 +53,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
 }
 `;
 
-// Never answers initialize and ignores SIGTERM and stdin EOF, so only a forced kill retires it.
-const HUNG_SERVER = `
-import net from "node:net";
-process.on("SIGTERM", () => {});
-process.stdin.on("data", () => {});
-process.stdin.on("end", () => {});
-net.connect(Number(process.argv[2]), "127.0.0.1");
-`;
-
-function createMcpFixture(extra?: Partial<OpenClawConfig>) {
+function createMcpFixture(params: { extra?: Partial<OpenClawConfig>; serverArgs?: string[] } = {}) {
   const root = tempDirs.make("openclaw-cron-mcp-");
   const serverPath = path.join(root, "sources.mjs");
   const startLog = path.join(root, "starts.log");
@@ -64,11 +63,14 @@ function createMcpFixture(extra?: Partial<OpenClawConfig>) {
     plugins: { enabled: false },
     mcp: {
       servers: {
-        sources: { command: process.execPath, args: [serverPath, startLog] },
+        sources: {
+          command: process.execPath,
+          args: [serverPath, startLog, ...(params.serverArgs ?? [])],
+        },
         broken: { command: process.execPath, args: ["-e", "process.exit(3)"] },
       },
     },
-    ...extra,
+    ...params.extra,
   };
   return {
     config,
@@ -97,15 +99,6 @@ return {
     deleteVisible: typeof MCP.sources.deleteSource === "function",
   },
 };
-`;
-
-const CATCH_BROKEN_SCRIPT = `
-try {
-  await MCP.broken.ping({});
-  return { fire: false };
-} catch (error) {
-  return { fire: true, message: String(error.message ?? error) };
-}
 `;
 
 describe("cron script MCP namespace", () => {
@@ -142,7 +135,7 @@ describe("cron script MCP namespace", () => {
   );
 
   it("exposes a server-scoped glob within the owning agent's tool policy", async () => {
-    const fixture = createMcpFixture({ tools: { deny: ["sources__delete_source"] } });
+    const fixture = createMcpFixture({ extra: { tools: { deny: ["sources__delete_source"] } } });
     const runtime = createCronScriptRuntime({ config: fixture.config });
 
     await expect(
@@ -179,103 +172,71 @@ describe("cron script MCP namespace", () => {
     expect(getSessionMcpRuntimeManagerForTesting().listRuntimeKeys()).toEqual([]);
   });
 
-  it.each([["broken__ping"], ["broken__*"]])(
-    "rejects calls to a server that failed to start (%s) with a catchable error",
-    async (brokenEntry) => {
-      const runtime = createCronScriptRuntime({ config: createMcpFixture().config });
+  it("fails the evaluation before the script runs when a named server cannot start", async () => {
+    const runtime = createCronScriptRuntime({ config: createMcpFixture().config });
 
-      const result = await runtime.evaluateTrigger({
-        jobId: "mcp-broken",
-        script: CATCH_BROKEN_SCRIPT,
-        state: null,
-        toolsAllow: [brokenEntry],
+    const result = await runtime.evaluateTrigger({
+      jobId: "mcp-broken",
+      script: "return { fire: true };",
+      state: null,
+      toolsAllow: ["broken__*"],
+    });
+
+    expect(result).toMatchObject({ kind: "error", code: "runtime_unavailable" });
+    expect(result.kind === "error" ? result.error : "").toContain(
+      'MCP server "broken" is unavailable',
+    );
+    expect(getSessionMcpRuntimeManagerForTesting().listRuntimeKeys()).toEqual([]);
+  });
+
+  it.each(["evaluated", "aborted"] as const)(
+    "returns an %s evaluation while a stubborn MCP server keeps retiring",
+    async (outcome) => {
+      // Forced shutdown takes 3 s; a finished evaluation waits at most the 1 s cleanup grace.
+      mcpRuntimeTesting.setBundleMcpDisposeTimeoutMsForTest(3_000);
+      const connected = createDeferred<net.Socket>();
+      const listener = net.createServer((socket) => connected.resolve(socket));
+      await new Promise<void>((resolve) => {
+        listener.listen(0, "127.0.0.1", resolve);
       });
+      try {
+        const port = (listener.address() as AddressInfo).port;
+        const fixture = createMcpFixture({
+          serverArgs: [`${port}`, outcome === "aborted" ? "hang" : "reply"],
+        });
+        const runtime = createCronScriptRuntime({ config: fixture.config });
+        const controller = new AbortController();
+        const evaluation = runtime.evaluateTrigger({
+          jobId: `mcp-stubborn-${outcome}`,
+          script: "await MCP.sources.listSources({}); return { fire: false };",
+          state: null,
+          toolsAllow: ["sources__*"],
+          abortSignal: controller.signal,
+        });
+        // The server holds this socket until it is killed, so its close proves retirement.
+        const socket = await connected.promise;
+        let retired = false;
+        const closed = new Promise<void>((resolve) => {
+          socket.once("close", () => {
+            retired = true;
+            resolve();
+          });
+        });
+        if (outcome === "aborted") {
+          controller.abort();
+        }
 
-      expect(result).toMatchObject({ kind: "evaluated", fire: true });
-      expect(result.kind === "evaluated" ? result.message : "").toContain(
-        'MCP server "broken" is unavailable',
-      );
-      expect(getSessionMcpRuntimeManagerForTesting().listRuntimeKeys()).toEqual([]);
+        const result = await evaluation;
+
+        expect(result.kind === "error" ? result.code : result.kind).toBe(outcome);
+        expect(retired).toBe(false);
+        await closed;
+      } finally {
+        mcpRuntimeTesting.setBundleMcpDisposeTimeoutMsForTest();
+        await new Promise<void>((resolve) => {
+          listener.close(() => resolve());
+        });
+      }
     },
   );
-
-  it("returns ended evaluations while hung MCP servers keep retiring in the background", async () => {
-    // Forced shutdown takes 3 s; ended evaluations may wait only the 1 s cleanup grace.
-    mcpRuntimeTesting.setBundleMcpDisposeTimeoutMsForTest(3_000);
-    // Each fixture holds its socket until the process dies, so every close proves retirement.
-    const serverExits: Promise<void>[] = [];
-    const allStarted = createDeferred<void>();
-    const listener = net.createServer((socket) => {
-      serverExits.push(
-        new Promise<void>((resolve) => {
-          socket.once("close", () => resolve());
-        }),
-      );
-      if (serverExits.length === 3) {
-        allStarted.resolve();
-      }
-    });
-    await new Promise<void>((resolve) => {
-      listener.listen(0, "127.0.0.1", resolve);
-    });
-    try {
-      const root = tempDirs.make("openclaw-cron-mcp-hung-");
-      const serverPath = path.join(root, "hung.mjs");
-      fs.writeFileSync(serverPath, HUNG_SERVER);
-      const port = (listener.address() as AddressInfo).port;
-      const runtime = createCronScriptRuntime({
-        config: {
-          agents: { defaults: { workspace: path.join(root, "workspace") } },
-          plugins: { enabled: false },
-          mcp: {
-            // Distinct servers: startup is single-flight per server, and each job fills a slot.
-            servers: Object.fromEntries(
-              [0, 1, 2].map((index) => [
-                `hung${index}`,
-                { command: process.execPath, args: [serverPath, `${port}`] },
-              ]),
-            ),
-          },
-        },
-      });
-      const controllers = [0, 1, 2].map(() => new AbortController());
-      // Three hung connects fill every trigger-evaluation slot.
-      const evaluations = controllers.map((controller, index) =>
-        runtime.evaluateTrigger({
-          jobId: `mcp-hung-${index}`,
-          script: `await MCP.hung${index}.ping({}); return { fire: false };`,
-          state: null,
-          toolsAllow: [`hung${index}__*`],
-          abortSignal: controller.signal,
-        }),
-      );
-      await allStarted.promise;
-
-      const abortedAt = performance.now();
-      for (const controller of controllers) {
-        controller.abort();
-      }
-      const results = await Promise.all(evaluations);
-      const returnedAfterMs = performance.now() - abortedAt;
-
-      expect(
-        results.map((result) => (result.kind === "error" ? result.code : result.kind)),
-      ).toEqual(["aborted", "aborted", "aborted"]);
-      expect(returnedAfterMs).toBeLessThan(2_500);
-      await expect(
-        runtime.evaluateTrigger({
-          jobId: "mcp-after-hung",
-          script: "return { fire: false };",
-          state: null,
-          toolsAllow: [],
-        }),
-      ).resolves.toEqual({ kind: "evaluated", fire: false });
-      await Promise.all(serverExits);
-    } finally {
-      mcpRuntimeTesting.setBundleMcpDisposeTimeoutMsForTest();
-      await new Promise<void>((resolve) => {
-        listener.close(() => resolve());
-      });
-    }
-  });
 });

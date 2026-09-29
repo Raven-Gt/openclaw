@@ -59,10 +59,7 @@ const RESERVED_NAMESPACE_FUNCTION_IDENTIFIERS = new Set([
 
 type McpNamespaceScope = Map<
   string,
-  | string
-  | McpNamespaceScope
-  | { kind: "function"; path: string[] }
-  | { kind: "functionScope"; path: string[] }
+  string | McpNamespaceScope | { kind: "function"; path: string[] }
 >;
 
 type McpNamespaceCall = {
@@ -74,17 +71,8 @@ type McpNamespaceCall = {
 export type SerializedCodeModeNamespaceValue =
   | { kind: "array"; items: SerializedCodeModeNamespaceValue[] }
   | { kind: "function"; path: string[] }
-  /** Every string property is a namespace function at `[...path, property]`. */
-  | { kind: "functionScope"; path: string[] }
   | { kind: "object"; entries: Array<[string, SerializedCodeModeNamespaceValue]> }
   | { kind: "value"; value: unknown };
-
-/** A configured MCP server whose startup failed before it listed any tools. */
-export type CodeModeUnavailableMcpServer = {
-  serverName: string;
-  safeServerName: string;
-  message: string;
-};
 
 /** Descriptor sent to code mode for one visible namespace. */
 export type CodeModeNamespaceDescriptor = {
@@ -234,8 +222,6 @@ type McpNamespaceModel = {
   calls: Map<string, McpNamespaceCall>;
   docs: McpApiServerDoc[];
   bindings: Map<string, CodeModeMcpCatalogBinding>;
-  /** Server identifier to the error every call under that server rejects with. */
-  unavailable: Map<string, string>;
 };
 
 type McpNamespaceServer = {
@@ -333,13 +319,11 @@ function createMcpNamespacePlan(catalog: readonly CodeModeNamespaceCatalogEntry[
 
 function createMcpNamespaceModel(
   catalog: readonly CodeModeNamespaceCatalogEntry[],
-  unavailableServers: readonly CodeModeUnavailableMcpServer[],
 ): McpNamespaceModel | undefined {
   const plan = createMcpNamespacePlan(catalog);
-  if (!plan && unavailableServers.length === 0) {
+  if (!plan) {
     return undefined;
   }
-  const usedServerIdentifiers = plan?.usedServerIdentifiers ?? new Set<string>();
   const usedToolIdentifiers = new Map<string, Set<string>>();
   const root: McpNamespaceScope = new Map();
   const calls = new Map<string, McpNamespaceCall>();
@@ -349,14 +333,15 @@ function createMcpNamespaceModel(
   };
   const serverDocs = new Map<string, McpApiServerDoc>();
   const bindings = new Map<string, CodeModeMcpCatalogBinding>();
-  for (const entry of plan?.entries ?? []) {
+  for (const entry of plan.entries) {
     const mcp = entry.mcp;
     if (!mcp || !entry.id) {
       continue;
     }
     const serverKey = mcpNamespaceServerKey(mcp);
     const serverIdentifier =
-      plan?.servers.get(serverKey)?.identifier ?? uniqueIdentifier("server", usedServerIdentifiers);
+      plan.servers.get(serverKey)?.identifier ??
+      uniqueIdentifier("server", plan.usedServerIdentifiers);
     const serverScope = scopeAtPath(root, [serverIdentifier]);
     serverScope.set("$serverName", mcp.serverName);
     let serverDoc = serverDocs.get(serverIdentifier);
@@ -423,23 +408,7 @@ function createMcpNamespaceModel(
       input: (args) => buildMcpApiResponse({ servers: docs, server, args }),
     });
   }
-  // A failed server listed no tools, so keep its scope callable by any name and
-  // reject each call with the startup failure instead of a missing-property TypeError.
-  const unavailable = new Map<string, string>();
-  for (const server of unavailableServers.toSorted((a, b) =>
-    a.safeServerName.localeCompare(b.safeServerName),
-  )) {
-    const identifier = uniqueIdentifier(
-      toIdentifier(server.safeServerName, "server"),
-      usedServerIdentifiers,
-    );
-    root.set(identifier, { kind: "functionScope", path: [identifier] });
-    unavailable.set(
-      identifier,
-      `MCP server "${server.serverName}" is unavailable: ${server.message}`,
-    );
-  }
-  return { root, calls, docs, bindings, unavailable };
+  return { root, calls, docs, bindings };
 }
 
 const SWARM_AGENTS_API_CONTENT = `type AgentJsonSchema = Record<string, unknown>;
@@ -547,9 +516,8 @@ function serializeMcpNamespaceScope(scope: McpNamespaceScope): SerializedCodeMod
 /** Creates the runtime descriptor/invocation layer for visible namespaces. */
 export function createCodeModeNamespaceRuntime(
   catalog: readonly CodeModeNamespaceCatalogEntry[] = [],
-  unavailableMcpServers: readonly CodeModeUnavailableMcpServer[] = [],
 ): CodeModeNamespaceRuntime {
-  const model = createMcpNamespaceModel(catalog, unavailableMcpServers);
+  const model = createMcpNamespaceModel(catalog);
   return {
     descriptors: model
       ? [
@@ -580,14 +548,7 @@ export function createCodeModeNamespaceRuntime(
       }
       const target = model.calls.get(namespacePathKey(path));
       if (!target) {
-        const [serverIdentifier, toolName, ...rest] = path;
-        const unavailable =
-          serverIdentifier && toolName && rest.length === 0
-            ? model.unavailable.get(serverIdentifier)
-            : undefined;
-        throw new Error(
-          unavailable ?? `Code mode namespace path is not callable: ${path.join(".")}`,
-        );
+        throw new Error(`Code mode namespace path is not callable: ${path.join(".")}`);
       }
       const input = await target.input(args);
       if (!target.tool) {

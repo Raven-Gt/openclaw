@@ -25,7 +25,6 @@ import {
 import { createHeadlessDeadlineScope } from "../agents/code-mode-headless.js";
 import type {
   CodeModeNamespaceDescriptor,
-  CodeModeUnavailableMcpServer,
   SerializedCodeModeNamespaceValue,
 } from "../agents/code-mode-namespaces.js";
 import {
@@ -106,7 +105,8 @@ const MAX_CONCURRENT_TRIGGER_EVALS = 3;
 const MAX_CACHED_TRIGGER_RUNTIMES = 128;
 const HEADLESS_TRIGGER_WALL_CLOCK_MS = 30_000;
 const HEADLESS_TRIGGER_TOOL_BUDGET = 5;
-// Bounds MCP teardown after an ended evaluation; retirement itself continues as tracked work.
+// Holds a finished evaluation for MCP teardown at most this long; a hung connect or shutdown
+// keeps retiring as tracked work instead of holding the result and trigger slot.
 const CRON_SCRIPT_MCP_CLEANUP_GRACE_MS = 1_000;
 
 let activeTriggerEvaluations = 0;
@@ -541,12 +541,13 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
           // Retry setup once with the same admission and deadline, never script execution.
         }
       }
-      let unavailableMcpServers: CodeModeUnavailableMcpServer[] = [];
       if (mcp) {
         // Server connection and tool listing spend the evaluation's own deadline.
         const surface = await evaluationScope.wait(mcp.surface);
+        if (surface.unavailable) {
+          return scriptFailure(surface.unavailable, "runtime_unavailable");
+        }
         tools = [...tools, ...surface.tools];
-        unavailableMcpServers = surface.unavailableServers;
       }
       const ctx: ToolSearchToolContext = {
         ...runtime.context,
@@ -596,7 +597,6 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
           wallClockMs: remainingWallClockMs,
           maxToolCalls: params.maxToolCalls,
           extraNamespaces: [triggerStateNamespace(params.state, params.streamBatch)],
-          unavailableMcpServers,
           signal: evaluationScope.signal,
         });
         if (result.status === "failed") {
@@ -615,24 +615,15 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
             : "internal_error",
       );
     } finally {
-      // Read before cleanup() aborts the scope: an ended evaluation gets only the grace period.
-      const mcpCleanupMs = Math.max(
-        CRON_SCRIPT_MCP_CLEANUP_GRACE_MS,
-        evaluationScope.signal.aborted
-          ? 0
-          : Math.ceil(evaluationScope.deadline - performance.now()),
-      );
       admission?.close();
       clearToolSearchCatalog({ catalogRef });
       evaluationScope.cleanup();
       if (mcp) {
-        // Retirement normally finishes inside the deadline. A hung connect or shutdown keeps
-        // retiring as tracked work instead of holding the result, admission, and trigger slot.
         await runAgentCleanupStep({
           runId,
           sessionId: runId,
           step: "cron-script-mcp-retire",
-          timeoutMs: mcpCleanupMs,
+          timeoutMs: CRON_SCRIPT_MCP_CLEANUP_GRACE_MS,
           log: { warn: logWarn },
           cleanup: mcp.dispose,
         });
