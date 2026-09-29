@@ -5,6 +5,7 @@ import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-wo
 import { noteCronJobsStoreCommit } from "../store.js";
 import { cronStoreKey } from "../store/key.js";
 import type { CronFailureNotificationDelivery } from "../types.js";
+import { resolveFailureAlert } from "./failure-alerts.js";
 import { locked } from "./locked.js";
 import type { CronNotificationIntent } from "./notification-intents.js";
 import { runCronRuntimeMutation } from "./runtime-mutation.js";
@@ -175,9 +176,18 @@ function transportFailureRepair(
     ) {
       return;
     }
-    if (!live.enabled || live.state.autoDisabled) {
-      // A job disabled meanwhile (by the user or the auto-disable notice) needs no alert;
-      // settle the repair so a restart does not report it as interrupted.
+    // The fallback is the alert a failure would send now: under the live policy and route,
+    // not the ones captured when the repair started.
+    const route = resolveFailureAlert({ deps: state.deps }, live);
+    if (
+      !live.enabled ||
+      live.state.autoDisabled ||
+      !route ||
+      (live.delivery?.bestEffort === true && !live.failureAlert)
+    ) {
+      // A job disabled meanwhile (by the user or the auto-disable notice), or whose alerts
+      // were turned off, needs no alert; settle the repair so a restart does not report
+      // it as interrupted.
       await recordFailureAlertOutcome(state, cycle, { status: "not-requested" });
       return;
     }
@@ -185,7 +195,7 @@ function transportFailureRepair(
       { jobId: job.id, reason },
       "cron: failure repair did not complete; alerting",
     );
-    transportFailureAlert(state, params.fallback);
+    transportFailureAlert(state, { ...params.fallback, route });
   };
   void start({ ...params.request, job: structuredClone(liveJob) })
     .then(async (outcome) => {

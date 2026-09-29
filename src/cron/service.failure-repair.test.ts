@@ -151,16 +151,19 @@ describe("CronService failure repair", () => {
     );
   });
 
-  it("drops the fallback alert and settles when the job was disabled while the repair ran", async () => {
+  it.each([
+    { name: "the job was disabled", patch: { enabled: false } },
+    { name: "its alerts were turned off", patch: { failureAlert: false as const } },
+  ])("drops the fallback alert and settles when $name while the repair ran", async ({ patch }) => {
     const pending = createDeferred<"failed">();
     const startRepair = vi.fn<StartRepair>(() => pending.promise);
     await withRepair(startRepair, async ({ cron, sendCronFailureAlert, addJob }) => {
-      const job = await addJob("disabled mid-repair", owned);
+      const job = await addJob("changed mid-repair", owned);
       await cron.run(job.id, "force");
       await cron.run(job.id, "force");
       expect(startRepair).toHaveBeenCalledOnce();
 
-      await cron.update(job.id, { enabled: false });
+      await cron.update(job.id, patch);
       pending.resolve("failed");
       // Settled, so a restart does not report the aborted repair as interrupted.
       await vi.waitFor(() =>
@@ -168,6 +171,28 @@ describe("CronService failure repair", () => {
       );
       expect(cron.getJob(job.id)?.state.failureAlertIncident?.repair?.alerted).toBeUndefined();
       expect(sendCronFailureAlert).not.toHaveBeenCalled();
+    });
+  });
+
+  it("sends the fallback alert to the route configured when the repair fails", async () => {
+    const pending = createDeferred<"failed">();
+    const startRepair = vi.fn<StartRepair>(() => pending.promise);
+    await withRepair(startRepair, async ({ cron, sendCronFailureAlert, addJob }) => {
+      const job = await addJob("rerouted mid-repair", owned);
+      await cron.run(job.id, "force");
+      await cron.run(job.id, "force");
+      expect(startRepair).toHaveBeenCalledOnce();
+
+      await cron.update(job.id, {
+        failureAlert: { after: 2, cooldownMs: 0, channel: "telegram", to: "424242" },
+      });
+      pending.resolve("failed");
+      await vi.waitFor(() => expect(sendCronFailureAlert).toHaveBeenCalledOnce());
+      expect(sendCronFailureAlert.mock.calls[0]?.[0]).toMatchObject({
+        channel: "telegram",
+        to: "424242",
+      });
+      expectAlertTextContaining(sendCronFailureAlert, 'Automation "rerouted mid-repair" failed 2');
     });
   });
 
