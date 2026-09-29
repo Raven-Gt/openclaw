@@ -51,7 +51,7 @@ const SessionsYieldToolSchema = Type.Object({
   waitFor: Type.Optional(
     Type.Literal("message", {
       description:
-        "Explicitly pause an unfinished subagent until an incoming continuation message. An announcing child notifies its requester that it needs sessions_send; this does not send the continuation or submit a final result.",
+        "Explicitly pause an unfinished subagent until an incoming continuation message; its requester is notified once. Does not schedule a message or submit the final result.",
     }),
   ),
   message: Type.Optional(
@@ -60,7 +60,7 @@ const SessionsYieldToolSchema = Type.Object({
   acknowledgment: Type.Optional(
     Type.String({
       description:
-        "Optional waiting reply for an otherwise-silent interactive parent turn, or pause notice text sent to an announcing child's requester with waitFor:message (trimmed, at most 12,000 characters).",
+        "Optional waiting reply for an otherwise-silent interactive parent turn; with waitFor, the pause notice for the requester.",
     }),
   ),
 });
@@ -79,7 +79,7 @@ export function createSessionsYieldTool(opts?: {
     // tool must stay visible even when tool search compacts the catalog.
     catalogMode: "direct-only",
     description:
-      'End this turn for pending child completion events; this is not a final-result submission. Return completed work normally. An unfinished subagent waiting for an incoming continuation must set waitFor:"message". An announcing child wakes its requester once with a paused notice and acknowledgment; only sessions_send to the child resumes it. Collector runs require explicit collection instead. acknowledgment can send a waiting reply for an otherwise-silent interactive parent.',
+      'End this turn for pending child completion events; this is not a final-result submission. Return completed work normally. An unfinished subagent waiting for an incoming continuation must set waitFor:"message". Collector runs require explicit collection instead. acknowledgment can send a waiting reply for an otherwise-silent interactive parent.',
     parameters: SessionsYieldToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
