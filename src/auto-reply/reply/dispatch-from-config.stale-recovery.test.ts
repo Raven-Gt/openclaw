@@ -9,6 +9,8 @@ import {
   resetPluginTtsAndThreadMocks,
 } from "./dispatch-from-config.shared.test-harness.js";
 import type { DispatchFromConfigParams } from "./dispatch-from-config.types.js";
+import { resolveReplyOperationRunState } from "./reply-operation-run-state.js";
+import type { ReplyOperationStaleReason } from "./reply-run-finalization-lease.js";
 import { buildTestCtx } from "./test-ctx.js";
 
 let dispatchReplyFromConfig: typeof import("./dispatch-from-config.js").dispatchReplyFromConfig;
@@ -138,28 +140,42 @@ describe("dispatchReplyFromConfig stale visible admission recovery", () => {
     expect(dispatchParams.dispatcher.sendFinalReply).toHaveBeenCalledTimes(1);
   });
 
+  function createStallingDispatchParams(continueStalledTurn?: () => boolean) {
+    let resolverStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      resolverStarted = resolve;
+    });
+    const dispatchParams = createVisibleDispatchParams(async (_ctx, options) => {
+      const runState = resolveReplyOperationRunState(options);
+      if (runState && continueStalledTurn) {
+        // The admitted run owner arms this before model work starts.
+        runState.continueStalledTurn = continueStalledTurn;
+      }
+      resolverStarted();
+      await new Promise<void>((resolve) => {
+        options?.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      const error = new Error("reply expired");
+      error.name = "AbortError";
+      throw error;
+    });
+    return { dispatchParams, started };
+  }
+
+  async function stallActiveReply(reason: ReplyOperationStaleReason) {
+    const operation = replyRunRegistry.get(sessionKey);
+    expect(operation).toBeDefined();
+    expect(expireStaleReplyOperation(operation!, reason)).toBe(false);
+  }
+
   it.each(["no_activity", "stuck_recovery"] as const)(
-    "sends truthful stalled feedback when %s expires the active reply",
+    "sends the stall notice when %s expires a reply nothing can continue",
     async (reason) => {
-      let resolverStarted: () => void = () => {};
-      const resolverStartedPromise = new Promise<void>((resolve) => {
-        resolverStarted = resolve;
-      });
-      const dispatchParams = createVisibleDispatchParams(async (_ctx, options) => {
-        resolverStarted();
-        await new Promise<void>((resolve) => {
-          options?.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
-        });
-        const error = new Error("reply expired");
-        error.name = "AbortError";
-        throw error;
-      });
+      const { dispatchParams, started } = createStallingDispatchParams();
 
       const dispatchPromise = dispatchReplyFromConfig(dispatchParams);
-      await resolverStartedPromise;
-      const operation = replyRunRegistry.get(sessionKey);
-      expect(operation).toBeDefined();
-      expect(expireStaleReplyOperation(operation!, reason)).toBe(false);
+      await started;
+      await stallActiveReply(reason);
 
       await expect(dispatchPromise).resolves.toMatchObject({ queuedFinal: true });
       expect(dispatchParams.dispatcher.sendFinalReply).toHaveBeenCalledWith({
@@ -168,4 +184,46 @@ describe("dispatchReplyFromConfig stale visible admission recovery", () => {
       });
     },
   );
+
+  it.each(["no_activity", "stuck_recovery"] as const)(
+    "lets the session lane answer instead of the notice when %s expires the reply",
+    async (reason) => {
+      const continueStalledTurn = vi.fn(() => true);
+      const { dispatchParams, started } = createStallingDispatchParams(continueStalledTurn);
+
+      const dispatchPromise = dispatchReplyFromConfig(dispatchParams);
+      await started;
+      await stallActiveReply(reason);
+
+      await expect(dispatchPromise).resolves.toMatchObject({ queuedFinal: false });
+      expect(continueStalledTurn).toHaveBeenCalledOnce();
+      expect(dispatchParams.dispatcher.sendFinalReply).not.toHaveBeenCalled();
+    },
+  );
+
+  it("falls back to the stall notice when no continuation could be arranged", async () => {
+    const continueStalledTurn = vi.fn(() => false);
+    const { dispatchParams, started } = createStallingDispatchParams(continueStalledTurn);
+
+    const dispatchPromise = dispatchReplyFromConfig(dispatchParams);
+    await started;
+    await stallActiveReply("stuck_recovery");
+
+    await expect(dispatchPromise).resolves.toMatchObject({ queuedFinal: true });
+    expect(continueStalledTurn).toHaveBeenCalledOnce();
+    expect(dispatchParams.dispatcher.sendFinalReply).toHaveBeenCalledOnce();
+  });
+
+  it("neither continues nor notifies when finalization stalls after output", async () => {
+    const continueStalledTurn = vi.fn(() => true);
+    const { dispatchParams, started } = createStallingDispatchParams(continueStalledTurn);
+
+    const dispatchPromise = dispatchReplyFromConfig(dispatchParams);
+    await started;
+    await stallActiveReply("finalization_stalled");
+
+    await expect(dispatchPromise).resolves.toMatchObject({ queuedFinal: false });
+    expect(continueStalledTurn).not.toHaveBeenCalled();
+    expect(dispatchParams.dispatcher.sendFinalReply).not.toHaveBeenCalled();
+  });
 });

@@ -47,6 +47,10 @@ import {
   resolveSourceReplyVisibilityPolicy,
 } from "./source-reply-delivery-mode.js";
 import {
+  buildStalledTurnNoticePayload,
+  isReplyOperationStalledBeforeOutput,
+} from "./stalled-turn-recovery.js";
+import {
   buildStrandedReplyDeliveryFailurePayload,
   resolveStrandedReplyRecovery,
 } from "./stranded-reply-recovery.js";
@@ -90,16 +94,6 @@ export async function resolveFollowupDeliveryDecision(params: {
   ) {
     return { kind: "suppress", reason: "room-event" };
   }
-  if (execution.outcome.kind === "aborted") {
-    return { kind: "suppress", reason: "aborted" };
-  }
-  const postCompactionModelFailure = execution.outcome.postCompactionModelFailure;
-  const renderFailurePayloads = (payloads: ReplyPayload[]) =>
-    payloads.map((payload) =>
-      renderPostCompactionModelFailurePayload(
-        markPostCompactionModelFailurePayload(postCompactionModelFailure, payload),
-      ),
-    );
   const sourcePolicy = resolveSourceReplyVisibilityPolicy({
     cfg: turn.config,
     ctx: {
@@ -148,6 +142,29 @@ export async function resolveFollowupDeliveryDecision(params: {
       "payloads" | keyof typeof deliveryContext
     > = {},
   ) => resolveFollowupDeliveryPayloads({ ...deliveryContext, ...options, payloads });
+  if (execution.outcome.kind === "aborted") {
+    // The one recovery run for a stalled turn stalled too: the notice is the last resort.
+    // Like the dispatch-owned notice it replaces, it bypasses message-tool-only suppression.
+    if (
+      turn.queued.stalledTurnRecovery === true &&
+      isReplyOperationStalledBeforeOutput(turn.operation)
+    ) {
+      const payloads = preparePayloads([
+        markReplyPayloadForSourceSuppressionDelivery(buildStalledTurnNoticePayload()),
+      ]);
+      if (payloads.length > 0) {
+        return { kind: "deliver", payloads };
+      }
+    }
+    return { kind: "suppress", reason: "aborted" };
+  }
+  const postCompactionModelFailure = execution.outcome.postCompactionModelFailure;
+  const renderFailurePayloads = (payloads: ReplyPayload[]) =>
+    payloads.map((payload) =>
+      renderPostCompactionModelFailurePayload(
+        markPostCompactionModelFailurePayload(postCompactionModelFailure, payload),
+      ),
+    );
   if (execution.outcome.kind === "rejected") {
     if (!isInteractive) {
       return { kind: "suppress", reason: "silent" };

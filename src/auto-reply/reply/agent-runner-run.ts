@@ -54,7 +54,11 @@ import { createFollowupRunner } from "./followup-runner.js";
 import { REPLY_RUN_STILL_SHUTTING_DOWN_TEXT } from "./get-reply-run-queue.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import { resolveActiveRunQueueAction } from "./queue-policy.js";
-import { enqueueFollowupRun, scheduleFollowupDrain } from "./queue.js";
+import {
+  enqueueFollowupRun,
+  getNextQueuedFollowupRequest,
+  scheduleFollowupDrain,
+} from "./queue.js";
 import { resolveFollowupAbortSignal } from "./queue/types.js";
 import { REPLY_ADMISSION_TICKET } from "./reply-admission-ticket.js";
 import { createReplyMediaContext } from "./reply-media-paths.js";
@@ -71,6 +75,7 @@ import {
 import { resolveRoutedDeliveryThreadId } from "./routed-delivery-thread.js";
 import { resolveSourceReplyExpectation } from "./source-reply-delivery-mode.js";
 import { readChannelSourceTurnId } from "./source-turn-id.js";
+import { appendStalledTurnGuidance, buildStalledTurnRecoveryRun } from "./stalled-turn-recovery.js";
 import { createTypingSignaler } from "./typing-mode.js";
 export async function runReplyAgent(
   input: RunReplyAgentParams,
@@ -592,6 +597,34 @@ export async function runReplyAgent(
     shouldDrainQueuedFollowupsAfterClear = true;
     return value;
   };
+  if (replyOperationRunState && !isHeartbeat && replyExpectation === "required") {
+    // Dispatch owns the stall notice; this owner holds the queue facts needed to answer
+    // instead. A queued request inherits the guidance; otherwise one recovery run is queued.
+    replyOperationRunState.continueStalledTurn = () => {
+      const queuedRequest = getNextQueuedFollowupRequest(queueKey);
+      if (queuedRequest) {
+        appendStalledTurnGuidance(queuedRequest);
+        return true;
+      }
+      const enqueued = enqueueFollowupRun(
+        queueKey,
+        buildStalledTurnRecoveryRun(followupRun),
+        resolvedQueue,
+        "none",
+        runFollowupTurn,
+        false,
+        { position: "front" },
+      );
+      if (enqueued) {
+        scheduleFollowupDrainAfterReplyOperationClear({
+          operation: replyOperation,
+          queueKey,
+          runFollowup: runFollowupTurn,
+        });
+      }
+      return enqueued;
+    };
+  }
   const {
     admitUserTurn,
     beginBeforeAgentReply,

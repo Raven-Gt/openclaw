@@ -275,6 +275,19 @@ export function getFollowupQueueDepth(key: string): number {
   return countPendingQueueItems(queue.items, queue.inFlight);
 }
 
+/** Next pending user request awaiting a reply; internal retries and ambient events do not count. */
+export function getNextQueuedFollowupRequest(key: string): FollowupRun | undefined {
+  const queue = getExistingFollowupQueue(key);
+  return queue?.items.find(
+    (item) =>
+      !queue.inFlight.has(item) &&
+      !isFollowupRunAborted(item) &&
+      item.run.terminalReplyExpectation === "required" &&
+      item.strandedReplyRetry !== true &&
+      item.stalledTurnRecovery !== true,
+  );
+}
+
 function settleParkedSteerAcceptance(key: string, run: FollowupRun, accepted: boolean): boolean {
   const queue = getExistingFollowupQueue(key);
   const pending = run.steerPending;
