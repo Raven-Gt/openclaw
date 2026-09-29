@@ -21,6 +21,7 @@ import { pathMayExistSync } from "./path-existence.js";
 import { withLegacyMigrationStateLock } from "./state-migrations.lock.js";
 import {
   type LegacyMigrationSourceClaim,
+  type LegacyMigrationSourceSnapshot as SourceSnapshot,
   legacyMigrationSourceOrClaimMayExist as sourceOrClaimMayExist,
   legacyMigrationSourceSnapshotsMatch as snapshotsMatch,
 } from "./state-migrations.source-snapshot.js";
@@ -38,7 +39,6 @@ import {
   canonicalCoversParsedSource,
   importAndRecordReceipt,
   parseSource,
-  type SourceSnapshot,
 } from "./state-migrations.workspace-setup-store.js";
 import type {
   LegacyWorkspaceStateDetection,

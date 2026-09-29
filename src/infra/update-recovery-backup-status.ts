@@ -42,14 +42,10 @@ const updateRecoveryTerminalOutcomeSchema = z
 
 const updateRecoveryForwardResolutionSchema =
   updateRecoveryCaptureStateSchema.shape.forwardResolution.unwrap();
-const outcomeSchema = z
-  .object({
-    status: z.enum(["pending", "restored", "committed", "restore-failed"]),
-    error: z.string().optional(),
-  })
-  .strict();
-type Outcome = z.infer<typeof outcomeSchema>;
-const recordedOutcomeSchema = updateRecoveryTerminalOutcomeSchema;
+type Outcome = {
+  status: "pending" | "restored" | "committed" | "restore-failed";
+  error?: string | undefined;
+};
 
 async function statOrMissing(pathname: string) {
   try {
@@ -96,7 +92,7 @@ function captureDirectory(runId: string, stateDir?: string): string {
   return path.join(backupStore(stateDir), runId);
 }
 const MAX_UPDATE_RECOVERY_OUTCOME_BYTES = 16 * 1024;
-type RecordedOutcome = z.infer<typeof recordedOutcomeSchema>;
+type RecordedOutcome = z.infer<typeof updateRecoveryTerminalOutcomeSchema>;
 
 function assertManifestLocation(
   ref: UpdateRecoveryBackupRef,
@@ -144,7 +140,7 @@ async function withRecoveryMetadata<T>(
     assertManifestLocation(ref, manifest);
     let outcome: RecordedOutcome | undefined;
     if (await statOrMissing(path.join(ref.directory, "outcome.json"))) {
-      outcome = recordedOutcomeSchema.parse(
+      outcome = updateRecoveryTerminalOutcomeSchema.parse(
         await source.readJson("outcome.json", {
           maxBytes: MAX_UPDATE_RECOVERY_OUTCOME_BYTES,
         }),
@@ -413,7 +409,7 @@ async function listBackups(installRoot?: string): Promise<
     const terminalPath = path.join(directory, "outcome.json");
     let outcome: Outcome;
     if (await statOrMissing(terminalPath)) {
-      const terminal = recordedOutcomeSchema.parse(
+      const terminal = updateRecoveryTerminalOutcomeSchema.parse(
         await source.readJson("outcome.json", {
           maxBytes: MAX_UPDATE_RECOVERY_OUTCOME_BYTES,
         }),

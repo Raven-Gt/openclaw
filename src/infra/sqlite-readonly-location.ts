@@ -472,7 +472,7 @@ async function prepareReadOnlySourceInProcess(
   }
 }
 
-function prepareReadOnlySourceSyncInProcess(
+export function prepareSqliteReadOnlyLocationSyncInProcess(
   pathname: string,
   stagingRoot?: string,
 ): PreparedSqliteReadOnlyLocation {
@@ -554,10 +554,6 @@ export function prepareSqliteReadOnlyLocationInProcess(
 ) {
   signal?.throwIfAborted();
   return prepareReadOnlySourceInProcess(pathname, stagingRoot, signal, onProgress);
-}
-
-export function prepareSqliteReadOnlyLocationSyncInProcess(pathname: string, stagingRoot?: string) {
-  return prepareReadOnlySourceSyncInProcess(pathname, stagingRoot);
 }
 
 /** Snapshot the lifecycle owner's already-open native connection. Opening or
