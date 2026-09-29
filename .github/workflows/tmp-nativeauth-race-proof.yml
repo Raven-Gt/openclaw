@@ -1,0 +1,190 @@
+# PROOF ONLY (task-owned temporary branch): reproduce the saved-profile reconnect native-auth
+# flake under CPU load on the disposable hosted Xcode runner, then prove the fix. Deleted after use.
+name: tmp nativeauth race proof
+
+on:
+  push:
+    branches: [tmp/steipete-nativeauth-race-proof]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tmp-nativeauth-race-proof
+  cancel-in-progress: true
+
+jobs:
+  proof:
+    name: nativeauth-proof (${{ matrix.variant }})
+    runs-on: xcode-27
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: pre
+            ref: d6edf57740a487457a7c36d0a974fa9ec704bfc3
+            e1: e1-d6edf57.patch
+          - variant: main
+            ref: 9a75b9bdf4ce3a7b23980bb4341e4a5544291b74
+            e1: e1-9a75b9b.patch
+          - variant: fix
+            ref: 5e53fd9c64baf4761dee5695908250e72b90c1b5
+            e1: e1-HEAD.patch
+    env:
+      TARGET_TEST: saved profile reconnect refreshes retained document
+      TEST_FILE: apps/macos/Tests/OpenClawIPCTests/ControlUIDocumentNativeAuthTests.swift
+      HARNESS: .proof-harness/.github/nativeauth-proof
+    steps:
+      - name: Checkout target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .proof-harness
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          source scripts/lib/swift-toolchain.sh
+          select_xcode_toolchain
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: "24.21.0"
+          install-bun: "false"
+          install-deps: "false"
+
+      - name: Install Mermaid renderer dependencies
+        env:
+          CI: "true"
+        run: >-
+          pnpm install --frozen-lockfile --prefer-offline --optional
+          --filter '@openclaw/mermaid-renderer...'
+          --config.ignore-scripts=false
+          --config.engine-strict=false
+          --config.enable-pre-post-scripts=true
+          --config.side-effects-cache=true
+
+      - name: Prepare Apple Mermaid assets
+        run: node scripts/prepare-apple-mermaid.mjs
+
+      - name: Detect Swift toolchain cache key
+        id: swift-toolchain
+        run: |
+          set -euo pipefail
+          xcode_version="$(xcodebuild -version | tr '\n' ' ' | sed 's/  */ /g; s/ $//')"
+          swift_version="$(swift --version | head -n 1)"
+          toolchain_key="$(printf '%s\n%s\n' "$xcode_version" "$swift_version" | shasum -a 256 | awk '{print $1}')"
+          echo "key=$toolchain_key" >> "$GITHUB_OUTPUT"
+
+      - name: Restore SwiftPM cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('apps/macos/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
+
+      - name: Restore Swift build directory cache
+        id: swift-build-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/macos/.build
+          key: ${{ runner.os }}-swift-build-v7-tests-${{ hashFiles('scripts/swift-build-cache-metadata.py') }}-graph-${{ steps.swift-toolchain.outputs.key }}-${{ hashFiles('apps/macos/Package*.swift', 'apps/macos/Package.resolved', 'apps/shared/**/Package*.swift', 'apps/shared/**/Package.resolved', 'apps/swabble/Package*.swift', 'apps/swabble/Package.resolved') }}-${{ hashFiles('apps/macos/Sources/**', 'apps/macos/Tests/**', 'apps/shared/**/Sources/**', 'apps/swabble/Sources/**') }}
+          restore-keys: |
+            ${{ runner.os }}-swift-build-v7-tests-${{ hashFiles('scripts/swift-build-cache-metadata.py') }}-graph-${{ steps.swift-toolchain.outputs.key }}-${{ hashFiles('apps/macos/Package*.swift', 'apps/macos/Package.resolved', 'apps/shared/**/Package*.swift', 'apps/shared/**/Package.resolved', 'apps/swabble/Package*.swift', 'apps/swabble/Package.resolved') }}-
+
+      - name: Validate Swift build cache
+        id: validate-swift-build-cache
+        run: |
+          set -euo pipefail
+          cache_valid=true
+          sparkle_info="apps/macos/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/Info.plist"
+          if [[ -d apps/macos/.build && ! -f "$sparkle_info" ]]; then
+            swift package --package-path apps/macos reset
+            cache_valid=false
+          fi
+          echo "cache-valid=$cache_valid" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Swift build input timestamps
+        if: steps.validate-swift-build-cache.outputs.cache-valid == 'true'
+        run: python3 -I -S scripts/swift-build-cache-metadata.py restore
+
+      - name: Swift lint (fix only)
+        if: matrix.variant == 'fix'
+        run: |
+          set -euo pipefail
+          swift_tools_dir="$RUNNER_TEMP/openclaw-swift-tools"
+          ./scripts/install-xcodegen.sh "$swift_tools_dir"
+          ./scripts/install-swift-tools.sh "$swift_tools_dir"
+          export PATH="$swift_tools_dir:$PATH"
+          ./scripts/lint-swift.sh macos
+          ./scripts/format-swift.sh macos
+
+      - name: Build tests
+        run: |
+          set -euo pipefail
+          sw_vers; sysctl -n hw.logicalcpu hw.memsize
+          swift build --package-path apps/macos --build-system native --enable-code-coverage --disable-index-store -Xswiftc -gline-tables-only --build-tests
+
+      - name: Proof loops
+        run: |
+          set -euo pipefail
+          build() { swift build --package-path apps/macos --build-system native --enable-code-coverage --disable-index-store -Xswiftc -gline-tables-only --build-tests; }
+          run() { bash "$HARNESS/run.sh" "$@"; }
+          case "${{ matrix.variant }}" in
+            pre)
+              run pre-plain "$TARGET_TEST" 10
+              git apply "$HARNESS/${{ matrix.e1 }}"; build
+              run pre-inject "$TARGET_TEST" 8
+              ;;
+            main)
+              run main-plain "$TARGET_TEST" 10
+              git apply "$HARNESS/${{ matrix.e1 }}"; build
+              run main-inject "$TARGET_TEST" 8
+              git checkout -- "$TEST_FILE"
+              git apply "$HARNESS/regression-only.patch"; build
+              run main-regression-only "$TARGET_TEST" 4
+              ;;
+            fix)
+              run fix-plain "$TARGET_TEST" 15
+              run fix-suite "ControlUIDocumentNativeAuthTests" 4
+              run fix-siblings "DashboardReconnectTests|DashboardTokenlessRouteTests|DashboardNativeGatewayAuthBridgeTests|DashboardWindowOwnershipTests|DashboardGatewaysTests|DashboardBrowserSessionTests|GatewayConnectionDashboardIdentityTests" 2
+              git apply "$HARNESS/${{ matrix.e1 }}"; build
+              run fix-inject "$TARGET_TEST" 8
+              ;;
+          esac
+
+      - name: Full default partition (fix only, no load)
+        if: matrix.variant == 'fix'
+        run: |
+          set -euo pipefail
+          git checkout -- "$TEST_FILE"
+          swift build --package-path apps/macos --build-system native --enable-code-coverage --disable-index-store -Xswiftc -gline-tables-only --build-tests
+          logical_cpu="$(sysctl -n hw.logicalcpu)"
+          width=$(( logical_cpu < 12 ? logical_cpu : 12 ))
+          mkdir -p "$RUNNER_TEMP/nativeauth-proof/logs"
+          node scripts/test-macos-native.mts default --package-path apps/macos --build-system native --enable-code-coverage --disable-index-store -Xswiftc -gline-tables-only --skip-build --experimental-maximum-parallelization-width "$width" --skip "AppStateIsolationTests|ProfileChatPreferencesTests|QuickChatCatalogPresentationTests" > "$RUNNER_TEMP/nativeauth-proof/logs/fix-full-default.log" 2>&1 && code=0 || code=$?
+          grep -E "✘ Test .*(recorded an issue|failed after)|Test run with" "$RUNNER_TEMP/nativeauth-proof/logs/fix-full-default.log" | tail -20 | tee -a "$RUNNER_TEMP/nativeauth-proof/summary.txt"
+          echo "[fix-full-default] exit=$code" | tee -a "$RUNNER_TEMP/nativeauth-proof/summary.txt"
+
+      - name: Summary
+        if: always()
+        run: cat "$RUNNER_TEMP/nativeauth-proof/summary.txt" || true
+
+      - name: Upload proof logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nativeauth-proof-${{ matrix.variant }}
+          path: ${{ runner.temp }}/nativeauth-proof
+          retention-days: 3

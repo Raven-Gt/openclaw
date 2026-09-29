@@ -1,0 +1,12 @@
+--- a/apps/macos/Tests/OpenClawIPCTests/ControlUIDocumentNativeAuthTests.swift	2026-09-28 18:07:38.530737579 -0700
++++ b/apps/macos/Tests/OpenClawIPCTests/ControlUIDocumentNativeAuthTests.swift	2026-09-28 18:07:38.614026058 -0700
+@@ -382,6 +382,9 @@
+                     seconds: 5, onTimeout: { URLError(.timedOut) },
+                     operation: { await retirementObserved.wait() })
+                 #expect(!oldCredentials.isCurrent())
++                // PROOF ONLY: another suite's catalog change, outside this test's identity scope.
++                let proofNotification = MacGatewayProfileStore.didChangeNotification
++                Task.detached { NotificationCenter.default.post(name: proofNotification, object: nil) }
+                 // This gate opens only when profile reconciliation installs the
+                 // new projection on its document, not merely when hello arrives.
+                 try await AsyncTimeout.withTimeout(
