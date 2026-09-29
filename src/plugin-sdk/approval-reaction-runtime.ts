@@ -230,7 +230,7 @@ function resolveApprovalReactionTargetInternal<TRoute>(params: {
     return null;
   }
   const resolvedKind =
-    approvalKind === "exec" || approvalKind === "plugin"
+    approvalKind === "exec" || approvalKind === "plugin" || approvalKind === "system-agent"
       ? approvalKind
       : params.allowLegacyKindInference
         ? approvalId.startsWith("plugin:")
