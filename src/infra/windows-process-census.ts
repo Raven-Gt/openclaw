@@ -22,7 +22,7 @@ function loadNative() {
   const open = kernel.func("void * __stdcall OpenProcess(uint32_t, int32_t, uint32_t)");
   const close = kernel.func("int32_t __stdcall CloseHandle(void *)");
   const error = kernel.func("uint32_t __stdcall GetLastError()");
-  const wait = kernel.func("uint32_t __stdcall WaitForSingleObject(void *, uint32_t)");
+  const exitCode = kernel.func("int32_t __stdcall GetExitCodeProcess(void *, void *)");
   const times = kernel.func(
     "int32_t __stdcall GetProcessTimes(void *, void *, void *, void *, void *)",
   );
@@ -32,27 +32,12 @@ function loadNative() {
   const query = nt.func(
     "int32_t __stdcall NtQueryInformationProcess(void *, uint32_t, void *, uint32_t, void *)",
   );
-  const current = kernel.func("void * __stdcall GetCurrentProcess()");
-  const openToken = security.func("int32_t __stdcall OpenProcessToken(void *, uint32_t, void *)");
-  const tokenInfo = security.func(
-    "int32_t __stdcall GetTokenInformation(void *, uint32_t, void *, uint32_t, void *)",
-  );
   const equalSid = security.func("int32_t __stdcall EqualSid(void *, void *)");
-  const user = (handle: bigint): Buffer | undefined => {
-    const token = Buffer.alloc(8);
-    if (!openToken(handle, 8, token)) {
-      return undefined;
-    }
-    try {
-      // TOKEN_USER plus SECURITY_MAX_SID_SIZE; the kernel points into this retained buffer.
-      const info = Buffer.alloc(16 + 68);
-      return tokenInfo(token.readBigUInt64LE(), 1, info, info.length, Buffer.alloc(4))
-        ? info
-        : undefined;
-    } finally {
-      close(token.readBigUInt64LE());
-    }
-  };
+  const sessions = koffi.load("wtsapi32.dll");
+  const owners = sessions.func(
+    "int32_t __stdcall WTSEnumerateProcessesW(void *, uint32_t, uint32_t, void *, void *)",
+  );
+  const free = sessions.func("void __stdcall WTSFreeMemory(void *)");
   const memory = (handle: bigint, address: bigint, length: number): Buffer => {
     const bytes = Buffer.alloc(length);
     const returned = Buffer.alloc(8);
@@ -103,7 +88,6 @@ function loadNative() {
     observation.cwd = string(narrow ? 36 : 56);
   };
   return (deadline: number): WindowsProcessObservation[] => {
-    const currentUser = user(current());
     const bytes = Buffer.alloc(4 * 65_536);
     const returned = Buffer.alloc(4);
     if (
@@ -114,59 +98,74 @@ function loadNative() {
       throw new Error("Windows process enumeration is incomplete.");
     }
     const pids = new Uint32Array(bytes.buffer, bytes.byteOffset, returned.readUInt32LE() / 4);
-    const observations = Array.from(pids, (pid): WindowsProcessObservation | undefined => {
+    const snapshot = new Map<number, bigint>(Array.from(pids, (pid) => [pid, 0n]));
+    const allocation = Buffer.alloc(8);
+    try {
+      try {
+        // WTS returns PID/SID pairs even for CSRSS; kernel-only rows remain owner-unknown.
+        if (owners(null, 0, 1, allocation, returned) && returned.readUInt32LE() <= 65_536) {
+          const records = Buffer.from(
+            koffi.decode(allocation.readBigUInt64LE(), "uint8_t", returned.readUInt32LE() * 24),
+          );
+          for (let offset = 0; offset < records.length; offset += 24) {
+            snapshot.set(records.readUInt32LE(offset + 4), records.readBigUInt64LE(offset + 16));
+          }
+        }
+      } catch {
+        snapshot.forEach((_sid, pid) => snapshot.set(pid, 0n));
+      }
+      const self = snapshot.get(process.pid);
+      const observations = Array.from(snapshot, ([pid, owner]) => {
+        if (Date.now() >= deadline) {
+          throw new Error("Windows process census exceeded its deadline.");
+        }
+        if (pid === 0 || pid === 4) {
+          // Idle/System have no user-mode argv/cwd.
+          return undefined;
+        }
+        const observation: WindowsProcessObservation = { pid };
+        if (self && owner && !equalSid(self, owner)) {
+          observation.foreignOwner = true;
+        }
+        const handle: bigint | null =
+          open(0x0410, 0, pid) ?? (error() === 87 ? null : open(0x1000, 0, pid));
+        if (!handle) {
+          return error() === 87 ? undefined : observation;
+        }
+        try {
+          const state = Buffer.alloc(4);
+          const known = exitCode(handle, state);
+          if (!known || state.readUInt32LE() !== 259) {
+            return known ? undefined : observation;
+          }
+          const created = Buffer.alloc(8);
+          if (
+            times(handle, created, Buffer.alloc(8), Buffer.alloc(8), Buffer.alloc(8)) &&
+            created.readBigUInt64LE()
+          ) {
+            observation.startIdentity = String(
+              Number(created.readBigUInt64LE() / 10000n - 11644473600000n),
+            );
+          }
+          try {
+            parameters(handle, observation);
+          } catch {
+            // Missing argv/cwd stays unknown unless the owner is verified foreign.
+          }
+        } finally {
+          close(handle);
+        }
+        return observation;
+      });
       if (Date.now() >= deadline) {
         throw new Error("Windows process census exceeded its deadline.");
       }
-      if (pid === 0 || pid === 4) {
-        // Idle/System have no user-mode argv/cwd.
-        return undefined;
+      return observations.filter((observation) => observation !== undefined);
+    } finally {
+      if (allocation.readBigUInt64LE()) {
+        free(allocation.readBigUInt64LE());
       }
-      // The handle pins identity for creation time, argv, cwd and owner reads.
-      let handle: bigint | null = open(0x0010_0410, 0, pid);
-      if (!handle && error() !== 87) {
-        handle = open(0x0010_1000, 0, pid);
-      }
-      if (!handle) {
-        return error() === 87 ? undefined : { pid };
-      }
-      const observation: WindowsProcessObservation = { pid };
-      try {
-        const state = wait(handle, 0);
-        if (state !== 258) {
-          return state === 0 ? undefined : observation;
-        }
-        const created = Buffer.alloc(8);
-        if (
-          times(handle, created, Buffer.alloc(8), Buffer.alloc(8), Buffer.alloc(8)) &&
-          created.readBigUInt64LE()
-        ) {
-          observation.startIdentity = String(
-            Number(created.readBigUInt64LE() / 10000n - 11644473600000n),
-          );
-        }
-        try {
-          parameters(handle, observation);
-        } catch {
-          // Partial inspection remains unknown; verified foreign work can still be excluded.
-        }
-        const owner = !observation.commandLine || !observation.cwd ? user(handle) : undefined;
-        if (
-          currentUser &&
-          owner &&
-          !equalSid(currentUser.readBigUInt64LE(), owner.readBigUInt64LE())
-        ) {
-          observation.foreignOwner = true;
-        }
-      } finally {
-        close(handle);
-      }
-      return observation;
-    });
-    if (Date.now() >= deadline) {
-      throw new Error("Windows process census exceeded its deadline.");
     }
-    return observations.filter((observation) => observation !== undefined);
   };
 }
 

@@ -39,8 +39,10 @@ function readLinuxProcessUid(pid: number): number | undefined {
         ? /^Uid:[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\d+)[ \t]*$/.exec(lines[0]!)
         : null;
     const ids = fields?.slice(1).map(Number);
+    const inspectorUid = process.getuid?.();
+    // Any matching credential UID denotes our account; otherwise retain the real UID.
     return ids?.every((uid) => Number.isSafeInteger(uid) && uid <= 0xffff_ffff)
-      ? ids[0]
+      ? (ids.find((uid) => uid === inspectorUid) ?? ids[0])
       : undefined;
   } catch {
     return undefined;

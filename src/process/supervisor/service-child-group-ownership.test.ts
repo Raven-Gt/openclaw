@@ -187,7 +187,7 @@ it.each([
   { status: "Uid:\t1000\t1000\t1000\n", uid: undefined },
   { status: "Uid:\t4294967296\t0\t0\t0\n", uid: undefined },
   { status: "Name:\tworker\n", uid: undefined },
-])("retains only an unambiguous Linux real UID ($uid)", ({ status, uid }) => {
+])("retains only valid Linux ownership UID evidence ($uid)", ({ status, uid }) => {
   identities.set(owner, status);
   const [observation] = readProcessGroupMembers(1_000, { readDarwinCommand: darwinCommand });
   expect(observation?.command?.uid).toBe(uid);
@@ -195,7 +195,7 @@ it.each([
 });
 
 it.each([1000, 2000, undefined])(
-  "keeps denied Linux arguments uncertain unless the real UID is positively foreign (%s)",
+  "keeps denied Linux arguments uncertain unless the credential UIDs are foreign (%s)",
   (uid) => {
     if (uid !== undefined) {
       identities.set(owner, `Uid:\t${uid}\t${uid}\t${uid}\t${uid}\n`);

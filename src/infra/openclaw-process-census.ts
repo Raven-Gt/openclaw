@@ -152,6 +152,9 @@ export function inspectOtherOpenClawProcesses(handoff?: HandoffReferences) {
             command.uid !== process.getuid?.());
         if (((!argv && observation?.commandLine === undefined) || cwd === undefined) && !foreign) {
           result.unverifiedPids.push(pid);
+          if (windows) {
+            result.error = "Retry update repair as Administrator using the same Windows account.";
+          }
         }
         continue;
       }
@@ -180,11 +183,9 @@ export function inspectOtherOpenClawProcesses(handoff?: HandoffReferences) {
       }
     }
   } catch (error) {
-    if (handoff) {
-      const pid = /Could not classify PID (\d+):/.exec(error instanceof Error ? error.message : "");
-      if (pid) {
-        result.unverifiedPids.push(Number(pid[1]));
-      }
+    const pid = /Could not classify PID (\d+):/.exec(error instanceof Error ? error.message : "");
+    if (handoff && pid) {
+      result.unverifiedPids.push(Number(pid[1]));
     }
     result.error = handoff
       ? "Host process census is incomplete; verify process-inspection permissions and retry update repair."

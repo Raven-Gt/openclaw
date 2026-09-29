@@ -77,9 +77,9 @@ beforeEach(() => {
     return cwd;
   });
   directory.mockReset().mockImplementation(() => Array.from(rows.keys(), String));
-  read.mockReset().mockImplementation((file: string) => {
+  read.mockReset().mockImplementation((input: string) => {
     // Native Windows path operations can add a drive and separators to these POSIX fixtures.
-    file = file.replaceAll("\\", "/").replace(/^[A-Za-z]:/, "");
+    const file = input.replaceAll("\\", "/").replace(/^[A-Za-z]:/, "");
     if (file.endsWith("/package.json")) {
       return JSON.stringify({
         name: file === "/app/package.json" ? "openclaw" : "unrelated-service",
@@ -95,7 +95,8 @@ beforeEach(() => {
       return row.environment ?? "";
     }
     if (match?.[2] === "status") {
-      return `Uid:\t${row.uid ?? 1000}\t1000\t1000\t1000\n`;
+      const uid = row.uid ?? 1000;
+      return `Uid:\t${uid}\t${uid}\t${uid}\t${uid}\n`;
     }
     if (match?.[2] === "cmdline" && row.commandError) {
       throw row.commandError;
@@ -379,6 +380,26 @@ it("names an unreadable same-user PID without exposing its process data", () => 
   expect(JSON.stringify(observed)).not.toContain("private-process-value");
 });
 
+it.each([
+  ["2000\t1000\t2000\t2000", false],
+  ["2000\t2000\t1000\t2000", false],
+  ["2000\t2000\t2000\t1000", false],
+  ["2000\t0\t2000\t0", true],
+] as const)(
+  "checks every Linux credential UID before excluding unreadable work (%s)",
+  (uids, foreign) => {
+    rows.set(peer, { ppid: 1, argv: ["node", "worker.js"], uid: 2000, cwd: denied() });
+    const readFile = read.getMockImplementation()!;
+    read.mockImplementation((file: string) =>
+      file === `/proc/${peer}/status` ? `Uid:\t${uids}\n` : readFile(file),
+    );
+    expect(inspectOtherOpenClawProcesses(references)).toEqual({
+      matchingPids: [],
+      unverifiedPids: foreign ? [] : [peer],
+    });
+  },
+);
+
 it.each(["container", "missing self", "deadline"])(
   "holds handoff recovery with %s observations",
   (failure) => {
@@ -447,6 +468,7 @@ it.each([100, 200, 300])(
         peer + 6,
       ],
       unverifiedPids: [peer + 2],
+      error: "Retry update repair as Administrator using the same Windows account.",
     });
   },
 );

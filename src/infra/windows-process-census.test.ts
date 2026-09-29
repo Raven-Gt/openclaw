@@ -2,20 +2,21 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 const native = vi.hoisted(() => ({
   K32EnumProcesses: vi.fn(),
+  WTSEnumerateProcessesW: vi.fn(),
+  WTSFreeMemory: vi.fn(),
+  decode: vi.fn(),
   OpenProcess: vi.fn(),
   CloseHandle: vi.fn(),
   GetLastError: vi.fn(),
-  WaitForSingleObject: vi.fn(),
+  GetExitCodeProcess: vi.fn(),
   GetProcessTimes: vi.fn(),
   NtQueryInformationProcess: vi.fn(),
   ReadProcessMemory: vi.fn(),
-  GetCurrentProcess: vi.fn(),
-  OpenProcessToken: vi.fn(),
-  GetTokenInformation: vi.fn(),
   EqualSid: vi.fn(),
 }));
 vi.mock("node:module", () => ({
   createRequire: () => () => ({
+    decode: native.decode,
     load: () => ({
       func: (signature: string) => {
         const binding = Object.entries(native).find(([name]) => signature.includes(`${name}(`));
@@ -29,28 +30,59 @@ vi.mock("node:module", () => ({
 }));
 import { readWindowsProcessCensus } from "./windows-process-census.js";
 
-const pid = 120;
+const pid = process.pid + 1;
 const handle = 12n;
 const memory = new Map<bigint, Buffer>();
+const owners = new Map<number, bigint>();
+const snapshotAddress = 0x9000n;
+const selfSid = 0x5000n;
+const systemSid = 0x6000n;
 let narrow = false;
+
+function peers() {
+  return readWindowsProcessCensus(1_000).filter((observation) => observation.pid !== process.pid);
+}
 
 beforeEach(() => {
   narrow = false;
   memory.clear();
+  owners.clear();
+  owners.set(0, 0n).set(4, 0n).set(pid, 0n).set(process.pid, selfSid);
+  native.WTSEnumerateProcessesW.mockReset().mockImplementation(
+    (_server, _reserved, _version, pointer: Buffer, count: Buffer) => {
+      const records = Buffer.alloc(owners.size * 24);
+      [...owners].forEach(([processId, sid], index) => {
+        records.writeUInt32LE(processId, index * 24 + 4);
+        records.writeBigUInt64LE(sid, index * 24 + 16);
+      });
+      memory.set(snapshotAddress, records);
+      pointer.writeBigUInt64LE(snapshotAddress);
+      count.writeUInt32LE(owners.size);
+      return 1;
+    },
+  );
+  native.WTSFreeMemory.mockReset();
+  native.decode.mockReset().mockImplementation((address: bigint, _type, length: number) => {
+    const records = memory.get(address);
+    if (!records || records.length < length) {
+      throw new Error("Snapshot is unreadable.");
+    }
+    return records.subarray(0, length);
+  });
   native.K32EnumProcesses.mockReset().mockImplementation(
     (bytes: Buffer, _size, returned: Buffer) => {
-      [0, 4, pid].forEach((value, index) => bytes.writeUInt32LE(value, index * 4));
-      returned.writeUInt32LE(12);
+      [0, 4, pid, process.pid].forEach((value, index) => bytes.writeUInt32LE(value, index * 4));
+      returned.writeUInt32LE(16);
       return 1;
     },
   );
   native.OpenProcess.mockReset().mockReturnValue(handle);
   native.CloseHandle.mockReset().mockReturnValue(1);
   native.GetLastError.mockReset().mockReturnValue(5);
-  native.WaitForSingleObject.mockReset().mockReturnValue(258);
-  native.GetCurrentProcess.mockReset().mockReturnValue(-1n);
-  native.OpenProcessToken.mockReset().mockReturnValue(0);
-  native.GetTokenInformation.mockReset().mockReturnValue(0);
+  native.GetExitCodeProcess.mockReset().mockImplementation((_handle, output: Buffer) => {
+    output.writeUInt32LE(259);
+    return 1;
+  });
   native.EqualSid.mockReset().mockImplementation((left, right) => Number(left === right));
   native.GetProcessTimes.mockReset().mockImplementation((_handle, creation: Buffer) => {
     creation.writeBigUInt64LE(133_700_000_000_000_001n);
@@ -114,7 +146,7 @@ it.each([false, true])(
   (wow64) => {
     narrow = wow64;
     processParameters();
-    expect([...readWindowsProcessCensus(1_000)]).toEqual([
+    expect(peers()).toEqual([
       {
         pid,
         parentPid: 100,
@@ -124,6 +156,7 @@ it.each([false, true])(
       },
     ]);
     expect(native.CloseHandle).toHaveBeenCalledWith(handle);
+    expect(native.WTSFreeMemory).toHaveBeenCalledExactlyOnceWith(snapshotAddress);
   },
 );
 
@@ -132,6 +165,7 @@ it.each([
   "denied memory",
   "short memory",
   "incomplete string",
+  "unknown exit status",
   "identity changed",
 ])("keeps %s observations unknown", (failure) => {
   processParameters();
@@ -143,6 +177,8 @@ it.each([
     memory.set(0x3000n, Buffer.from("x", "utf16le"));
   } else if (failure === "incomplete string") {
     memory.get(0x2000n)!.writeUInt16LE(1, 56);
+  } else if (failure === "unknown exit status") {
+    native.GetExitCodeProcess.mockReturnValue(0);
   } else {
     native.NtQueryInformationProcess.mockImplementation(
       (_handle, _kind, bytes: Buffer, _size, returned: Buffer) => {
@@ -152,39 +188,50 @@ it.each([
       },
     );
   }
-  const [observed] = readWindowsProcessCensus(1_000);
+  const [observed] = peers();
   expect(observed).toMatchObject({ pid });
   expect(observed?.cwd).toBeUndefined();
   expect(observed?.foreignOwner).toBeUndefined();
 });
 
-function processOwner(same: boolean) {
-  native.OpenProcessToken.mockImplementation((processHandle, _access, token: Buffer) => {
-    token.writeBigUInt64LE(processHandle === -1n ? 21n : 22n);
-    return 1;
-  });
-  native.GetTokenInformation.mockImplementation((token, _kind, output: Buffer) => {
-    output.writeBigUInt64LE(token === 21n || same ? 0x1000n : 0x2000n);
-    return 1;
-  });
-}
-
-it.each([false, true])(
-  "excludes opaque work only with a verified foreign SID (same owner=%s)",
-  (same) => {
-    processOwner(same);
-    native.OpenProcess.mockImplementation((access) => (access === 0x0010_1000 ? handle : null));
-    const [observed] = readWindowsProcessCensus(1_000);
-    expect(observed).toMatchObject({ pid, startIdentity: "1725526400000" });
-    expect(observed?.foreignOwner).toBe(same ? undefined : true);
+it.each(["SYSTEM", "same user", "missing SID", "WTS failure"])(
+  "retains only verified foreign ownership when all process handles are denied (%s)",
+  (owner) => {
+    owners.set(pid, owner === "same user" ? selfSid : systemSid);
+    if (owner === "missing SID") {
+      owners.set(pid, 0n);
+    } else if (owner === "WTS failure") {
+      native.WTSEnumerateProcessesW.mockReturnValue(0);
+    }
+    native.OpenProcess.mockReturnValue(null);
+    const [observed] = peers();
+    expect(observed).toMatchObject({ pid });
+    expect(observed?.commandLine).toBeUndefined();
+    expect(observed?.cwd).toBeUndefined();
+    expect(observed?.foreignOwner).toBe(owner === "SYSTEM" ? true : undefined);
   },
 );
 
+it("retains an unreadable PID omitted from the owner snapshot", () => {
+  owners.delete(pid);
+  native.OpenProcess.mockReturnValue(null);
+  expect(peers()).toEqual([{ pid }]);
+});
+
+it("releases an unreadable owner snapshot and retains unknown ownership", () => {
+  native.decode.mockImplementation(() => {
+    throw new Error("Snapshot is unreadable.");
+  });
+  native.OpenProcess.mockReturnValue(null);
+  expect(peers()).toEqual([{ pid }]);
+  expect(native.WTSFreeMemory).toHaveBeenCalledExactlyOnceWith(snapshotAddress);
+});
+
 it("preserves readable foreign argv when cwd inspection is denied", () => {
-  processOwner(false);
+  owners.set(pid, systemSid);
   processParameters();
   memory.delete(0x3000n);
-  expect([...readWindowsProcessCensus(1_000)]).toEqual([
+  expect(peers()).toEqual([
     {
       pid,
       parentPid: 100,
@@ -201,9 +248,12 @@ it.each(["absent", "exited"])("excludes a kernel-confirmed %s process", (state) 
     native.OpenProcess.mockReturnValue(null);
     native.GetLastError.mockReturnValue(87);
   } else {
-    native.WaitForSingleObject.mockReturnValue(0);
+    native.GetExitCodeProcess.mockImplementation((_handle, output: Buffer) => {
+      output.writeUInt32LE(0);
+      return 1;
+    });
   }
-  expect([...readWindowsProcessCensus(1_000)]).toEqual([]);
+  expect(peers()).toEqual([]);
 });
 
 it("rejects a truncated PID census instead of claiming the host is empty", () => {

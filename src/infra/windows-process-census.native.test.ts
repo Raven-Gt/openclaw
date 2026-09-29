@@ -49,10 +49,13 @@ it.runIf(process.platform === "win32")(
       expect(path.resolve(observed?.cwd ?? "").toLowerCase()).toBe(retained.toLowerCase());
       expect(observed?.foreignOwner).toBeUndefined();
       // The run ID is absent from argv: matching this child requires native cwd inspection.
-      expect(
-        inspectOtherOpenClawProcesses({ runId: "absent-fixture-run", artifactPaths: [retained] })
-          .matchingPids,
-      ).toContain(child.pid);
+      const census = inspectOtherOpenClawProcesses({
+        runId: "absent-fixture-run",
+        artifactPaths: [retained],
+      });
+      expect(census.matchingPids).toContain(child.pid);
+      expect(census.unverifiedPids).toEqual([]);
+      expect(census.error).toBeUndefined();
       child.send("exit");
       expect(await closed, stderr).toEqual([0, null]);
       expect(
