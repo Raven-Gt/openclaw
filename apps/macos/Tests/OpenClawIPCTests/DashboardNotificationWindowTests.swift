@@ -298,11 +298,8 @@ extension DashboardWindowOwnershipTests {
             }
             await gate.waitUntilRequested()
             manager.openOrFocusDashboard(for: action == "other-open" ? .primary : target)
-            let deadline = ContinuousClock.now + .seconds(5)
-            while manager._testController() == nil, manager._testAuxiliaryWindows().isEmpty,
-                  ContinuousClock.now < deadline
-            {
-                try await Task.sleep(for: .milliseconds(10))
+            try await DashboardTestWait.state("manual notification window admission") {
+                manager._testController() != nil || !manager._testAuxiliaryWindows().isEmpty
             }
             let opened = try #require(manager._testController() ?? manager._testAuxiliaryWindows().first?.controller)
             try await self.waitForDashboard(opened, path: "/")
@@ -376,11 +373,8 @@ extension DashboardWindowOwnershipTests {
                 throw error
             }
             await recoveryGate.release()
-            let deadline = ContinuousClock.now + .seconds(5)
-            while (window.windowController as? DashboardWindowController)?.pendingGatewaySwitch != nil,
-                  ContinuousClock.now < deadline
-            {
-                try await Task.sleep(for: .milliseconds(10))
+            try await DashboardTestWait.state("notification gateway recovery") {
+                (window.windowController as? DashboardWindowController)?.pendingGatewaySwitch == nil
             }
             let restored = try #require(window.windowController as? DashboardWindowController)
             #expect(manager._testController() === restored)
@@ -481,9 +475,8 @@ extension DashboardWindowOwnershipTests {
             do {
                 try writeConfig(url: nextURL, token: nextToken)
                 manager.dispatchNativeCommand(.commandPalette)
-                let deadline = ContinuousClock.now + .seconds(5)
-                while manager._testController() === original, ContinuousClock.now < deadline {
-                    try await Task.sleep(for: .milliseconds(10))
+                try await DashboardTestWait.state("notification controller replacement") {
+                    manager._testController() !== original
                 }
                 replacement = try #require(manager._testController())
                 try #require(replacement !== original)
@@ -548,17 +541,16 @@ extension DashboardWindowOwnershipTests {
     }
 
     private func waitForQueuedToggles(_ manager: DashboardManager) async throws -> DashboardWindowController {
-        let deadline = ContinuousClock.now + .seconds(5)
-        while ContinuousClock.now < deadline {
-            if let controller = manager._testController(), controller.isWindowOpen,
-               let commands = try? await controller.webView.evaluateJavaScript("window.commandEvents") as? [String],
-               commands.filter({ $0 == "toggle" }).count == 2
-            {
-                return controller
-            }
-            try await Task.sleep(for: .milliseconds(10))
+        var reopened: DashboardWindowController?
+        try await DashboardTestWait.state("queued notification toggles") {
+            guard let controller = manager._testController(), controller.isWindowOpen,
+                  let commands = try? await controller.webView.evaluateJavaScript("window.commandEvents") as? [String],
+                  commands.filter({ $0 == "toggle" }).count == 2
+            else { return false }
+            reopened = controller
+            return true
         }
-        throw URLError(.timedOut)
+        return try #require(reopened)
     }
 
     private func completion() throws -> DashboardBackgroundSessionCompletion {
@@ -568,16 +560,8 @@ extension DashboardWindowOwnershipTests {
     }
 
     private func waitForDashboard(_ controller: DashboardWindowController, path: String) async throws {
-        let deadline = ContinuousClock.now + .seconds(5)
-        // Check readiness even when the main actor resumes after the deadline.
-        while !controller.canDeliverNativeCommands || controller.webView.isLoading ||
-            controller.webView.url?.path != path,
-            ContinuousClock.now < deadline
-        {
-            try await Task.sleep(for: .milliseconds(10))
+        try await DashboardTestWait.document(controller, "dashboard at \(path)") {
+            controller.webView.url?.path == path
         }
-        try #require(controller.canDeliverNativeCommands)
-        try #require(!controller.webView.isLoading)
-        try #require(controller.webView.url?.path == path)
     }
 }
