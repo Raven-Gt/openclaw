@@ -308,7 +308,6 @@ export function captureUpdateRecoveryBaseline(params: {
       await createPrivateSqliteDirectory(path.join(directory, "payload"));
       requireDirectorySync(await syncDirectory(store), "Original update capture root");
       assertCurrent();
-      const declaredDatabaseCandidates = new Set([...forcedSqlite, ...files.keys()]);
       const databases = await createUpdateDatabaseBackup({
         backupRoot: path.join(directory, "database"),
         stateDir,
@@ -333,15 +332,6 @@ export function captureUpdateRecoveryBaseline(params: {
       const databaseOwners = databases.databaseOwners;
       if (!databaseOwners) {
         throw new Error("Original update database ownership inventory is unavailable.");
-      }
-      if (
-        [...databasePaths].some(
-          (pathname) =>
-            !declaredDatabaseCandidates.has(pathname) &&
-            !databaseOwners.some((owner) => owner.path === pathname),
-        )
-      ) {
-        throw new Error("Original update database inventory contains an unknown owner.");
       }
       for (const pathname of [...databases.sourcePaths, ...databasePaths]) {
         const canonical = canonicalEntryPath(pathname);

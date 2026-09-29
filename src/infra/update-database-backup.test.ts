@@ -88,8 +88,8 @@ it.each(["", "-wal", "-shm", "-journal"])(
   },
 );
 
-async function originalCaptureFixture() {
-  const f = await fixture();
+async function originalCaptureFixture(externalAgents = false) {
+  const f = await fixture(externalAgents);
   const configPath = path.join(f.stateDir, "openclaw.json");
   const authoredConfig = path.join(f.stateDir, "authored.json5");
   const include = path.join(f.stateDir, "settings.json5");
@@ -191,7 +191,8 @@ async function originalCaptureFixture() {
 }
 
 it("seals original bytes and declared resources without changing the SQLite source family", async () => {
-  const f = await originalCaptureFixture();
+  const f = await originalCaptureFixture(true);
+  const externalBytes = await Promise.all(f.external.map((source) => fs.readFile(source)));
   const result = await f.captureOriginal("original");
   const raw = await fs.readFile(result.ref.manifestPath, "utf8");
   const { parseUpdateRecoveryBackupManifest } =
@@ -209,23 +210,33 @@ it("seals original bytes and declared resources without changing the SQLite sour
     expect(await fs.readFile(payload(source))).toEqual(bytes);
     expect(await fs.readFile(source)).toEqual(bytes);
   }
-  for (const source of [f.shared, f.pluginDatabase]) {
+  for (const source of [f.shared, f.pluginDatabase, ...f.external]) {
     expect(entries.get(source)).toMatchObject({ kind: "file", sqlite: true });
     const snapshot = new DatabaseSync(payload(source), { readOnly: true });
     try {
       expect(snapshot.prepare("SELECT rowid,value FROM payload").all()).toEqual([
-        { rowid: 42, value: "retained" },
+        {
+          rowid: 42,
+          value: f.external.includes(source) ? path.basename(path.dirname(source)) : "retained",
+        },
       ]);
       if (source === f.shared) {
         expect(snapshot.prepare("SELECT rowid,token FROM state_leases").all()).toEqual([
           { rowid: 87, token: "original-lease" },
         ]);
       }
+      if (f.external.includes(source)) {
+        expect(snapshot.prepare("SELECT agent_id FROM schema_meta").get()).toEqual({
+          agent_id: "main",
+        });
+      }
     } finally {
       snapshot.close();
     }
   }
   expect(await Promise.all(f.familyPaths.map((file) => fs.readFile(file)))).toEqual(f.family);
+  expect(await Promise.all(f.external.map((source) => fs.readFile(source)))).toEqual(externalBytes);
+  expect(manifest.databases?.filter((database) => f.external.includes(database.path))).toEqual([]);
   expect(manifest.configPaths).toEqual(
     expect.arrayContaining([f.configPath, f.authoredConfig, f.include]),
   );

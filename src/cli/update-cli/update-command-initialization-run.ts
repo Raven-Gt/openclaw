@@ -4,9 +4,11 @@ import { resolvePathViaExistingAncestorSync } from "../../infra/boundary-path.js
 import { formatErrorMessage } from "../../infra/errors.js";
 import { canResolveRegistryVersionForPackageTarget } from "../../infra/update-global.js";
 import { readUpdateRunDriver } from "../../infra/update-run-driver.js";
+import { updateRunStepsFromResultStep } from "../../infra/update-run-step.js";
 import { DEFAULT_UPDATE_STEP_TIMEOUT_MS } from "../../infra/update-run-timeouts.js";
 import { redactSupportString } from "../../logging/diagnostic-support-redaction.js";
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
+import { resolveDebugProxySettings } from "../../proxy-capture/env.js";
 import { defaultRuntime } from "../../runtime.js";
 import { OPENCLAW_STATE_SCHEMA_VERSION } from "../../state/openclaw-state-db-contract.js";
 import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.paths.js";
@@ -96,6 +98,11 @@ export async function initializeAndRunUpdate(
                 executor,
                 registerRun: async (run) => {
                   registerRun(run);
+                  for (const result of target.preflightSteps ?? []) {
+                    for (const step of updateRunStepsFromResultStep(result)) {
+                      recordUpdateCommandTarget(run, { step });
+                    }
+                  }
                   if (target.inspectionWarning) {
                     recordUpdateCommandTarget(run, {
                       step: {
@@ -207,6 +214,12 @@ export async function initializeAndRunUpdate(
                     throw error;
                   }
                   warn(`Original state capture is unavailable: ${formatErrorMessage(error)}`);
+                }
+                assertCurrent();
+                if (resolveDebugProxySettings(env).enabled) {
+                  warn(
+                    "Debug HTTP capture is disabled in this updater process. Doctor may enable capture in its own process after schema readiness is confirmed.",
+                  );
                 }
               };
               const runCapturedInitialization = async () => {

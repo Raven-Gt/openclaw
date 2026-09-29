@@ -29,13 +29,14 @@ import {
   type ResolvedGlobalInstallTarget,
 } from "../../infra/update-global.js";
 import { createUpdatePreflightFailure } from "../../infra/update-preflight-details.js";
-import { updateRunStepsFromResultStep } from "../../infra/update-run-step.js";
+import { isFailedUpdateStep, updateRunStepsFromResultStep } from "../../infra/update-run-step.js";
 import {
   describeUpdateInstallRoot,
   resolveUnmanagedUpdateInstallReason,
   resolveUpdateInstallSurface,
 } from "../../infra/update-runner-install-surface.js";
 import type { UpdateRunResult } from "../../infra/update-runner-types.js";
+import type { UpdateStepResult } from "../../infra/update-step-result.js";
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { withCommandProcessScope } from "../../process/exec-spawn.js";
 import { runCommandWithTimeout } from "../../process/exec.js";
@@ -160,6 +161,16 @@ export async function resolveUpdateCommandTarget(
       let root = discoveredRoot;
       let updateInstallKind = installKind;
       let packageManager: ResolvedGlobalInstallTarget["manager"] | undefined;
+      const preflightSteps: UpdateStepResult[] = [];
+      const recordPreflightStep = (result: UpdateStepResult) => {
+        if (!opts.run) {
+          preflightSteps.push(result);
+          return;
+        }
+        for (const step of updateRunStepsFromResultStep(result)) {
+          recordUpdateCommandTarget(opts.run, { step });
+        }
+      };
       const resolveMode = async (): Promise<UpdateRunResult["mode"]> => {
         if (updateInstallKind === "git") {
           return "git";
@@ -190,6 +201,14 @@ export async function resolveUpdateCommandTarget(
           message,
           failureFacts,
           recoverySteps,
+          ...(preflightSteps.length
+            ? {
+                stepResult: {
+                  steps: preflightSteps,
+                  failedStep: preflightSteps.findLast(isFailedUpdateStep),
+                },
+              }
+            : {}),
           opts,
           controlPlaneUpdateSentinelMeta,
         };
@@ -453,13 +472,14 @@ export async function resolveUpdateCommandTarget(
               defaultRuntime.log(theme.warn(diskWarning));
             }
             opts.run?.executorFence?.assertCurrent();
-            for (const step of updateRunStepsFromResultStep({
+            recordPreflightStep({
               name: "disk-space-preflight",
+              command: "disk-space-preflight",
+              cwd: root,
+              durationMs: 0,
               exitCode: 0,
               warnings: [diskWarning],
-            })) {
-              recordUpdateCommandTarget(opts.run, { step });
-            }
+            });
           }
           const npmLifecycleGate = resolveNpmLifecyclePolicyGate(packageInstallTarget);
           if (npmLifecycleGate.error) {
@@ -598,9 +618,7 @@ export async function resolveUpdateCommandTarget(
           env,
         });
         opts.run?.executorFence?.assertCurrent();
-        for (const step of updateRunStepsFromResultStep(snapshot)) {
-          recordUpdateCommandTarget(opts.run, { step });
-        }
+        recordPreflightStep(snapshot);
         if (snapshot.exitCode !== 0) {
           await refuseUpdate("snapshot-capacity-insufficient", snapshot.stderrTail ?? undefined);
           return undefined;
@@ -617,6 +635,7 @@ export async function resolveUpdateCommandTarget(
       return {
         root,
         ...(inspectionWarning ? { inspectionWarning } : {}),
+        ...(preflightSteps.length ? { preflightSteps } : {}),
         mode: await resolveMode(),
         updateInstallKind,
         refuseUpdate,
