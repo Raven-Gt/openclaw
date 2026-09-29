@@ -132,8 +132,14 @@ admission. It rejects ambiguous participant identity; direct the model to
 guard, which the relay rechecks after awaited preparation immediately before allow;
 a returned reason becomes a model-visible refusal.
 The participant check uses existing native model admission, including its default
-optional mode. When native admission is disabled or unavailable, the thread disables
-native delegation; `sessions_spawn` remains available.
+optional mode. When native admission is disabled or unavailable, solo Codex turns
+keep native delegation, and another person's input queues as a follow-up instead of
+steering the active turn.
+
+Backend handles can declare `supportsCrossProfileSteering: false` when steering
+must stay with the turn owner's operator profile; omitting the field permits
+cross-profile steering. The reply admission owner applies this restriction before
+message injection, including question answers delivered through that path.
 
 For independently retained native work, call the optional
 `retainSourceAuthority()` while the host capability is active. When an operator

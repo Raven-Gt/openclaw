@@ -542,6 +542,9 @@ export function activateCodexAttemptTurn(
     runId: params.runId,
     startedAtMs: params.startedAtMs,
     toolAuthorityFingerprint: params.toolAuthorityFingerprint,
+    supportsCrossProfileSteering:
+      params.pluginHarnessToolPolicyRestricted === true ||
+      resourceState.nativeSpawnAdmissionInstalled,
     permissionChangeOwner: params.permissionChange?.owner,
     applyPermissionMode: async (
       mode: NonNullable<typeof params.permissionMode> | null,

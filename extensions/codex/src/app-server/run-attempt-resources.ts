@@ -34,7 +34,6 @@ import { createNativeSubagentAssignmentStore } from "./native-subagent-assignmen
 import { createCodexNativeSubagentHistoryOwner } from "./native-subagent-history-owner.js";
 import { codexNativeSubagentMonitorRuntime } from "./native-subagent-monitor.js";
 import type { CodexNativeSubagentSubmissionStore } from "./native-subagent-submission.js";
-import { mergeCodexThreadConfigs } from "./plugin-thread-config.js";
 import type { CodexSandboxPolicy, CodexTurnEnvironmentParams } from "./protocol.js";
 import { emitCodexAppServerEvent } from "./run-attempt-lifecycle.js";
 import type { CodexAttemptPrompt } from "./run-attempt-prompt.js";
@@ -57,7 +56,6 @@ import {
   isSameCodexAppServerThreadOwner,
   retainCodexAppServerBindingSubscription,
 } from "./thread-ownership.js";
-import { CODEX_DELEGATION_DISABLED_THREAD_CONFIG } from "./thread-requests.js";
 import { createCodexTrajectoryRecorder } from "./trajectory.js";
 import type { CodexAppServerTurnRouter, CodexThreadRouteReservation } from "./turn-router.js";
 
@@ -126,6 +124,7 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
     detachRouteAbort: (() => undefined) as () => void,
     trajectoryEndRecorded: false,
     nativeHookRelay: undefined as CodexNativeHookRelay | undefined,
+    nativeSpawnAdmissionInstalled: false,
     nativeSubagentMonitor: undefined as
       | Awaited<ReturnType<typeof codexNativeSubagentMonitorRuntime.register>>
       | undefined,
@@ -519,6 +518,7 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
   const buildNativeHookRelayFinalConfigPatch = async (
     decision: CodexThreadFinalConfigPatchDecision,
   ) => {
+    state.nativeSpawnAdmissionInstalled = false;
     const previousRelay = state.nativeHookRelay;
     previousRelay?.unregister();
     await previousRelay?.drain();
@@ -597,21 +597,26 @@ export function prepareCodexAttemptResources(prompt: CodexAttemptPrompt) {
     });
     await state.nativeHookRelay?.prepareInvocation();
     connection.assertCurrent();
+    state.nativeSpawnAdmissionInstalled = Boolean(
+      state.nativeHookRelay &&
+      requiresModelAdmission &&
+      decision.nativeModelInputTools?.includes("spawn_agent") &&
+      params.hostCapabilities.assertNativeSubagentSpawnAllowed,
+    );
+    if (!state.nativeSpawnAdmissionInstalled) {
+      // A prior backend attempt may already have accepted another participant.
+      params.hostCapabilities.assertNativeSubagentSpawnAllowed?.();
+    }
     return {
-      configPatch: mergeCodexThreadConfigs(
-        state.nativeHookRelay
-          ? buildCodexNativeHookRelayConfig({
-              relay: state.nativeHookRelay,
-              events: relayEvents,
-              hookTimeoutSec: options.nativeHookRelay?.hookTimeoutSec,
-            })
-          : options.nativeHookRelay?.enabled === false
-            ? buildCodexNativeHookRelayDisabledConfig()
-            : undefined,
-        params.hostCapabilities.assertNativeSubagentSpawnAllowed && !requiresModelAdmission
-          ? CODEX_DELEGATION_DISABLED_THREAD_CONFIG
+      configPatch: state.nativeHookRelay
+        ? buildCodexNativeHookRelayConfig({
+            relay: state.nativeHookRelay,
+            events: relayEvents,
+            hookTimeoutSec: options.nativeHookRelay?.hookTimeoutSec,
+          })
+        : options.nativeHookRelay?.enabled === false
+          ? buildCodexNativeHookRelayDisabledConfig()
           : undefined,
-      ),
       nativeHookRelayGeneration: state.nativeHookRelay?.generation,
     };
   };
