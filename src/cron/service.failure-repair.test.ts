@@ -1,5 +1,7 @@
 // Owner-conversation repair replaces the first failure alert of a streak.
+import { setImmediate } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../test/helpers/promise.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import {
   createTelegramDelivery,
@@ -31,6 +33,27 @@ function withRepair(
     { scheduler: createTestGatewayScheduler(), failureAlert, startCronFailureRepair },
     run,
   );
+}
+
+async function restartCron(storePath: string, startCronFailureRepair: StartRepair) {
+  const sendCronFailureAlert = vi.fn<
+    NonNullable<ConstructorParameters<typeof CronService>[0]["sendCronFailureAlert"]>
+  >(async () => undefined);
+  const restarted = new CronService({
+    scheduler: createTestGatewayScheduler(),
+    nowMs: () => Date.now(),
+    storePath,
+    cronEnabled: true,
+    cronConfig: { failureAlert: { enabled: true } },
+    log: createNoopLogger(),
+    enqueueSystemEvent: vi.fn(),
+    requestHeartbeat: vi.fn(),
+    runIsolatedAgentJob: vi.fn(async () => ({ status: "error" as const, error: "boom" })),
+    sendCronFailureAlert,
+    startCronFailureRepair,
+  });
+  await restarted.start();
+  return { restarted, sendCronFailureAlert };
 }
 
 describe("CronService failure repair", () => {
@@ -69,7 +92,7 @@ describe("CronService failure repair", () => {
   });
 
   it("holds failures while the repair is still running, then alerts after its window", async () => {
-    const startRepair = vi.fn<StartRepair>(() => Promise.withResolvers<"completed">().promise);
+    const startRepair = vi.fn<StartRepair>(() => createDeferred<"completed">().promise);
     await withRepair(startRepair, async ({ cron, sendCronFailureAlert, addJob }) => {
       const job = await addJob("stuck sync", owned);
       await cron.run(job.id, "force");
@@ -129,7 +152,7 @@ describe("CronService failure repair", () => {
   });
 
   it("drops the fallback alert when the job was disabled while the repair ran", async () => {
-    const pending = Promise.withResolvers<"failed">();
+    const pending = createDeferred<"failed">();
     const startRepair = vi.fn<StartRepair>(() => pending.promise);
     await withRepair(startRepair, async ({ cron, sendCronFailureAlert, addJob }) => {
       const job = await addJob("disabled mid-repair", owned);
@@ -155,7 +178,7 @@ describe("CronService failure repair", () => {
       const startRepair = vi.fn<StartRepair>(() =>
         outcome === "completed"
           ? Promise.resolve("completed")
-          : Promise.withResolvers<"completed">().promise,
+          : createDeferred<"completed">().promise,
       );
       await withRepair(startRepair, async ({ cron, storePath, addJob }) => {
         const job = await addJob("restart sync", owned);
@@ -171,23 +194,7 @@ describe("CronService failure repair", () => {
         await cron.run(job.id, "force");
         cron.stop();
 
-        const sendCronFailureAlert = vi.fn<
-          NonNullable<ConstructorParameters<typeof CronService>[0]["sendCronFailureAlert"]>
-        >(async () => undefined);
-        const restarted = new CronService({
-          scheduler: createTestGatewayScheduler(),
-          nowMs: () => Date.now(),
-          storePath,
-          cronEnabled: true,
-          cronConfig: { failureAlert: { enabled: true } },
-          log: createNoopLogger(),
-          enqueueSystemEvent: vi.fn(),
-          requestHeartbeat: vi.fn(),
-          runIsolatedAgentJob: vi.fn(async () => ({ status: "error" as const, error: "boom" })),
-          sendCronFailureAlert,
-          startCronFailureRepair: startRepair,
-        });
-        await restarted.start();
+        const { restarted, sendCronFailureAlert } = await restartCron(storePath, startRepair);
         try {
           expect(sendCronFailureAlert).toHaveBeenCalledTimes(alerts);
           if (alerts) {
@@ -200,6 +207,35 @@ describe("CronService failure repair", () => {
       });
     },
   );
+
+  it("leaves a repair that fails after stop to the restarted service's one alert", async () => {
+    const pending = createDeferred<"failed">();
+    const startRepair = vi.fn<StartRepair>(() => pending.promise);
+    await withRepair(startRepair, async ({ cron, storePath, addJob, sendCronFailureAlert }) => {
+      const job = await addJob("late failure sync", owned);
+      await cron.run(job.id, "force");
+      await cron.run(job.id, "force");
+      expect(startRepair).toHaveBeenCalledOnce();
+      cron.stop();
+
+      const restarted = await restartCron(storePath, startRepair);
+      try {
+        expect(restarted.sendCronFailureAlert).toHaveBeenCalledOnce();
+        expectAlertTextContaining(
+          restarted.sendCronFailureAlert,
+          "interrupted by a Gateway restart",
+        );
+        // The retired service's repair fails only now; its fallback must not alert again.
+        pending.resolve("failed");
+        await pending.promise;
+        await setImmediate();
+        expect(sendCronFailureAlert).not.toHaveBeenCalled();
+        expect(restarted.sendCronFailureAlert).toHaveBeenCalledOnce();
+      } finally {
+        restarted.restarted.stop();
+      }
+    });
+  });
 
   it("upgrades v2026.9.6 rows through failure, repair, and silent settlement", async () => {
     // The v2026.9.6 row codec is identical to this head's (row-codec.ts differs only in an

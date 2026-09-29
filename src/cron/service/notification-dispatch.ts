@@ -164,11 +164,15 @@ function transportFailureRepair(
   };
   const fallBack = (reason: string) => {
     // A verification run can resolve the incident before a failing repair settles, and a
-    // job disabled meanwhile (by the user or the auto-disable notice) needs no alert.
+    // job disabled meanwhile (by the user or the auto-disable notice) needs no alert. A
+    // stopped or restarted service no longer owns it: startup reconciliation alerts once.
     const live = findLiveJob();
     if (
+      state.stopped ||
+      state.lifecycleGeneration !== cycle.lifecycleGeneration ||
       !live ||
       live.state.failureAlertIncident?.repair?.atMs !== repairAtMs ||
+      live.state.failureAlertIncident?.repair?.alerted ||
       !live.enabled ||
       live.state.autoDisabled
     ) {
