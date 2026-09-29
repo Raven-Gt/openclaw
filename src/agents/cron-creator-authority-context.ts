@@ -241,7 +241,7 @@ export function bindCronManagementGrant(runId: string | undefined) {
     !scope.active ||
     scope.signal.aborted ||
     scope.isCurrent?.() === false ||
-    (scope.managementEntitlement.source === "channel-owner" &&
+    (scope.managementEntitlement.source !== "control-ui-admin" &&
       !scope.managementEntitlement.isCurrent()) ||
     scope.runId !== runId ||
     !authority ||

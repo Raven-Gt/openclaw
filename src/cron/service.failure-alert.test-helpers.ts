@@ -1,7 +1,8 @@
 import { expect, vi } from "vitest";
 import { CronService } from "./service.js";
 import { setupCronServiceSuite } from "./service.test-harness.js";
-import type { CronJobCreate } from "./types.js";
+import { saveCronStore } from "./store.js";
+import type { CronJobCreate, CronStoredJob } from "./types.js";
 
 type CronServiceParams = ConstructorParameters<typeof CronService>[0];
 type RunIsolatedAgentJob = NonNullable<CronServiceParams["runIsolatedAgentJob"]>;
@@ -42,6 +43,8 @@ export function setupFailureAlertSuite() {
       runResult?: IsolatedAgentRunResult;
       useFallback?: boolean;
       startCronFailureRepair?: StartCronFailureRepair;
+      /** Rows written before the service starts, e.g. as an older release left them. */
+      seedJobs?: CronStoredJob[];
     },
     run: (context: {
       cron: CronService;
@@ -54,6 +57,9 @@ export function setupFailureAlertSuite() {
     }) => Promise<void>,
   ): Promise<void> {
     const store = await makeStorePath();
+    if (params.seedJobs) {
+      await saveCronStore(store.storePath, { version: 1, jobs: params.seedJobs });
+    }
     const sendCronFailureAlert = vi.fn<SendCronFailureAlert>(async () => undefined);
     const enqueueSystemEvent = vi.fn();
     const requestHeartbeat = vi.fn();

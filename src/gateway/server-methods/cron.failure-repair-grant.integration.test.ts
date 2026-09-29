@@ -89,6 +89,7 @@ describe("cron.update with a failure-repair grant", () => {
       validateAgentRuntimeApprovalAuthority: createAgentRuntimeApprovalAuthorityValidator(),
     });
 
+    let repairIsLive = true;
     const runId = "failure-repair-run";
     const operationalRunInstance = createOperationalRunInstanceRef(runId);
     const authority = claimAgentRunDelegatedAuthority(operationalRunInstance);
@@ -108,7 +109,7 @@ describe("cron.update with a failure-repair grant", () => {
       createCronCreatorAuthorityCapability(
         runId,
         { kind: "unknown" },
-        { source: "failure-repair", jobId: repaired.id },
+        { source: "failure-repair", jobId: repaired.id, isCurrent: () => repairIsLive },
         () => true,
       ),
       "repair capability",
@@ -173,6 +174,10 @@ describe("cron.update with a failure-repair grant", () => {
                 payload: { kind: "agentTurn", message: "sync with helper" },
               }),
             ).resolves.toMatchObject({ ok: true });
+
+            // Once the incident is resolved or escalated, the host ends the repair's liveness.
+            repairIsLive = false;
+            expect(() => management.mint("cron.update")).toThrow("no longer active");
           },
         ),
       );

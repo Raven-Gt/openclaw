@@ -33,7 +33,7 @@ const DEFAULT_FAILURE_ALERT_AFTER = 2;
 const DEFAULT_FAILURE_ALERT_COOLDOWN_MS = 60 * 60_000; // 1 hour
 /** Budget for one owner-conversation repair turn; the host aborts the turn after it. */
 export const CRON_FAILURE_REPAIR_TIMEOUT_MS = 10 * 60_000;
-// A repair owns its failure streak for this long; later failures alert, naming it.
+// An unsettled repair (still running, or lost to a crash) holds alerts at most this long.
 const FAILURE_REPAIR_SETTLE_WINDOW_MS = CRON_FAILURE_REPAIR_TIMEOUT_MS + 5 * 60_000;
 
 /** Returns the last failure-notification delivery trace persisted on a cron job. */
@@ -367,9 +367,14 @@ export function maybeEmitFailureAlert(
   const now = state.deps.nowMs();
   // A repair whose fallback alert was sent is `alerted` (recorded with the alert outcome).
   const repairFailed = repair !== undefined && !repair.alerted;
-  if (repairFailed && now >= repair.atMs && now - repair.atMs < FAILURE_REPAIR_SETTLE_WINDOW_MS) {
-    // Failures in the window, including the repair's own verification runs, belong
-    // to the turn in flight.
+  if (
+    repairFailed &&
+    !repair.settled &&
+    now >= repair.atMs &&
+    now - repair.atMs < FAILURE_REPAIR_SETTLE_WINDOW_MS
+  ) {
+    // While the turn may still be running, failures (including its own verification runs)
+    // belong to it. Once it settles, the next failure alerts immediately.
     return;
   }
   if (repairFailed) {
@@ -406,6 +411,7 @@ export function maybeEmitFailureAlert(
     params.status === "error" &&
     ownerSessionKey &&
     repairIncident &&
+    repairIncident.signature !== undefined &&
     repairAtMs !== undefined
   ) {
     repairIncident.repair = { atMs: repairAtMs };
@@ -416,6 +422,8 @@ export function maybeEmitFailureAlert(
         ownerSessionKey,
         consecutiveErrors: params.consecutiveCount,
         runAtMs: params.runAtMs,
+        incidentSignature: repairIncident.signature,
+        repairAtMs,
       },
       fallback: alert,
     });

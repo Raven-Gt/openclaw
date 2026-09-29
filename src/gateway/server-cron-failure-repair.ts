@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { wrapUntrustedPromptDataBlock } from "../agents/sanitize-for-prompt.js";
+import { AUTOMATIONS_TOOL_NAME } from "../agents/tools/automations-tool-name.js";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import type { CliDeps } from "../cli/deps.types.js";
 import { readSessionEntryInWorker } from "../config/sessions/session-entry-read-runtime.js";
@@ -27,6 +28,27 @@ const REPAIR_RUNS_MAX_CHARS = 4_000;
 
 type CronFailureRepairOutcome = "completed" | "unavailable" | "failed";
 
+/**
+ * The repair turn keeps the failing job's own effective tool cap (and its scheduled policy,
+ * exec pin, provenance, and runtime authority) plus only the automations tool, which the
+ * host grant limits to get/update/run of this job. Returns undefined for an unrestricted cap.
+ */
+function resolveRepairTurnToolsAllow(job: CronStoredJob): string[] | undefined {
+  const cap = "toolsAllow" in job.payload ? job.payload.toolsAllow : undefined;
+  return cap === undefined || cap.includes("*") ? cap : [...cap, AUTOMATIONS_TOOL_NAME];
+}
+
+/** Workspace edits need a file or shell tool; without one the repair can change only job text. */
+const WORKSPACE_EDIT_TOOLS = new Set([
+  "*",
+  "write",
+  "edit",
+  "apply_patch",
+  "exec",
+  "group:fs",
+  "group:runtime",
+]);
+
 /** The private, self-contained instructions the owner conversation's agent repairs from. */
 export function buildCronFailureRepairBrief(params: {
   job: CronStoredJob;
@@ -44,6 +66,8 @@ export function buildCronFailureRepairBrief(params: {
           ? payload.script
           : "";
   const toolsAllow = "toolsAllow" in payload ? payload.toolsAllow : undefined;
+  const canEditWorkspace =
+    toolsAllow === undefined || toolsAllow.some((tool) => WORKSPACE_EDIT_TOOLS.has(tool));
   const runLines = params.runs.flatMap((run) => {
     const detail = (run.error ?? run.summary)?.trim();
     return [
@@ -79,7 +103,15 @@ export function buildCronFailureRepairBrief(params: {
     "",
     "Diagnose the failure (inspect the workspace and the automation as needed), then do exactly one:",
     `1. Transient outage (provider, network, rate limit, or temporary upstream error; the job itself is fine): change nothing and reply exactly ${SILENT_REPLY_TOKEN}.`,
-    `2. Fixable job logic (wrong prompt, broken or missing workspace helper script, wrong tool or arguments, too much work per run): fix it durably for the next run. Edit the workspace helper script and/or update this automation's text with the automations tool (update jobId "${job.id}" with only payload.message for agentTurn, payload.script for script payloads, or trigger.script; tools, schedule, and delivery stay as they are). Verify the fix, for example run it with runMode "force" and read its state with get. Then reply with one short sentence saying what you fixed, or ${SILENT_REPLY_TOKEN}.`,
+    `2. Fixable job logic (wrong prompt, broken or missing workspace helper script, wrong tool or arguments, too much work per run): fix it durably for the next run. ${
+      canEditWorkspace
+        ? "Edit the workspace helper script and/or update"
+        : "This turn has the automation's own tools, which cannot edit workspace files, so you can only update"
+    } this automation's text with the automations tool (update jobId "${job.id}" with only payload.message for agentTurn, payload.script for script payloads, or trigger.script; tools, schedule, and delivery stay as they are).${
+      canEditWorkspace
+        ? ""
+        : " If the fix needs a helper script or other workspace change, treat it as case 3 and tell the user exactly what to change."
+    } Verify the fix, for example run it with runMode "force" and read its state with get. Then reply with one short sentence saying what you fixed, or ${SILENT_REPLY_TOKEN}.`,
     "3. Needs the user (expired or missing credentials, access only they can grant, a tool the job is not allowed to use, or a decision only they can make): leave the automation unchanged and tell the user concisely what is wrong and what they need to do.",
     `Your final reply is posted to this conversation as-is; ${SILENT_REPLY_TOKEN} keeps it silent. If the automation keeps failing after this turn, the user gets the normal failure alert.`,
   ].join("\n");
@@ -105,9 +137,23 @@ export async function runGatewayCronFailureRepair(params: {
     candidate.enabled !== false &&
     candidate.owner?.sessionKey?.trim() === ownerSessionKey &&
     !isOperatorCommandCronJob(candidate);
+  // The dispatch-time snapshot can predate the committed incident; the request carries it.
+  const { incidentSignature, repairAtMs } = request;
   if (!ownsJob(job)) {
     return "unavailable";
   }
+  // The grant lives only while the exact incident that started this repair is still open,
+  // unescalated, and owned: a success that clears it, a new incident, or an alert ends it.
+  const repairsIncident = (candidate: CronJob | undefined) => {
+    const live = candidate?.state.failureAlertIncident;
+    return (
+      ownsJob(candidate) &&
+      live !== undefined &&
+      live.signature === incidentSignature &&
+      live.repair?.atMs === repairAtMs &&
+      live.repair.alerted !== true
+    );
+  };
   let agent: { agentId: string; cfg: OpenClawConfig };
   try {
     agent = params.resolveCronAgent(
@@ -142,7 +188,8 @@ export async function runGatewayCronFailureRepair(params: {
   const deadlineMs = nowMs + CRON_FAILURE_REPAIR_TIMEOUT_MS;
   // A detached `current` turn in the owner conversation: its final visible reply is
   // committed there, NO_REPLY stays silent. It inherits the failing job's owner and
-  // restrict-only execution policy; toolsAllow covers workspace edits and the grant.
+  // execution envelope: its tool cap plus the job-scoped automations grant.
+  const repairToolsAllow = resolveRepairTurnToolsAllow(job);
   const repairJob: CronStoredJob = {
     id: randomUUID(),
     agentId: agent.agentId,
@@ -158,12 +205,17 @@ export async function runGatewayCronFailureRepair(params: {
       kind: "agentTurn",
       message,
       timeoutSeconds: Math.floor(CRON_FAILURE_REPAIR_TIMEOUT_MS / 1000),
-      toolsAllow: ["*"],
+      ...(repairToolsAllow ? { toolsAllow: repairToolsAllow } : {}),
     },
     ...(job.owner ? { owner: job.owner } : {}),
     ...(job.scheduledToolPolicy ? { scheduledToolPolicy: job.scheduledToolPolicy } : {}),
     ...(job.toolsAllowProvenance ? { toolsAllowProvenance: job.toolsAllowProvenance } : {}),
     ...(job.toolsAllowExecTarget ? { toolsAllowExecTarget: job.toolsAllowExecTarget } : {}),
+    ...(job.toolsAllowExecTargetRequirement
+      ? { toolsAllowExecTargetRequirement: job.toolsAllowExecTargetRequirement }
+      : {}),
+    ...(job.runtimeAuthority ? { runtimeAuthority: job.runtimeAuthority } : {}),
+    ...(job.runtimeAuthorityRecoveryRequired ? { runtimeAuthorityRecoveryRequired: true } : {}),
     state: { nextRunAtMs: nowMs },
   };
   try {
@@ -180,8 +232,12 @@ export async function runGatewayCronFailureRepair(params: {
             lane: "cron",
             abortSignal: AbortSignal.timeout(CRON_FAILURE_REPAIR_TIMEOUT_MS + 60_000),
             cronManagement: {
-              entitlement: { source: "failure-repair", jobId: job.id },
-              isCurrent: () => Date.now() < deadlineMs && ownsJob(params.getJob(job.id)),
+              entitlement: {
+                source: "failure-repair",
+                jobId: job.id,
+                isCurrent: () => repairsIncident(params.getJob(job.id)),
+              },
+              isCurrent: () => Date.now() < deadlineMs,
             },
           }),
         ),

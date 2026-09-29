@@ -48,6 +48,8 @@ scenario:
       fixedMessage: "Cron failure repair QA check: fixed step. Reply exactly `QA-CRON-REPAIR-JOB-OK`."
       jobMarker: QA-CRON-REPAIR-JOB-OK
       repairMarker: QA-CRON-REPAIR-FIXED
+      fencedMarker: QA-CRON-REPAIR-FENCED
+      repairInactiveText: "automation repair is no longer active"
       repairBriefNeedle: "Automation repair: private background turn started by the scheduler"
 
 flow:
@@ -110,6 +112,9 @@ flow:
                 kind: agentTurn
                 message:
                   ref: config.brokenMessage
+                # A cap without file or shell tools: the repair must inherit it, not widen it.
+                toolsAllow:
+                  - read
               delivery:
                 mode: announce
                 channel: qa-channel
@@ -189,6 +194,13 @@ flow:
         - set: repairActions
           value:
             expr: "(() => { const tool = (Array.isArray(repairRequests[0].body?.tools) ? repairRequests[0].body.tools : []).find((candidate) => candidate?.name === 'automations'); return (tool?.parameters ?? tool?.input_schema)?.properties?.action?.enum; })()"
+        - set: repairToolNames
+          value:
+            expr: "(Array.isArray(repairRequests[0].body?.tools) ? repairRequests[0].body.tools : []).map((tool) => tool?.name).filter(Boolean)"
+        - assert:
+            expr: "repairToolNames.includes('automations') && !repairToolNames.some((name) => ['exec', 'write', 'edit', 'apply_patch', 'process'].includes(name))"
+            message:
+              expr: "`repair turn widened the job's tool cap: ${JSON.stringify(repairToolNames)}`"
         - assert:
             expr: "JSON.stringify(repairActions) === JSON.stringify(['get', 'update', 'run'])"
             message:
@@ -196,12 +208,21 @@ flow:
         - set: repairPlans
           value:
             expr: "repairRequests.map((request) => request.plannedToolName === 'tool_call' ? request.plannedToolArgs?.args?.action : request.plannedToolArgs?.action).filter(Boolean)"
+        # Fix (update, run), poll with get until the verification run resolves the incident,
+        # then a further update and run from the same turn must be rejected.
         - assert:
-            expr: "repairRequests.length === 3 && JSON.stringify(repairPlans) === JSON.stringify(['update', 'run'])"
+            expr: "repairRequests.length === repairPlans.length + 1 && /^update,run(,get)+,update,run$/.test(repairPlans.join(','))"
             message:
               expr: "`expected one repair turn planning update then run, got ${JSON.stringify(repairRequests.map((request) => ({ tool: request.plannedToolName, args: request.plannedToolArgs, output: String(request.toolOutput ?? '').slice(0, 400) })))}`"
+        - set: fencedOutputs
+          value:
+            expr: "repairRequests.slice(-2).map((request) => String(request.toolOutput ?? ''))"
         - assert:
-            expr: "repairReplies.length === 1 && repairReplies[0].text.includes(config.repairMarker)"
+            expr: "fencedOutputs.length === 2 && fencedOutputs.every((output) => output.includes(config.repairInactiveText))"
+            message:
+              expr: "`update and run after the incident resolved were not rejected: ${JSON.stringify(fencedOutputs.map((output) => output.slice(0, 400)))}`"
+        - assert:
+            expr: "repairReplies.length === 1 && repairReplies[0].text.includes(config.repairMarker) && repairReplies[0].text.includes(config.fencedMarker)"
             message:
               expr: "`repair turn did not complete its fix: ${JSON.stringify(repairReplies.map((message) => message.text))}`"
         - call: waitForCronRunCompletion
@@ -258,7 +279,7 @@ flow:
             expr: "(ownerTranscript.probeTextEndLine ?? 0) > 0"
             message:
               expr: "`repair reply did not land in the owner transcript: ${JSON.stringify(ownerTranscript)}`"
-      detailsExpr: "`job=${jobId} failed=${JSON.stringify(failedRuns.map((run) => [run.status, run.error]))} plans=${repairPlans.join(',')} verified=${verifiedRun.status} payload=${JSON.stringify(repairedJob.payload.message)} transcriptLine=${ownerTranscript.probeTextEndLine} outbound=${JSON.stringify(outboundMessages.map((message) => [message.conversation.id, message.text]))}`"
+      detailsExpr: "`job=${jobId} failed=${JSON.stringify(failedRuns.map((run) => [run.status, run.error]))} plans=${repairPlans.join(',')} repairTools=${repairToolNames.join(',')} verified=${verifiedRun.status} payload=${JSON.stringify(repairedJob.payload.message)} transcriptLine=${ownerTranscript.probeTextEndLine} outbound=${JSON.stringify(outboundMessages.map((message) => [message.conversation.id, message.text]))}`"
 
     - name: an unowned job with the same failures still alerts
       actions:

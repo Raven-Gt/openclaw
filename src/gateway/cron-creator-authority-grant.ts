@@ -43,10 +43,11 @@ export type CronManagementEntitlement =
   | Readonly<{ source: "control-ui-admin" }>
   | Readonly<{ source: "channel-owner"; isCurrent: () => boolean }>
   /**
-   * Host-minted for one owner-conversation repair run. Its scope `isCurrent` owns liveness;
-   * it is never transferred to requester continuations.
+   * Host-minted for one owner-conversation repair run: live only while the incident that
+   * started the repair is open. Never transferred to requester continuations. Its liveness
+   * gates automation management only, not the rest of the repair run.
    */
-  | Readonly<{ source: "failure-repair"; jobId: string }>;
+  | Readonly<{ source: "failure-repair"; jobId: string; isCurrent: () => boolean }>;
 
 export type CronCreatorAuthorityRunScope = {
   readonly runId: string;
@@ -154,10 +155,15 @@ export function mintCronCreatorAuthorityGrant(
     operationSignal?.aborted ||
     scope.isCurrent?.() === false ||
     isCurrent?.() === false ||
-    (scope.managementEntitlement?.source === "channel-owner" &&
+    (scope.managementEntitlement !== undefined &&
+      scope.managementEntitlement.source !== "control-ui-admin" &&
       !scope.managementEntitlement.isCurrent())
   ) {
-    throw management ? expiredManagementError() : expiredAuthorityError();
+    throw management
+      ? scope.managementEntitlement?.source === "failure-repair"
+        ? inactiveFailureRepairError()
+        : expiredManagementError()
+      : expiredAuthorityError();
   }
   // Remote admission can prove the requester, never materialize fresh runtime authority.
   if (
@@ -339,6 +345,12 @@ export function consumeCronCreatorAuthorityGrant(
   return entry.runtimeAuthority ? cloneCronRuntimeAuthority(entry.runtimeAuthority) : undefined;
 }
 
+function inactiveFailureRepairError(): TypeError {
+  return new TypeError(
+    "This automation repair is no longer active: its failure was resolved, replaced by a new failure, or escalated to the user. Do not change the automation further.",
+  );
+}
+
 function expiredManagementError(): TypeError {
   return new TypeError(
     "Automation admin grant is missing, expired, or already used. Retry from a fresh authenticated configured channel owner or Control UI administrator turn, or use the Automations page.",
@@ -400,12 +412,15 @@ export async function withCronManagementGrant<T>(
       entry.scope.signal.aborted ||
       entry.operationSignal?.aborted ||
       entry.scope.isCurrent?.() === false ||
-      (entry.scope.managementEntitlement?.source === "channel-owner" &&
+      (entry.scope.managementEntitlement !== undefined &&
+        entry.scope.managementEntitlement.source !== "control-ui-admin" &&
         !entry.scope.managementEntitlement.isCurrent()) ||
       Date.now() >= management.expiresAtMs ||
       !validateAgentRunDelegatedAuthority(management.authority)
     ) {
-      throw expiredManagementError();
+      throw entry.scope.managementEntitlement?.source === "failure-repair"
+        ? inactiveFailureRepairError()
+        : expiredManagementError();
     }
   };
   assertActive();

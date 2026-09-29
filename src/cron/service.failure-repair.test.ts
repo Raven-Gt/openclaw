@@ -8,6 +8,8 @@ import {
 } from "./service.failure-alert.test-helpers.js";
 import { CronService } from "./service.js";
 import { createNoopLogger } from "./service.test-harness.js";
+import { loadCronStore } from "./store.js";
+import type { CronStoredJob } from "./types.js";
 
 const { withFailureAlertCron } = setupFailureAlertSuite();
 type AlertParams = Parameters<typeof withFailureAlertCron>;
@@ -32,7 +34,7 @@ function withRepair(
 }
 
 describe("CronService failure repair", () => {
-  it("repairs silently at the threshold, then alerts naming the repair if failures continue", async () => {
+  it("repairs silently at the threshold, then alerts on the next failure once the repair settles", async () => {
     const startRepair = vi.fn<StartRepair>(async () => "completed");
     await withRepair(startRepair, async ({ cron, sendCronFailureAlert, addJob }) => {
       const job = await addJob("gmail sync", owned);
@@ -50,12 +52,11 @@ describe("CronService failure repair", () => {
         job: { id: job.id },
       });
       expect(sendCronFailureAlert).not.toHaveBeenCalled();
+      await vi.waitFor(() =>
+        expect(cron.getJob(job.id)?.state.failureAlertIncident?.repair?.settled).toBe(true),
+      );
 
-      // Failures while the repair can still be running (its own verification runs) are held.
-      await cron.run(job.id, "force");
-      expect(sendCronFailureAlert).not.toHaveBeenCalled();
-
-      vi.setSystemTime(Date.now() + 16 * 60_000);
+      // A settled repair no longer holds alerts: no need to wait out the in-flight window.
       await cron.run(job.id, "force");
       expect(startRepair).toHaveBeenCalledOnce();
       expect(sendCronFailureAlert).toHaveBeenCalledOnce();
@@ -64,6 +65,24 @@ describe("CronService failure repair", () => {
       await cron.run(job.id, "force");
       expect(sendCronFailureAlert).toHaveBeenCalledOnce();
       expect(startRepair).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("holds failures while the repair is still running, then alerts after its window", async () => {
+    const startRepair = vi.fn<StartRepair>(() => Promise.withResolvers<"completed">().promise);
+    await withRepair(startRepair, async ({ cron, sendCronFailureAlert, addJob }) => {
+      const job = await addJob("stuck sync", owned);
+      await cron.run(job.id, "force");
+      await cron.run(job.id, "force");
+      // Failures while the repair can still be running (its own verification runs) are held.
+      await cron.run(job.id, "force");
+      expect(startRepair).toHaveBeenCalledOnce();
+      expect(sendCronFailureAlert).not.toHaveBeenCalled();
+
+      vi.setSystemTime(Date.now() + 16 * 60_000);
+      await cron.run(job.id, "force");
+      expect(sendCronFailureAlert).toHaveBeenCalledOnce();
+      expectAlertTextContaining(sendCronFailureAlert, "automatic repair was attempted");
     });
   });
 
@@ -181,4 +200,84 @@ describe("CronService failure repair", () => {
       });
     },
   );
+
+  it("upgrades v2026.9.6 rows through failure, repair, and silent settlement", async () => {
+    // The v2026.9.6 row codec is identical to this head's (row-codec.ts differs only in an
+    // export), so saveCronStore writes exactly the rows that release persisted. Its incident
+    // state had no repair marker; the second job is mid-incident after that release's alert.
+    const nowMs = Date.now();
+    const stableJob = (id: string, state: CronStoredJob["state"]): CronStoredJob => ({
+      id,
+      name: id,
+      enabled: true,
+      createdAtMs: nowMs - 86_400_000,
+      updatedAtMs: nowMs - 3_600_000,
+      schedule: { kind: "every", everyMs: 3_600_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "sync", toolsAllow: ["read"] },
+      delivery: createTelegramDelivery(),
+      owner: { agentId: "main", sessionKey: ownerSessionKey },
+      failureAlert: { after: 2, cooldownMs: 0 },
+      state,
+    });
+    const seedJobs = [
+      stableJob("fresh-stable", { lastRunStatus: "ok", consecutiveErrors: 0 }),
+      stableJob("alerted-stable", {
+        lastRunStatus: "error",
+        lastError: "temporary upstream error",
+        consecutiveErrors: 2,
+        lastFailureAlertAtMs: nowMs - 600_000,
+        lastFailureNotificationDeliveryStatus: "delivered",
+        lastFailureNotificationDelivered: true,
+        failureAlertIncident: { signature: "v2026.9.6-incident", scope: "run" },
+      }),
+    ];
+    const startRepair = vi.fn<StartRepair>(async () => "completed");
+    await withFailureAlertCron(
+      {
+        scheduler: createTestGatewayScheduler(),
+        failureAlert: { enabled: true },
+        startCronFailureRepair: startRepair,
+        seedJobs,
+      },
+      async ({ cron, storePath, sendCronFailureAlert, runIsolatedAgentJob }) => {
+        const legacy = (await loadCronStore(storePath)).jobs.find(
+          (job) => job.id === "alerted-stable",
+        );
+        expect(legacy?.state.failureAlertIncident).toEqual({
+          signature: "v2026.9.6-incident",
+          scope: "run",
+        });
+
+        await cron.run("fresh-stable", "force");
+        await cron.run("fresh-stable", "force");
+        expect(startRepair).toHaveBeenCalledOnce();
+        expect(startRepair.mock.calls[0]?.[0].jobId).toBe("fresh-stable");
+        expect(sendCronFailureAlert).not.toHaveBeenCalled();
+        await vi.waitFor(() =>
+          expect(cron.getJob("fresh-stable")?.state.failureAlertIncident?.repair?.settled).toBe(
+            true,
+          ),
+        );
+
+        // The legacy incident's next failure is a new cause for this head: one repair, no alert.
+        await cron.run("alerted-stable", "force");
+        expect(startRepair).toHaveBeenCalledTimes(2);
+        expect(startRepair.mock.calls[1]?.[0].jobId).toBe("alerted-stable");
+        expect(sendCronFailureAlert).not.toHaveBeenCalled();
+
+        runIsolatedAgentJob.mockResolvedValueOnce({ status: "ok", delivered: true });
+        await cron.run("fresh-stable", "force");
+        expect(cron.getJob("fresh-stable")?.state.failureAlertIncident).toBeUndefined();
+        expect(sendCronFailureAlert.mock.calls.map((call) => call[0].job.id)).not.toContain(
+          "fresh-stable",
+        );
+        const persisted = (await loadCronStore(storePath)).jobs.find(
+          (job) => job.id === "fresh-stable",
+        );
+        expect(persisted?.state.failureAlertIncident).toBeUndefined();
+      },
+    );
+  });
 });

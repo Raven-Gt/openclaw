@@ -59,6 +59,9 @@ export type CronFailureRepairRequest = {
   ownerSessionKey: string;
   consecutiveErrors: number;
   runAtMs?: number;
+  /** The incident this repair belongs to; its grant ends when the incident does. */
+  incidentSignature: string;
+  repairAtMs: number;
 };
 
 export type CronNotificationIntent =
