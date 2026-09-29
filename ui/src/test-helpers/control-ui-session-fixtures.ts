@@ -612,3 +612,12 @@ export function createControlUiSessionFixtures(
     },
   };
 }
+
+export function successfulSessionPatch(key: string) {
+  return {
+    ok: true as const,
+    path: "",
+    key,
+    entry: { sessionId: key },
+  };
+}

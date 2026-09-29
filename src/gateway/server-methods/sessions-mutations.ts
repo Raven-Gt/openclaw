@@ -162,7 +162,11 @@ function createSessionPatchHandler(
           };
           outcomes.push(
             outcome.ok
-              ? { ok: true, ...identity }
+              ? {
+                  ok: true,
+                  ...identity,
+                  ...(outcome.automationPause ? { automationPause: outcome.automationPause } : {}),
+                }
               : { ok: false, ...identity, error: outcome.error },
           );
         }
@@ -179,13 +183,16 @@ function createSessionPatchHandler(
       const catalog = await executed.catalogs.available(prepared.targetAgentId);
       respond(
         true,
-        projectSessionPatchResult({
-          ...prepared,
-          cfg: executed.cfg,
-          entry: outcome.entry,
-          modelCatalog: catalog?.entries,
-          modelCatalogRouteVariants: catalog?.routeVariants,
-        }),
+        {
+          ...projectSessionPatchResult({
+            ...prepared,
+            cfg: executed.cfg,
+            entry: outcome.entry,
+            modelCatalog: catalog?.entries,
+            modelCatalogRouteVariants: catalog?.routeVariants,
+          }),
+          ...(outcome.automationPause ? { automationPause: outcome.automationPause } : {}),
+        },
         undefined,
       );
     } finally {

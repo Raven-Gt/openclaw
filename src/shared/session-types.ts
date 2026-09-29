@@ -2,6 +2,7 @@ import type {
   AgentSummary,
   ModelChoice,
   SessionCreatedActor,
+  SessionAutomationPauseResult,
   SessionPerson,
   SessionOwnerSessionCount,
   SessionsAssignOwnerParams,
@@ -87,4 +88,5 @@ export type SessionsPatchResultBase<TEntry> = {
   path: string;
   key: string;
   entry: TEntry;
+  automationPause?: SessionAutomationPauseResult;
 };
