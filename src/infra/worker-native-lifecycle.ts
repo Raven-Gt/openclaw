@@ -4,7 +4,6 @@ import {
   receiveMessageOnPort,
   SHARE_ENV,
   type MessagePort,
-  type Transferable,
   type Worker,
   type WorkerOptions,
 } from "node:worker_threads";
@@ -24,22 +23,17 @@ import { createCpuTrackedWorker, receiveWorkerMemoryPort } from "./worker-cpu.js
 import { NativeWorker } from "./worker-native-handle.js";
 import type {
   NativeWorkerReply,
-  NativeWorkerRequest,
+  NativeWorkerRuntime,
   NativeWorkerResourceDescriptor,
   NativeWorkerResourceConnection,
   RetainedNativeWorker,
 } from "./worker-native-lifecycle.types.js";
 import { nativePortIsOpen } from "./worker-native-port.js";
 
-export type NativeRuntime = {
+type NativeRuntime = NativeWorkerRuntime & {
   worker: Worker;
   port: MessagePort;
   handles: Map<number, NativeWorker>;
-  failure?: Error;
-  service(): void;
-  post(message: NativeWorkerRequest, transfers?: readonly Transferable[]): void;
-  refreshReference(): void;
-  resourceBroker(): SpawnBrokerHost;
   close(): Promise<void>;
 };
 

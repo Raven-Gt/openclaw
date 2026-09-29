@@ -1,4 +1,5 @@
 import type { MessagePort, Worker, WorkerOptions, Transferable } from "node:worker_threads";
+import type { SpawnBrokerHost } from "../process/spawn-broker/host.js";
 import type {
   BrokerResourceAttachment,
   BrokerResourceResponse,
@@ -38,6 +39,16 @@ export type RetainedNativeWorker = WorkerLifecycle & {
   on(event: "execution-exit", listener: (code: number | undefined) => void): unknown;
   service(): void;
   stop(): RetainedOperation<void>;
+};
+
+/** Handle operations consume this owner contract without importing its controller. */
+export type NativeWorkerRuntime = {
+  handles: { delete(id: number): boolean };
+  failure?: Error;
+  service(): void;
+  post(message: NativeWorkerRequest, transfers?: readonly Transferable[]): void;
+  refreshReference(): void;
+  resourceBroker(): SpawnBrokerHost;
 };
 
 type NativeWorkerOptions = Omit<WorkerOptions, "env" | "transferList"> & {

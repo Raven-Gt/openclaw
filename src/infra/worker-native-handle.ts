@@ -5,9 +5,9 @@ import { toErrorObject } from "@openclaw/normalization-core/error-coercion";
 import { createRetainedOperation } from "./retained-operation.js";
 import { trackNativeWorkerForCpu } from "./worker-cpu.js";
 import { decodeNativeWorkerFailure } from "./worker-native-error.js";
-import type { NativeRuntime } from "./worker-native-lifecycle.js";
 import type {
   NativeWorkerEvents,
+  NativeWorkerRuntime,
   NativeWorkerReply,
   NativeWorkerResourceConnection,
   NativeWorkerResourceDescriptor,
@@ -45,7 +45,7 @@ export class NativeWorker extends EventEmitter<NativeWorkerEvents> implements Re
   >();
 
   constructor(
-    private readonly runtime: NativeRuntime,
+    private readonly runtime: NativeWorkerRuntime,
     readonly id: number,
     private readonly filename: string | URL,
     private readonly evalSource: boolean,

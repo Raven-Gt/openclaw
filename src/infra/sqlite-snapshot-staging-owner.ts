@@ -39,7 +39,7 @@ import type { RetainedWorkerTask } from "./worker-task-pool.types.js";
 type SuccessfulReply = Exclude<SqliteSnapshotStagingReply, { type: "failed" }>;
 type OwnedDirectory = {
   directory: string;
-  retire(): Promise<void>;
+  retire: () => Promise<void>;
   startRetire(): RetainedOperation<void>;
 };
 

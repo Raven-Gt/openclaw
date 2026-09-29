@@ -742,6 +742,7 @@ src/infra/private-mode.ts
 src/infra/process-env.ts
 src/infra/prototype-keys.ts
 src/infra/restart-stale-pids.ts
+src/infra/retained-operation.ts
 src/infra/root-walk.ts
 src/infra/runtime-process-entrypoints.ts
 src/infra/runtime-process-url.ts
@@ -780,6 +781,8 @@ src/infra/sqlite-readonly-auth-transfer.ts
 src/infra/sqlite-readonly-location-cleanup.ts
 src/infra/sqlite-readonly-location.ts
 src/infra/sqlite-readonly-location.worker.ts
+src/infra/sqlite-readonly-native-resource.client.ts
+src/infra/sqlite-readonly-native-resource.types.ts
 src/infra/sqlite-readonly-worker-context.ts
 src/infra/sqlite-readonly-worker-protocol.ts
 src/infra/sqlite-readonly-worker-session.ts
@@ -879,6 +882,11 @@ src/infra/worker-cpu.ts
 src/infra/worker-diagnostic-script.ts
 src/infra/worker-idle-gc.ts
 src/infra/worker-memory.ts
+src/infra/worker-native-error.ts
+src/infra/worker-native-handle.ts
+src/infra/worker-native-lifecycle.ts
+src/infra/worker-native-port.ts
+src/infra/worker-native-resource.ts
 src/infra/worker-task-capacity.ts
 src/infra/worker-task-native-sections.ts
 src/infra/worker-task-pool-completion.ts
@@ -886,6 +894,7 @@ src/infra/worker-task-pool-core.ts
 src/infra/worker-task-pool-owned.ts
 src/infra/worker-task-pool-resources.ts
 src/infra/worker-task-pool-retirement.ts
+src/infra/worker-task-pool-worker.ts
 src/infra/worker-task-pool.ts
 src/infra/worker-task-server.ts
 src/infra/worker-transfer-bytes.ts
@@ -1197,6 +1206,8 @@ src/process/spawn-broker/host.ts
 src/process/spawn-broker/ipc.ts
 src/process/spawn-broker/pipe.ts
 src/process/spawn-broker/protocol.ts
+src/process/spawn-broker/resource-host.ts
+src/process/spawn-broker/resource-protocol.ts
 src/process/spawn-diagnostics.ts
 src/process/spawn-utils.ts
 src/process/supervisor/cancellation-policy.ts
@@ -1370,6 +1381,8 @@ src/state/openclaw-state-lease-worker.ts
 src/state/openclaw-state-lease.ts
 src/state/openclaw-state-ownership.ts
 src/state/openclaw-state-read-error.ts
+src/state/openclaw-state-read-operation.ts
+src/state/openclaw-state-read-request.ts
 src/state/openclaw-state-read-scope.ts
 src/state/openclaw-state-read-worker.ts
 src/state/openclaw-state-schema-compatibility.ts
