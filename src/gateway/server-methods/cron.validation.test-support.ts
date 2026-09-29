@@ -1,7 +1,6 @@
 import { vi } from "vitest";
 import type { ChannelPlugin } from "../../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import type { CronRuntimeAuthority } from "../../cron/runtime-authority.js";
 import type { CronJob } from "../../cron/types.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import {
@@ -94,8 +93,6 @@ export function createCronTestContext(
 ) {
   const jobs = currentJobs ? (Array.isArray(currentJobs) ? currentJobs : [currentJobs]) : [];
   const committedAdds: Partial<CronJob>[] = [];
-  const committedRuntimeAuthorities: Array<CronRuntimeAuthority | undefined> = [];
-  const committedRuntimeAuthorityCaptures: boolean[] = [];
   const committedUpdates: Array<{ id: string; patch: Partial<CronJob> }> = [];
   const update = vi.fn(async (id: string, patch: Partial<CronJob>) => {
     committedUpdates.push({ id, patch });
@@ -107,8 +104,6 @@ export function createCronTestContext(
   });
   return {
     committedAdds,
-    committedRuntimeAuthorities,
-    committedRuntimeAuthorityCaptures,
     committedUpdates,
     cron: {
       add: vi.fn(
@@ -116,12 +111,9 @@ export function createCronTestContext(
           input: Partial<CronJob>,
           opts?: {
             commitGuard?: () => void;
-            captureRuntimeAuthority?: () => CronRuntimeAuthority | undefined;
           },
         ) => {
           opts?.commitGuard?.();
-          committedRuntimeAuthorityCaptures.push(opts?.captureRuntimeAuthority !== undefined);
-          committedRuntimeAuthorities.push(opts?.captureRuntimeAuthority?.());
           committedAdds.push(input);
           return createCronJob({ ...input, id: "cron-1" });
         },
@@ -134,7 +126,6 @@ export function createCronTestContext(
           precondition: (job: CronJob, nowMs: number) => void | Promise<void>,
           opts?: {
             commitGuard?: () => void;
-            captureRuntimeAuthority?: () => CronRuntimeAuthority | undefined;
           },
         ) => {
           const job = jobs.find((candidate) => candidate.id === id);
@@ -143,8 +134,6 @@ export function createCronTestContext(
           }
           await precondition(job, Date.now());
           opts?.commitGuard?.();
-          committedRuntimeAuthorityCaptures.push(opts?.captureRuntimeAuthority !== undefined);
-          committedRuntimeAuthorities.push(opts?.captureRuntimeAuthority?.());
           return await update(id, patch);
         },
       ),
@@ -232,7 +221,7 @@ export function createCronJob(overrides: Partial<CronJob> = {}): CronJob {
     schedule: { kind: "every", everyMs: 60_000 },
     sessionTarget: "isolated",
     wakeMode: "next-heartbeat",
-    payload: { kind: "agentTurn", message: "hello", toolsAllow: ["*"] },
+    payload: { kind: "agentTurn", message: "hello" },
     delivery: { mode: "none" },
     state: {},
     ...overrides,

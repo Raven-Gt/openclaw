@@ -316,11 +316,6 @@ it.each([true, false])(
           invoke: (callback) => service.add({ ...input, id: "guarded" }, { commitGuard: callback }),
         },
         {
-          name: "captured add",
-          invoke: (callback) =>
-            service.add({ ...input, id: "captured" }, { captureRuntimeAuthority: callback }),
-        },
-        {
           name: "guarded convergence",
           invoke: (callback) =>
             service.add(
@@ -334,15 +329,6 @@ it.each([true, false])(
             service.update("first", { name: "guarded update" }, { commitGuard: callback }),
         },
         {
-          name: "captured update",
-          invoke: (callback) =>
-            service.update(
-              "first",
-              { name: "captured update" },
-              { captureRuntimeAuthority: callback },
-            ),
-        },
-        {
           name: "guarded owner update",
           invoke: (callback) =>
             service.update(
@@ -354,11 +340,6 @@ it.each([true, false])(
               },
               { commitGuard: callback },
             ),
-        },
-        {
-          name: "captured owner update",
-          invoke: (callback) =>
-            service.update("first", { agentId: "main" }, { captureRuntimeAuthority: callback }),
         },
         {
           name: "precondition update",
@@ -405,12 +386,12 @@ it.each([true, false])(
           expect(order.filter((event) => event === "commit").length, step.name).toBeGreaterThan(0);
           expect(order[0], step.name).toBe("callback");
           if (!step.precondition) {
-            // Preconditions already have an awaited contract; guards and captures do not.
+            // Preconditions already have an awaited contract; commit guards do not.
             expect(order.lastIndexOf("commit"), step.name).toBeLessThan(order.indexOf("yield"));
           }
         }
         const persisted = (await loadCronJobsStoreWithConfigJobs(storePath)).store.jobs;
-        expect(persisted.map((job) => job.id).toSorted()).toEqual(["captured", "first", "guarded"]);
+        expect(persisted.map((job) => job.id).toSorted()).toEqual(["first", "guarded"]);
         expect(persisted.find((job) => job.id === "first")?.name).toBe("precondition update");
         expect(persisted.every((job) => !job.enabled)).toBe(true);
       } finally {

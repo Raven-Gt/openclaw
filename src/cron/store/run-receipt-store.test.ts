@@ -29,7 +29,7 @@ import {
   resetCronActiveJobs,
 } from "../active-jobs.js";
 import { setupCronServiceSuite } from "../service.test-harness.js";
-import { update } from "../service/ops-mutations.js";
+import { add, update } from "../service/ops-mutations.js";
 import {
   assertServiceCronRunReceiptCurrent,
   cronRunReceiptPersistHooks,
@@ -158,9 +158,9 @@ function makeForeignOwner(handle: CronRunReceiptHandle) {
 
 describe("cron run receipt store", () => {
   it.each([
-    { writer: "service", enabled: true, mutation: "tool policy" },
-    { writer: "service", enabled: false, mutation: "tool policy" },
-    { writer: "canonical store", enabled: true, mutation: "tool policy" },
+    { writer: "service", enabled: true, mutation: "tool runtime" },
+    { writer: "service", enabled: false, mutation: "tool runtime" },
+    { writer: "canonical store", enabled: true, mutation: "tool runtime" },
     { writer: "service", enabled: true, mutation: "origin" },
     { writer: "canonical store", enabled: true, mutation: "origin" },
     { writer: "service", enabled: true, mutation: "native name" },
@@ -171,7 +171,7 @@ describe("cron run receipt store", () => {
     "retires message access after $writer $mutation changes from enabled=$enabled without retiring its receipt",
     async ({ writer, enabled, mutation }) => {
       const { storePath } = await makeStorePath();
-      const native = mutation !== "tool policy" && mutation !== "origin";
+      const native = mutation !== "tool runtime" && mutation !== "origin";
       const channelRequester = {
         version: 1 as const,
         channel: "discord",
@@ -190,8 +190,9 @@ describe("cron run receipt store", () => {
       };
       const job: CronStoredJob = {
         ...makeCronReceiptJob("message-permission-change"),
+        declarationKey: "agent:alpha:message-permission-change",
         enabled,
-        payload: { kind: "agentTurn", message: "read updates", toolsAllow: ["message", "exec"] },
+        payload: { kind: "agentTurn", message: "read updates" },
         scheduledToolPolicy: native
           ? {
               version: 1,
@@ -278,23 +279,18 @@ describe("cron run receipt store", () => {
           expect(assertMessageCurrent).not.toThrow();
           expect(assertSourceCurrent).not.toThrow();
           if (mutation === "native requester") {
-            await update(
-              state,
-              job.id,
-              { payload: { kind: "agentTurn", toolsAllow: job.payload.toolsAllow } },
-              {
-                toolsAllowProvenance: {
-                  ...toolsAllowProvenance,
-                  channelRequester: { ...channelRequester, senderId: "requester-b" },
-                },
+            const declaration = {
+              ...job,
+              description: "Operator notes",
+              displayName: "Readable label",
+            };
+            await add(state, declaration, {
+              toolsAllowProvenance: {
+                ...toolsAllowProvenance,
+                channelRequester: { ...channelRequester, senderId: "requester-b" },
               },
-            );
-            await update(
-              state,
-              job.id,
-              { payload: { kind: "agentTurn", toolsAllow: job.payload.toolsAllow } },
-              { toolsAllowProvenance },
-            );
+            });
+            await add(state, declaration, { toolsAllowProvenance });
           } else {
             const [changed, restored]: [CronJobPatch, CronJobPatch] =
               mutation === "native name"
@@ -315,7 +311,7 @@ describe("cron run receipt store", () => {
           expect(restored.delivery).toEqual(job.delivery);
           expect(restored.state.triggerState).toEqual(job.state.triggerState);
         } else {
-          // An admission that began disabled and unrelated tool/delivery edits keep access.
+          // An admission that began disabled and unrelated name/delivery edits keep access.
           await update(
             state,
             job.id,
@@ -324,9 +320,6 @@ describe("cron run receipt store", () => {
               : {
                   name: "renamed",
                   delivery: { mode: "none" },
-                  ...(mutation === "tool policy"
-                    ? { payload: { kind: "agentTurn" as const, toolsAllow: ["message"] } }
-                    : {}),
                 },
           );
           expect(assertMessageCurrent).not.toThrow();
@@ -341,7 +334,12 @@ describe("cron run receipt store", () => {
                 await update(
                   state,
                   job.id,
-                  { payload: { kind: "agentTurn", toolsAllow: ["message", "exec"] } },
+                  {
+                    payload: {
+                      kind: "agentTurn",
+                      message: channel === "slack" ? "read other updates" : "read updates",
+                    },
+                  },
                   { toolsAllowProvenance: originProvenance },
                 );
               } else {
@@ -353,9 +351,9 @@ describe("cron run receipt store", () => {
               }
             }
           } else if (writer === "service") {
-            await update(state, job.id, { payload: { kind: "agentTurn", toolsAllow: ["read"] } });
+            await update(state, job.id, { payload: { kind: "command", argv: ["true"] } });
             await update(state, job.id, {
-              payload: { kind: "agentTurn", toolsAllow: ["message"] },
+              payload: { kind: "agentTurn", message: "read updates" },
             });
           } else {
             await saveCronStore(storePath, {
@@ -368,7 +366,7 @@ describe("cron run receipt store", () => {
           }
         }
         expect(assertSourceCurrent).toThrow();
-        if (mutation === "tool policy") {
+        if (mutation === "tool runtime") {
           expect(assertMessageCurrent).toThrow();
         } else {
           expect(assertMessageCurrent).not.toThrow();

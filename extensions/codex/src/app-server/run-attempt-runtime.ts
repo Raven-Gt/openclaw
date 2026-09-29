@@ -27,11 +27,6 @@ import { isCodexResponsesOAuth } from "./responses-oauth.js";
 import { prewarmCodexAttemptClient } from "./run-attempt-client-prewarm.js";
 import type { CodexAttemptConnection } from "./run-attempt-connection.js";
 import {
-  assertScheduledCodexAppAuthorityRuntime,
-  buildLegacyScheduledCodexAppRecoveryPrompt,
-} from "./scheduled-app-authority.js";
-import { canResolveScheduledConfiguredMcpCreatorAuthority } from "./scheduled-configured-mcp-authority.js";
-import {
   createIsolatedCodexAppServerClient,
   releaseLeasedSharedCodexAppServerClient,
 } from "./shared-client.js";
@@ -78,7 +73,6 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
           config: params.config,
         })
       : undefined;
-  assertScheduledCodexAppAuthorityRuntime(connection, params);
   const attemptAuthProfileStore = preparedAuthBinding?.authProfileStore ?? params.authProfileStore;
   prewarmCodexAttemptClient({
     connection,
@@ -124,7 +118,6 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
     contextWindow: undefined,
     maxTokens: undefined,
   } as unknown as EmbeddedRunAttemptParams["model"];
-  const legacyScheduledAppRecoveryPrompt = buildLegacyScheduledCodexAppRecoveryPrompt(params);
   const runtimeParams: EmbeddedRunAttemptParams = usesSupervisionConnection
     ? {
         ...paramsWithoutOuterNativeOwnership,
@@ -139,13 +132,6 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
         ...params,
         authProfileStore: attemptAuthProfileStore,
         sessionKey: contextSessionKey,
-        ...(legacyScheduledAppRecoveryPrompt
-          ? {
-              extraSystemPrompt: [params.extraSystemPrompt, legacyScheduledAppRecoveryPrompt]
-                .filter((value): value is string => Boolean(value?.trim()))
-                .join("\n\n"),
-            }
-          : {}),
         ...(startupAuthProfileId ? { authProfileId: startupAuthProfileId } : {}),
       };
   const startupAuthAccountCacheKey = usesSupervisionConnection
@@ -183,47 +169,6 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
     manifestRegistry: bundleManifestRegistry,
     toolOverrides: codexMcpToolOverrides,
   });
-  const authenticatedScheduledMode =
-    params.trigger === "cron" &&
-    params.scheduledToolPolicy !== undefined &&
-    Array.isArray(params.toolsAllow);
-  const scheduledConfiguredMcpSurface =
-    authenticatedScheduledMode &&
-    (bundleMcpThreadConfig.staticServerNames.length > 0 ||
-      mutable.startupBinding?.configuredMcpOwnershipVersion === 1);
-  const cronCreatorAuthorityCapability = params.cronCreatorAuthorityCapability;
-  // Senderless local operator RPCs prove freshness with the host-minted exact-run
-  // capability; do not promote that fact to general sender ownership.
-  const hasFreshCreatorAuthority =
-    cronCreatorAuthorityCapability?.active === true &&
-    !(
-      cronCreatorAuthorityCapability.managementEntitlement &&
-      cronCreatorAuthorityCapability.callerOrigin.kind === "unknown"
-    ) &&
-    cronCreatorAuthorityCapability.runId === params.runId &&
-    !cronCreatorAuthorityCapability.signal.aborted;
-  const mayResolveScheduledConfiguredMcpCreatorAuthority =
-    !authenticatedScheduledMode &&
-    canResolveScheduledConfiguredMcpCreatorAuthority({
-      trigger: params.trigger,
-      connectionClass: appServer.connectionClass,
-      bindingKind: connection.bindingIdentity.kind,
-      bindingSessionKey:
-        connection.bindingIdentity.kind === "session"
-          ? connection.bindingIdentity.sessionKey
-          : undefined,
-      sessionKey: params.sessionKey,
-      usesSupervisionConnection,
-      preservesNativeModel: mutable.startupBinding?.preserveNativeModel === true,
-      senderIsOwner: params.senderIsOwner,
-      hasFreshCreatorAuthority,
-      senderId: params.senderId,
-      inputProvenance: params.inputProvenance,
-      trustedInternalHandoff: params.trustedInternalHandoff,
-      spawnedBy: params.spawnedBy,
-      scheduledToolPolicy: params.scheduledToolPolicy,
-      hasStaticConfiguredMcp: bundleMcpThreadConfig.staticServerNames.length > 0,
-    });
   preDynamicStartupStages.mark("bundle-mcp");
   const sandboxExecServerEnabled = isCodexSandboxExecServerEnabled(pluginConfig, sandbox);
   let nativeToolSurfaceEnabled = shouldEnableCodexAppServerNativeToolSurface(
@@ -285,9 +230,8 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
       }
     }
   }
-  const configuredMcpSurface = scheduledConfiguredMcpSurface
-    ? "scheduled"
-    : !nativeToolSurfaceEnabled && bundleMcpThreadConfig.staticServerNames.length > 0
+  const configuredMcpSurface =
+    !nativeToolSurfaceEnabled && bundleMcpThreadConfig.staticServerNames.length > 0
       ? "transient"
       : undefined;
   preDynamicStartupStages.mark("native-tool-surface");
@@ -364,10 +308,7 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
     startupEnvApiKeyCacheKey,
     bundleMcpThreadConfig,
     bundleManifestRegistry,
-    authenticatedScheduledMode,
     configuredMcpSurface,
-    canResolveScheduledConfiguredMcpCreatorAuthority:
-      mayResolveScheduledConfiguredMcpCreatorAuthority,
     codexMcpToolOverrides,
     sandboxExecServerEnabled,
     nativeToolSurfaceEnabled,

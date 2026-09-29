@@ -630,7 +630,7 @@ describe("cron edit command", () => {
     );
   });
 
-  it("stores an explicit wildcard with --clear-tools", async () => {
+  it("removes the legacy per-job tool list with --clear-tools", async () => {
     mockExistingJob({ id: "job-1", payload: { kind: "agentTurn", message: "hello" } });
     const program = createCronProgram();
 
@@ -644,7 +644,7 @@ describe("cron edit command", () => {
         patch: {
           payload: {
             kind: "agentTurn",
-            toolsAllow: ["*"],
+            toolsAllow: null,
           },
         },
       },
@@ -683,7 +683,7 @@ describe("cron edit command", () => {
 
     expect(callGatewayFromCli).toHaveBeenCalledWith("cron.update", expect.anything(), {
       id: "job-1",
-      patch: { payload: { kind: "command", toolsAllow: ["*"] } },
+      patch: { payload: { kind: "command", toolsAllow: null } },
     });
   });
 
@@ -692,7 +692,7 @@ describe("cron edit command", () => {
       label: "command with a cleared allowlist",
       payload: { kind: "command", argv: ["echo", "hello"] },
       toolArgs: ["--clear-tools"],
-      toolsAllow: ["*"],
+      toolsAllow: null,
     },
     {
       label: "agent turn with a restricted allowlist",

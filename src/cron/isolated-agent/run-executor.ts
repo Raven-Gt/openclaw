@@ -6,7 +6,6 @@ import {
   cliBackendAcceptsAuthProfileForwarding,
   resolveCliExecutionAuthProfileId,
 } from "../../agents/cli-execution-auth.js";
-import { resolveCliRuntimeToolsAllow } from "../../agents/cli-runner/tool-policy.js";
 import { settleCliSessionResult } from "../../agents/cli-session-store.js";
 import {
   applyCliSessionBindingResult,
@@ -50,10 +49,7 @@ import {
   resolveCurrentChannelTarget,
 } from "./channel-output-policy.js";
 import { resolveCronPayloadOutcome } from "./helpers.js";
-import {
-  assertCronRuntimeAuthorityCandidate,
-  prepareCronPromptRunAdmission,
-} from "./run-admission.js";
+import { prepareCronPromptRunAdmission } from "./run-admission.js";
 import { createCronCandidateExecutionResolver } from "./run-candidate-runtime.js";
 import { finalizeCronPromptForResolvedTools } from "./run-delivery-trace.js";
 import {
@@ -163,14 +159,11 @@ function createCronPromptExecutor(
       ? "lightweight"
       : undefined;
   const scheduledToolPolicy = resolveScheduledToolPolicyContext({
-    toolsAllow: params.agentPayload?.toolsAllow,
     scheduledToolPolicy: resolveCronScheduledToolPolicy({
-      toolsAllow: params.agentPayload?.toolsAllow,
       scheduledToolPolicy: params.job.scheduledToolPolicy,
       owner: params.job.owner,
     }),
     callerOrigin: params.job.toolsAllowProvenance?.callerOrigin,
-    execTarget: params.job.toolsAllowExecTarget,
   });
   const { sourceDelivery, runId } = params;
   const sourceReplyDeliveryMode = sourceDelivery.sourceReplyDeliveryMode;
@@ -252,7 +245,6 @@ function createCronPromptExecutor(
       sessionKey: params.runSessionKey,
       jobId: params.job.id,
       channelRequester: resolveCronAuthenticatedChannelRequester(params.job),
-      toolsAllow: params.agentPayload?.toolsAllow,
       scheduledToolPolicy,
       executionIdentity: params.executionIdentity,
     });
@@ -403,11 +395,6 @@ function createCronPromptExecutor(
           candidateRuntime,
           cliExecution && Boolean(rootedExecution),
         );
-        assertCronRuntimeAuthorityCandidate({
-          authority: params.job.runtimeAuthority,
-          candidateRuntime,
-          cliExecution,
-        });
         // The validated candidate that admits detached work owns its continuation
         // even if the provider throws before returning result metadata.
         setCronSessionRuntimeModel({
@@ -557,10 +544,6 @@ function createCronPromptExecutor(
                     sourceReplyDeliveryMode,
                     requireExplicitMessageTarget: sourceDelivery.messageTool.requireExplicitTarget,
                   },
-                  toolsAllow: resolveCliRuntimeToolsAllow(
-                    params.agentPayload?.toolsAllow,
-                    params.agentPayload?.toolsAllowIsDefault,
-                  ),
                   abortSignal: cliAbortSignal,
                 });
                 const classification = runOptions.classifyResult(candidateResult);
@@ -644,10 +627,6 @@ function createCronPromptExecutor(
           authProfileFailurePolicy: runOptions.authProfileFailurePolicy ?? "local_transient",
           verboseLevel: params.resolvedVerboseLevel,
           runTimeoutOverrideMs: params.runTimeoutOverrideMs,
-          toolsAllow: params.agentPayload?.toolsAllow,
-          scheduledRuntimeAuthority: params.job.runtimeAuthority,
-          scheduledRuntimeAuthorityRecoveryRequired:
-            params.job.runtimeAuthorityRecoveryRequired === true,
           execSession: params.cronSession.sessionEntry,
           execOverrides: params.suppressExecNotifyOnExit
             ? {

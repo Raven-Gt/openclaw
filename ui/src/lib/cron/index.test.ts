@@ -2011,52 +2011,6 @@ describe("cron controller", () => {
   });
 
   it.each([
-    { name: "omitted cap", policy: {} },
-    { name: "empty cap", policy: { toolsAllow: [] } },
-    { name: "finite cap", policy: { toolsAllow: ["read"] } },
-    { name: "wildcard cap", policy: { toolsAllow: ["*"] }, effectiveUnrestricted: true },
-    {
-      name: "default-marked cap as a new explicit restriction",
-      policy: { toolsAllow: ["read"], toolsAllowIsDefault: true },
-    },
-  ] satisfies Array<{
-    name: string;
-    effectiveUnrestricted?: boolean;
-    policy: Pick<
-      Extract<CronJob["payload"], { kind: "agentTurn" }>,
-      "toolsAllow" | "toolsAllowIsDefault"
-    >;
-  }>)("clone payload policy: retains $name without a capture marker", async (scenario) => {
-    const { policy } = scenario;
-    const source = createCronJob({
-      id: "cap-source",
-      name: "Public cap source",
-      payload: { kind: "agentTurn", message: "Synthetic clone task", ...policy },
-      delivery: { mode: "none" },
-    });
-    const original = structuredClone(source);
-    const request = createCronRequest("cap-clone");
-    const state = createStateWithRequest(request, { cronJobs: [source] });
-
-    startCronClone(state, source);
-    expect(await addCronJob(state)).toEqual({ saved: true, jobId: "cap-clone" });
-
-    const submitted = requestPayload(findRequestCall(request.mock.calls, "cron.add"));
-    const payload = requireRecord(submitted.payload, "cloned payload");
-    expect(validateCronAddParams(submitted)).toBe(true);
-    expect(source).toEqual(original);
-    expect(payload).not.toHaveProperty("toolsAllowIsDefault");
-    if ("effectiveUnrestricted" in scenario) {
-      // Fresh trusted creation defaults an omitted cap to wildcard.
-      expect(payload.toolsAllow ?? ["*"]).toEqual(["*"]);
-    } else if ("toolsAllow" in policy) {
-      expect(payload.toolsAllow).toEqual(policy.toolsAllow);
-    } else {
-      expect(payload).not.toHaveProperty("toolsAllow");
-    }
-  });
-
-  it.each([
     { name: "empty fallbacks", policy: { fallbacks: [] } },
     { name: "explicit fallbacks", policy: { fallbacks: ["openai/gpt-5.5"] } },
     { name: "unsafe-content false", policy: { allowUnsafeExternalContent: false } },
@@ -2206,7 +2160,7 @@ describe("cron controller", () => {
     payload: CronJob["payload"];
     trigger: CronJob["trigger"];
     target: "agentTurn" | "systemEvent";
-  }>)("clone payload policy: retains common restrictions for $name", async (scenario) => {
+  }>)("clones $name with the operator-authored payload", async (scenario) => {
     const source = createCronJob({
       id: "kind-source",
       name: "Kind transition source",
@@ -2243,7 +2197,6 @@ describe("cron controller", () => {
       ...(scenario.target === "systemEvent"
         ? { text: "New operator-authored task" }
         : { message: "New operator-authored task" }),
-      toolsAllow: scenario.payload.toolsAllow,
     });
   });
 

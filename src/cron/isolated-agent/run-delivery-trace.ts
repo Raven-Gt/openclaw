@@ -1,6 +1,4 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { resolveStaticSessionMcpServerNames } from "../../agents/agent-bundle-mcp-runtime-config.js";
-import { resolveCodexMcpToolOverridesForAgent } from "../../agents/cli-runner/bundle-mcp-codex.js";
 import { wrapUntrustedPromptDataBlock } from "../../agents/sanitize-for-prompt.js";
 /** Delivery planning, prompt policy, and delivery trace construction for cron runs. */
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -15,11 +13,6 @@ import {
   resolveCronDeliveryPlan,
   type CronDeliveryPlan,
 } from "../delivery-plan.js";
-import {
-  createCronRunDiagnosticsFromError,
-  createCronRunDiagnosticsFromMissingWebSearchProvider,
-  toolsAllowRequestsWebSearch,
-} from "../run-diagnostics.js";
 import { resolveCronScheduledToolPolicy } from "../scheduled-tool-policy.js";
 import { resolveCronDeliverySessionKey } from "../session-target.js";
 import type {
@@ -27,10 +20,7 @@ import type {
   CronDeliveryTraceMessageTarget,
   CronDeliveryTraceTarget,
   CronJob,
-  CronRunDiagnostics,
-  CronToolsAllowProvenance,
 } from "../types.js";
-import { logWarn } from "./run.runtime.js";
 import { resolveCronSourceDeliveryPlan } from "./source-delivery-plan.js";
 
 const MAX_CRON_DELIVERY_TARGET_CONTEXT_CHARS = 1000;
@@ -79,14 +69,6 @@ function buildCronDeliveryTargetRuntimeContext(params: {
 }
 
 const cronDeliveryRuntimeLoader = createLazyImportLoader(() => import("./run-delivery.runtime.js"));
-const nativeWebSearchLoader = createLazyImportLoader(
-  () => import("../../agents/native-web-search.js"),
-);
-const webToolRuntimeContextLoader = createLazyImportLoader(
-  () => import("../../agents/tools/web-tool-runtime-context.js"),
-);
-const webSearchRuntimeLoader = createLazyImportLoader(() => import("../../web-search/runtime.js"));
-
 export async function loadCronDeliveryRuntime() {
   return await cronDeliveryRuntimeLoader.load();
 }
@@ -177,92 +159,6 @@ export function buildCronDeliveryTrace(params: {
   };
 }
 
-export async function createCronToolsAllowPreflightDiagnostics(params: {
-  cfg: OpenClawConfig;
-  jobId: string;
-  provider: string;
-  model: string;
-  modelApi?: string;
-  agentId?: string;
-  agentDir?: string;
-  workspaceDir: string;
-  sessionKey?: string;
-  agentPayload: Extract<CronJob["payload"], { kind: "agentTurn" }> | null;
-  agentRuntime?: string;
-  toolsAllowProvenance?: CronToolsAllowProvenance;
-}): Promise<CronRunDiagnostics | undefined> {
-  const toolsAllow = params.agentPayload?.toolsAllow;
-  if (params.agentPayload?.toolsAllowIsDefault === true) {
-    const hasEnabledStaticMcp =
-      resolveStaticSessionMcpServerNames({
-        workspaceDir: params.workspaceDir,
-        cfg: params.cfg,
-        toolOverrides: resolveCodexMcpToolOverridesForAgent(params.cfg, {
-          agentId: params.agentId,
-          toolOverrides: undefined,
-        }),
-      }).length > 0;
-    if (
-      params.agentRuntime === "codex" &&
-      hasEnabledStaticMcp &&
-      params.toolsAllowProvenance?.source !== "final-executable-surface"
-    ) {
-      return createCronRunDiagnosticsFromError(
-        "cron-preflight",
-        `This automation's inherited tool cap predates final configured-MCP capture, so it continues with its stored finite tools and may omit MCP capabilities. Reauthorize in place with an exact explicit cap: openclaw automations edit ${params.jobId} --tools <tool,...>.`,
-        { severity: "warn" },
-      );
-    }
-    return undefined;
-  }
-  if (!toolsAllowRequestsWebSearch(toolsAllow)) {
-    return undefined;
-  }
-  try {
-    const { resolveNativeWebSearchRoute } = await nativeWebSearchLoader.load();
-    if (
-      resolveNativeWebSearchRoute({
-        config: params.cfg,
-        modelProvider: params.provider,
-        modelApi: params.modelApi,
-        modelId: params.model,
-        agentId: params.agentId,
-        sessionKey: params.sessionKey,
-        agentDir: params.agentDir,
-        runtimeToolAllowlist: toolsAllow,
-      }).kind === "native"
-    ) {
-      return undefined;
-    }
-    const { resolveWebToolRuntimeContext } = await webToolRuntimeContextLoader.load();
-    const {
-      config,
-      preferRuntimeProviders,
-      runtimeMetadata: runtimeWebSearch,
-    } = resolveWebToolRuntimeContext({
-      kind: "search",
-      config: params.cfg,
-      lateBindRuntimeConfig: true,
-    });
-    const { hasUsableWebSearchProvider } = await webSearchRuntimeLoader.load();
-    const hasWebSearchProvider = hasUsableWebSearchProvider({
-      config,
-      agentDir: params.agentDir,
-      runtimeWebSearch,
-      preferRuntimeProviders,
-    });
-    return createCronRunDiagnosticsFromMissingWebSearchProvider({
-      toolsAllow,
-      hasWebSearchProvider,
-    });
-  } catch (error) {
-    logWarn(
-      `[cron:${params.jobId}] Failed to inspect web_search provider state for toolsAllow diagnostics: ${String(error)}`,
-    );
-    return undefined;
-  }
-}
-
 /** Resolves the delivery plan and concrete target for one isolated cron run. */
 export async function resolveCronDeliveryContext(params: {
   cfg: OpenClawConfig;
@@ -305,7 +201,6 @@ export async function resolveCronDeliveryContext(params: {
   const payload = params.job.payload.kind === "agentTurn" ? params.job.payload : undefined;
   // Account-scoped scheduled sends go through the owner's account, as the message tool does.
   const scheduledPolicy = resolveCronScheduledToolPolicy({
-    toolsAllow: payload?.toolsAllow,
     scheduledToolPolicy: params.job.scheduledToolPolicy,
     owner: params.job.owner,
   });

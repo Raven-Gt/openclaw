@@ -1,7 +1,6 @@
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockCall } from "../../test-utils/mock-call-assertions.js";
-import { applyJobPatch } from "../service/jobs.js";
 import {
   buildSafeExternalPromptMock,
   callGatewayMock,
@@ -395,40 +394,18 @@ describe("runCronIsolatedAgentTurn delivery policy", () => {
       });
     });
 
-    it("does not restrict CLI-backed announce runs when toolsAllow contains a wildcard", async () => {
-      mockCliAnnounce();
-      await runCronIsolatedAgentTurn(
-        makeParams(makeJob(announce, { toolsAllow: ["read", " * "] })),
-      );
-      const cliRun = expectFields(mockCall(runCliAgentMock)[0], {}, "CLI run params");
-      expect(cliRun.toolsAllow).toBeUndefined();
-      expect(runPrompt(cliRun, true)).toContain("Message delivery destination metadata");
-    });
-
-    it("keeps a cron-tool default toolsAllow marker after a self-edit before CLI execution", async () => {
-      mockCliAnnounce();
-      const job = makeJob(announce, {
-        toolsAllow: ["read", "cron"],
-        toolsAllowIsDefault: true,
-      });
-      applyJobPatch(job, {
-        payload: {
-          kind: "agentTurn",
-          message: "send a clearer message",
-          toolsAllow: ["read", "cron"],
-        },
-      });
-      await runCronIsolatedAgentTurn(makeParams(job));
-      const cliRun = expectFields(
-        mockCall(runCliAgentMock)[0],
-        {
-          toolsAllow: ["read", "cron"],
-        },
-        "CLI run params",
-      );
-      expect(runPrompt(cliRun)).not.toContain("Message delivery destination metadata");
-      expect(cliRun.transcriptPrompt).toBeUndefined();
-    });
+    it.each([{ toolsAllow: [] }, { toolsAllow: ["read"] }, { toolsAllow: ["read", " * "] }])(
+      "uses current CLI message availability with the legacy tool list $toolsAllow",
+      async ({ toolsAllow }) => {
+        mockCliAnnounce();
+        const result = await runCronIsolatedAgentTurn(
+          makeParams(makeJob(announce, { toolsAllow })),
+        );
+        const cliRun = expectFields(mockCall(runCliAgentMock)[0], {}, "CLI run params");
+        expect(result.status).toBe("ok");
+        expect(runPrompt(cliRun, true)).toContain("Message delivery destination metadata");
+      },
+    );
 
     it("keeps automatic exec completion notifications when webhook delivery is active", async () => {
       const route = { mode: "webhook", to: "https://example.invalid/cron" };

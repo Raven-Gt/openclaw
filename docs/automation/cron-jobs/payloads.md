@@ -3,7 +3,7 @@ doc-schema-version: 1
 summary: "Payload kinds, agent-turn flags, command and script payloads, and session execution styles"
 read_when:
   - Choosing a system-event, agent-turn, command, or script payload
-  - Setting a per-job model, thinking level, or tool policy
+  - Setting a per-job model or thinking level
   - Deciding between main, current, isolated, and custom sessions
 title: "Automation payloads"
 sidebarTitle: "Payloads"
@@ -53,32 +53,26 @@ Skill collection review runs every 7 days. It is enabled when `skills.workshop.a
 <ParamField path="--light-context" type="boolean">
   Skip workspace bootstrap file injection.
 </ParamField>
-<ParamField path="--tools" type="string">
-  Restrict which tools the job can use, for example `--tools exec,read`. Pass `--tools ""` for an empty allowlist that disables all agent tools, including tools used by a condition trigger.
-</ParamField>
+<a id="param-tools"></a>
 
-New jobs that can run tools always store an explicit tool policy. Jobs created by an agent
-are capped to the tools available to that creating turn, and the agent cannot widen the
-stored list. Jobs created by an authenticated operator without `--tools` store an
-unrestricted `*` policy; `automations edit --clear-tools` restores that explicit unrestricted
-policy. Existing jobs that predate an explicit tool policy retain their current behavior
-until their tool policy is explicitly edited or the job is recreated.
+Scheduled jobs use their owning agent's current tools, connected accounts, and execution environment. They do not capture a separate per-job tool list or app permission snapshot. Existing saved tool lists are ignored; there is no need to recreate a job after a plugin or runtime update.
+
+The agent's current global, provider, channel, and sandbox policies still apply. To restrict scheduled work, restrict the owning agent. A schedule cannot establish access to another agent or account.
 
 Changing an account-bound job to a payload that does not run tools and later back
 to an agent turn preserves its account restriction. A payload conversion does not
 reauthorize that job as an operator-created job.
 
-Management edits cannot restore missing policy metadata as operator authority.
-For a legacy job that has lost its policy, an authenticated operator can explicitly
-reauthorize it, or an authenticated creator can recreate it with a fresh tool cap.
+Management edits cannot restore missing creator authorization as operator authority.
+Jobs with missing ownership metadata need authenticated recovery or recreation
+from an authorized source.
 
-When the creator's `exec` capability is fixed to the Gateway, the automation also
-retains that target. With `tools.exec.host: "auto"`, the saved target determines
-placement. A conflicting current explicit host setting or required sandbox
-isolation blocks the command instead of moving it to another host. Current tool
-and approval policies still apply.
+Scheduled execution follows the owning agent's current execution configuration,
+subject to the creator's required sandbox isolation and filesystem containment.
+It does not replay a per-job `exec` target. Current tool and approval policies
+still apply.
 
-With `message` in the tool cap, scheduled agent turns can read messages and channel
+When the owning agent can use `message`, scheduled agent turns can read messages and channel
 information on supported channel plugins without an inbound chat. Operator-created
 jobs use the current operator read policy. Agent-created jobs retain their recorded
 creator origin and account, and the channel's delegated read restrictions still
@@ -94,9 +88,9 @@ occurrence's revoked access.
 
 A new account-bound job created by a verified local administrator retains that
 authenticated local source, allowing provider-permitted reads through its saved
-creator account. Editing its `toolsAllow` cap from the same local source explicitly
-reauthorizes an existing job. Description, display-label, and exact no-op edits
-preserve the recorded source. Changes to model-facing names, prompts, tools, schedules,
+creator account. An executable edit from the same authenticated local source can
+reauthorize an existing job. Description, display-label, and exact no-op edits
+preserve the recorded source. Changes to model-facing names, prompts, schedules,
 or other executable behavior need fresh source authorization and clear the old source
 when none is present. Remote management alone cannot supply local-source authorization,
 and older jobs without a provable origin remain blocked until reauthorized or recreated
@@ -109,8 +103,8 @@ Trusted operator jobs can additionally use `channel-edit`, including the existin
 channel and thread edit options; account-created jobs do not inherit operator
 administration.
 
-For these writes, the job needs `message` in its tool policy, an enabled account
-and action, and the bot's required Discord permissions. Use an updated Discord plugin with
+For these writes, the owning agent must allow `message`, and the account and action
+must be enabled with the bot's required Discord permissions. Use an updated Discord plugin with
 [scheduled write support](/plugins/sdk-channel-plugins#scheduled-channel-administration).
 
 Account-bound jobs can use Discord `channel-edit` when an authenticated Discord
@@ -121,14 +115,14 @@ configured OpenClaw owner are not substitutes for those native permissions.
 
 Executable edits from the job's owning conversation and account bind the job to
 the current authorized editor. This includes the prompt, model, name, schedule,
-delivery, and tool policy. An executable edit without a matching authenticated
+and delivery. An executable edit without a matching authenticated
 Discord requester clears this permission and stops further native actions from
 the old occurrence. Description and display-label changes preserve it.
 
 Older jobs, jobs edited by older writers, and jobs whose requester authorization
 was cleared need fresh authorization before `channel-edit` can run. From the
-original Discord conversation and account, ask the agent to edit the job with
-an explicit finite `toolsAllow` list including `message`, or recreate it there.
+original Discord conversation and account, ask the agent to make an executable
+edit to the job, or recreate it there.
 If its execution authorization is also missing, recreate it from that conversation;
 management access alone does not restore the missing authorization.
 The editor must already have automation-management access. Other job behavior
@@ -231,15 +225,9 @@ Gateway restart. The completed run still retains its history.
 
 ### Codex apps in scheduled automations
 
-Codex-created automations can retain the app IDs and permission ceiling
-available to the authenticated creator thread. At execution, OpenClaw requires
-the same prepared Codex profile and account, then narrows the stored cap against
-current app policy. Revoked apps, account/runtime changes, and interactive
-approval requirements fail closed with a recovery message; they never fall
-back to broader or different credentials. Older jobs without a captured app
-envelope continue their ordinary non-app behavior; recreate or reauthorize one
-only when it needs Codex app access. See
-[Native Codex plugins](/plugins/codex-native-plugins#scheduled-automations).
+Codex automations use the same current plugin discovery, authenticated account, native MCP configuration, and execution environment as the owning agent's ordinary turns. They do not replay app grants or credentials from the turn that created the schedule.
+
+Normal tool approval and account policy still apply. A disconnected or revoked app must be reconnected on the owning agent; updating a schedule is not an authentication step. See [Native Codex plugins](/plugins/codex-native-plugins#scheduled-automations).
 
 | Style           | `--session` value   | Runs in                                              | Best for                        |
 | --------------- | ------------------- | ---------------------------------------------------- | ------------------------------- |
@@ -254,9 +242,9 @@ Agent-turn jobs default to the creating conversation when the create request car
   <Accordion title="Main session vs current vs isolated vs custom">
     **Main session** jobs enqueue a system event into the owning agent's main session and optionally wake the heartbeat (`--wake now` or `--wake next-heartbeat`). The event is processed with that session's existing context and last delivery context. Internal automation turns do not extend daily or idle reset freshness; only visible user activity updates session freshness. **Current-session** jobs execute in a detached run session, read a bounded tail of the conversation captured when the job was created, and commit the final visible assistant result back to that exact conversation. **Isolated** jobs run a dedicated agent turn with a fresh session. **Custom sessions** (`session:xxx`) persist context across runs, enabling workflows like daily standups that build on previous summaries.
 
-    `current` binds conversation context and result delivery, not the original agent execution or its worktree. The detached run uses the scheduled agent's workspace and captured tool restrictions. A task-specific checkout path in the prompt does not grant access to it. Before using a job to continue repository work, verify that its execution environment can access the required checkout and tools; otherwise keep the work with its existing execution owner. A result committed to the conversation does not itself resume the original agent.
+    `current` binds conversation context and result delivery, not the original agent execution or its worktree. The detached run uses the scheduled agent's workspace and current tool policy. A task-specific checkout path in the prompt does not grant access to it. Before using a job to continue repository work, verify that its execution environment can access the required checkout and tools; otherwise keep the work with its existing execution owner. A result committed to the conversation does not itself resume the original agent.
 
-    Custom-session agent turns use the existing session’s saved workspace and working directory, including its managed worktree. Requester-scoped jobs may use a saved workspace only for their owning conversation; trusted operator-scheduled jobs can target another conversation’s saved workspace. A missing, retired, or mismatched worktree stops the run instead of falling back to the agent’s default workspace. Filesystem containment and the job’s tool restrictions still apply; a path in the job prompt does not grant access. Persistent-session rollover keeps the saved workspace binding, permission mode, containment root, and inherited tool restrictions; detached runs do not inherit this workspace context. A new `session:custom-id` without an existing session starts in the configured agent workspace. Use `delivery: { mode: "none" }` without an external target for quiet named-session work that needs no runner fallback announcement.
+    Custom-session agent turns use the existing session’s saved workspace and working directory, including its managed worktree. Requester-scoped jobs may use a saved workspace only for their owning conversation; trusted operator-scheduled jobs can target another conversation’s saved workspace. A missing, retired, or mismatched worktree stops the run instead of falling back to the agent’s default workspace. Filesystem containment and the owning agent’s current tool policy still apply; a path in the job prompt does not grant access. Persistent-session rollover keeps the saved workspace binding, permission mode, containment root, and inherited tool restrictions; detached runs do not inherit this workspace context. A new `session:custom-id` without an existing session starts in the configured agent workspace. Use `delivery: { mode: "none" }` without an external target for quiet named-session work that needs no runner fallback announcement.
 
     Main-session automation events are self-contained system-event reminders. They do not automatically include the default heartbeat prompt or the heartbeat monitor scratch; say it explicitly in the automation event text if a reminder should consult that context.
 

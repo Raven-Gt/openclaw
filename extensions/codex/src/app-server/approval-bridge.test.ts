@@ -290,16 +290,10 @@ describe("Codex app-server approval bridge", () => {
     },
   );
 
-  it("keeps unrelated command approval policy unchanged for scheduled app authority", async () => {
+  it("keeps unrelated command approval policy unchanged for scheduled runs", async () => {
     const params = {
       ...createParams(),
       trigger: "cron",
-      scheduledRuntimeAuthority: {
-        version: 1,
-        runtimeId: "codex",
-        namespace: "codex.apps",
-        payload: { version: 1 },
-      },
     } as EmbeddedRunAttemptParams;
     params.hostCapabilities = {
       ...params.hostCapabilities,

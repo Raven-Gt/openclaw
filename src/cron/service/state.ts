@@ -11,7 +11,6 @@ import { LEGACY_IMPLICIT_AGENT_ID } from "../../routing/session-key.js";
 import type { DeliveryContext } from "../../utils/delivery-context.types.js";
 import type { CronAgentAvailability } from "../agent-availability.js";
 import { toPublicCronJob } from "../public-job.js";
-import type { CronRuntimeAuthority } from "../runtime-authority.js";
 import type { CronScheduledToolPolicy } from "../scheduled-tool-policy.js";
 import type { CronRunReceiptHandle } from "../store/run-receipt.types.js";
 import type { QuarantinedCronConfigJob } from "../store/types.js";
@@ -37,7 +36,6 @@ import type {
   CronRunTelemetry,
   CronStoredJob,
   CronStoreFile,
-  CronToolsAllowExecTarget,
   CronToolsAllowProvenance,
 } from "../types.js";
 import type { CronJobsSortBy, CronSortDir } from "./list-page-types.js";
@@ -450,21 +448,14 @@ export type CronAddOptions = {
   createdActor?: SessionCreatedActor;
   /** Authenticated caller provenance stamped by the service, never public input. */
   scheduledToolPolicy?: CronScheduledToolPolicy;
-  /** Private proof from an authenticated agent-runtime caller. */
+  /** Authenticated requester identity, never accepted from public input. */
   toolsAllowProvenance?: CronToolsAllowProvenance;
-  /** Restrict-only exec pin from the signed creator-turn identity. */
-  toolsAllowExecTarget?: CronToolsAllowExecTarget;
   /** Synchronous Gateway-owned liveness guard consumed immediately before mutation. */
   commitGuard?: () => void;
-  /** One-use fresh capture; callback presence means fresh even when it returns undefined. */
-  captureRuntimeAuthority?: () => CronRuntimeAuthority | undefined;
 };
 export type CronUpdateInput = CronJobPatch;
-/** Authenticated caller provenance used only when a tool policy is explicitly adopted. */
-export type CronUpdateOptions = Pick<
-  CronAddOptions,
-  "toolsAllowProvenance" | "toolsAllowExecTarget" | "commitGuard" | "captureRuntimeAuthority"
-> & {
+/** Authenticated owner and requester inputs for job mutations. */
+export type CronUpdateOptions = Pick<CronAddOptions, "toolsAllowProvenance" | "commitGuard"> & {
   /** Null forbids policy adoption; undefined retains in-process operator defaults. */
   scheduledToolPolicy?: CronScheduledToolPolicy | null;
 };

@@ -26,7 +26,7 @@ import { CommandLane } from "../../process/lanes.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import { CronExecutionRootRuntimeError } from "../execution-root-runtime.js";
 import { removeCronRunContinuationSessionIfIdle } from "../run-continuation-cleanup.js";
-import { createCronRunDiagnosticsFromError, mergeCronRunDiagnostics } from "../run-diagnostics.js";
+import { createCronRunDiagnosticsFromError } from "../run-diagnostics.js";
 import { resolveCronRunErrorReason } from "../run-error-reason.js";
 import {
   normalizeCronRunErrorText,
@@ -330,12 +330,9 @@ export async function runCronIsolatedAgentTurn(
               // telemetry on the aborted path; this catch never reaches it.
               provider: prepared.context.liveSelection.provider,
               model: prepared.context.liveSelection.model,
-              diagnostics: mergeCronRunDiagnostics(
-                prepared.context.preflightDiagnostics,
-                createCronRunDiagnosticsFromError(
-                  isCronLaneTimeout ? "cron-setup" : "agent-run",
-                  isCronLaneTimeout ? error : err,
-                ),
+              diagnostics: createCronRunDiagnosticsFromError(
+                isCronLaneTimeout ? "cron-setup" : "agent-run",
+                isCronLaneTimeout ? error : err,
               ),
             });
           } finally {

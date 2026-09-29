@@ -2,7 +2,6 @@
 import { tryResolveAmbientOwnerAgentId } from "../../agents/agent-scope.js";
 import { clearBootstrapSnapshotOnSessionRollover } from "../../agents/bootstrap-cache.js";
 import type { LiveSessionModelSelection } from "../../agents/live-model-switch.js";
-import { findModelInCatalog } from "../../agents/model-catalog-lookup.js";
 import {
   acquireAgentRunPreparedModelRuntime,
   loadPublishedGatewayReplyDispatchRuntime,
@@ -27,11 +26,9 @@ import {
   resolveCronModelSelectionOwner,
   resolveCronThinkingSelection,
 } from "./model-selection.js";
-import { resolveCronCommandPromptPreflight } from "./run-command-preflight.js";
 import { resolveCronActiveRuntimeConfig, resolveCronAgentConfig } from "./run-config.js";
 import { buildCurrentConversationContextBlock } from "./run-current-context.js";
 import {
-  createCronToolsAllowPreflightDiagnostics,
   resolveCronDeliveryContext,
 } from "./run-delivery-trace.js";
 import { resolveCronPreflight } from "./run-fallback-policy.js";
@@ -84,10 +81,6 @@ export async function prepareCronRunContext(params: {
   onLifecycleInterrupt: () => void;
 }) {
   const { input } = params;
-  const commandPromptPreflight = resolveCronCommandPromptPreflight(input.job);
-  if (commandPromptPreflight) {
-    return { ok: false as const, result: commandPromptPreflight };
-  }
   const requestedRuntimeCfg = resolveCronActiveRuntimeConfig(input.cfg);
   const requestedAgentId = input.agentId?.trim() || input.job.agentId?.trim();
   const normalizedRequested = requestedAgentId ? normalizeAgentId(requestedAgentId) : undefined;
@@ -410,25 +403,6 @@ export async function prepareCronRunContext(params: {
     // the embedded runner uses its presence to configure the idle watchdog.
     const runTimeoutOverrideMs = resolveCronRunTimeoutOverrideMs(explicitTimeoutSeconds);
     const agentPayload = input.job.payload.kind === "agentTurn" ? input.job.payload : null;
-    const configuredProvider = cfgWithAgentDefaults.models?.providers?.[provider];
-    const modelApi =
-      findModelInCatalog(thinkingSelection.catalog, provider, model)?.api ??
-      configuredProvider?.models?.find((candidate) => candidate.id === model)?.api ??
-      configuredProvider?.api;
-    const preflightDiagnostics = await createCronToolsAllowPreflightDiagnostics({
-      cfg: cfgWithAgentDefaults,
-      jobId: input.job.id,
-      provider,
-      model,
-      modelApi,
-      agentId: modelOwner.agentId,
-      agentDir: modelOwner.agentDir,
-      workspaceDir: executionWorkspaceDir,
-      sessionKey: agentSessionKey,
-      agentPayload,
-      agentRuntime: effectiveAgentRuntime,
-      toolsAllowProvenance: input.job.toolsAllowProvenance,
-    });
     const {
       deliveryPlan,
       deliveryRequested,
@@ -563,16 +537,11 @@ export async function prepareCronRunContext(params: {
           createdActor: input.job.createdActor,
           sandbox,
           thinkingLevel: requestedThinkLevel,
-          toolsAllow: agentPayload?.toolsAllow,
-          toolsAllowIsDefault: agentPayload?.toolsAllowIsDefault,
           scheduledToolPolicy: resolveCronScheduledToolPolicy({
-            toolsAllow: agentPayload?.toolsAllow,
             scheduledToolPolicy: input.job.scheduledToolPolicy,
             owner: input.job.owner,
           }),
           scheduledToolCallerOrigin: input.job.toolsAllowProvenance?.callerOrigin,
-          toolsAllowExecTarget: input.job.toolsAllowExecTarget,
-          toolsAllowExecTargetRequirement: input.job.toolsAllowExecTargetRequirement,
           cliSessionBindingFacts: {
             extraSystemPromptStatic: deliverySystemPrompt,
             sourceReplyDeliveryMode: sourceDelivery.sourceReplyDeliveryMode,
@@ -637,7 +606,6 @@ export async function prepareCronRunContext(params: {
         modelFallbacksOverride,
         thinkingSelection,
         timeoutMs,
-        preflightDiagnostics,
         runTimeoutOverrideMs,
         preparedModelRuntimeLease,
       },

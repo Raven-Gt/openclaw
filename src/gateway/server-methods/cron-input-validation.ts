@@ -9,6 +9,7 @@ import {
   assertValidCronFailureAlert,
 } from "../../cron/delivery-channel-validation.js";
 import { assertCronDeliveryInputNonBlankFields } from "../../cron/delivery-target-validation.js";
+import { assertNoNewCronToolAllowlist } from "../../cron/normalize-payload.js";
 import { normalizeCronJobCreate, normalizeCronJobPatch } from "../../cron/normalize.js";
 import { resolveFailureAlert } from "../../cron/service/failure-alerts.js";
 import { applyJobPatch } from "../../cron/service/jobs.js";
@@ -27,6 +28,7 @@ export function normalizeCronAddRequest(params: unknown): {
   candidate: unknown;
   enabledExplicit: boolean;
 } {
+  assertNoNewCronToolAllowlist(params);
   const rawParams = asOptionalObjectRecord(params);
   for (const key of ["declarationKey", "displayName"]) {
     const value = rawParams?.[key];
@@ -55,6 +57,7 @@ export function normalizeCronUpdateRequest(params: unknown): {
 } {
   const rawParams = asOptionalObjectRecord(params);
   const rawPatch = rawParams?.patch;
+  assertNoNewCronToolAllowlist(rawPatch);
   const patchFields = asOptionalObjectRecord(rawPatch);
   const rawDisplayName = patchFields?.displayName;
   if (typeof rawDisplayName === "string" && rawDisplayName.trim().length === 0) {
