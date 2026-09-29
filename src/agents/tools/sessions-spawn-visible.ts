@@ -64,7 +64,7 @@ import { startVisibleCloudSession } from "./sessions-spawn-cloud.js";
 import { resolveVisibleSessionOwner } from "./sessions-spawn-visible-owner.js";
 import { SessionsSpawnPlacementSchema } from "./sessions-spawn-visible.schema.js";
 
-export type VisibleSessionsSpawnDeps = {
+type VisibleSessionsSpawnDeps = {
   callGateway?: InProcessGatewayCaller;
   registerRun?: typeof registerSubagentRun;
   countActiveRuns?: typeof countActiveRunsForSession;

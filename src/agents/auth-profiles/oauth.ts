@@ -229,7 +229,12 @@ const oauthManager = createOAuthManager({
   buildApiKey: buildOAuthApiKey,
   refreshCredential: refreshOAuthCredential,
   canRefreshCredential: canRefreshOAuthCredential,
-  readBootstrapCredential: readExternalCliBootstrapCredential,
+  readBootstrapCredential: ({ store, profileId, credential }) =>
+    readExternalCliBootstrapCredential({
+      store,
+      profileId,
+      credential,
+    }),
 });
 
 if (process.env.VITEST || process.env.NODE_ENV === "test") {
