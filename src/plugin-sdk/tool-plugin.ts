@@ -238,9 +238,7 @@ export function defineToolPlugin<TConfigSchema extends TSchema | undefined = und
             description: tool.description,
             parameters: tool.parameters,
             ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
-            ...(tool.resultContentSource
-              ? { resultContentSource: tool.resultContentSource }
-              : {}),
+            ...(tool.resultContentSource ? { resultContentSource: tool.resultContentSource } : {}),
             execute: async (toolCallId, params, signal, onUpdate) =>
               wrapToolPluginResult(
                 await execute(params, config, {
