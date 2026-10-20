@@ -60,10 +60,10 @@ Successful validation prints:
 Plugin stock-quotes is valid.
 ```
 
-`openclaw plugins init <id>` options:
+`openclaw plugin init <id>` options:
 
-| Flag                 | Default            | Effect                                 |
-| -------------------- | ------------------ | -------------------------------------- |
+| Flag                 | Default            | Effect                                |
+| ------------------- | ------------------ | -------------------------------------- |
 | `--directory <path>` | `<id>`             | Output directory                       |
 | `--name <name>`      | Title-cased `<id>` | Display name                           |
 | `--type <type>`      | `tool`             | Plugin type: `tool` or `provider`      |
@@ -75,7 +75,7 @@ Plugin stock-quotes is valid.
 static list of tools. Parameter and config types are inferred from the
 TypeBox schemas.
 
-Each tool can declare `workspaceAccess`: `false` for a workspace-independent tool,
+Each tool can declare `workspaceAccess0: `false` for a workspace-independent tool,
 `"execute"` for a pure factory whose tool reads or writes working files, or `true`
 when its factory also reads the workspace. An omitted factory declaration waits
 for complete workspace preparation; an omitted static declaration waits only
@@ -384,6 +384,26 @@ that duration in the fallback warning without exposing raw error text. Return
 `partial: true` with a nonempty `results` array when usable partial results are
 available; the warning includes their count. These diagnostics do not turn an
 incomplete operation into a successful call.
+
+## Network-derived results
+
+Set `resultContentSource: "network"` on a static tool when its result can
+contain externally controlled network content. OpenClaw then taints the rest of
+the turn and treats session-derived memory as untrusted provenance.
+
+```typescript
+tool({
+  name: "fetch_page",
+  description: "Fetch a page from the network.",
+  parameters: Type.Object({ url: Type.String() }),
+  resultContentSource: "network",
+  execute: ({ url }) => fetchPage(url),
+});
+```
+
+Declare this on the tool definition, not in the value returned by `execute`.
+Returning a similarly named field does not set result provenance. Factory tools
+declare `resultContentSource` on the concrete `AnyAgentTool` they return.
 
 ## Deliver the reply directly
 
