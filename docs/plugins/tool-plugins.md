@@ -60,10 +60,10 @@ Successful validation prints:
 Plugin stock-quotes is valid.
 ```
 
-`openclaw plugin init <id>` options:
+`openclaw plugins init <id>` options:
 
-| Flag                 | Default            | Effect                                |
-| ------------------- | ------------------ | -------------------------------------- |
+| Flag                 | Default            | Effect                                 |
+| -------------------- | ------------------ | -------------------------------------- |
 | `--directory <path>` | `<id>`             | Output directory                       |
 | `--name <name>`      | Title-cased `<id>` | Display name                           |
 | `--type <type>`      | `tool`             | Plugin type: `tool` or `provider`      |
@@ -75,7 +75,7 @@ Plugin stock-quotes is valid.
 static list of tools. Parameter and config types are inferred from the
 TypeBox schemas.
 
-Each tool can declare `workspaceAccess0: `false` for a workspace-independent tool,
+Each tool can declare `workspaceAccess`: `false` for a workspace-independent tool,
 `"execute"` for a pure factory whose tool reads or writes working files, or `true`
 when its factory also reads the workspace. An omitted factory declaration waits
 for complete workspace preparation; an omitted static declaration waits only
